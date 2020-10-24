@@ -1,5 +1,6 @@
 class Tensor:
-    def __init__(self, data):
+    def __init__(self, name, data):
+        self.name = name
         self.data = data
 
     def shape(self):

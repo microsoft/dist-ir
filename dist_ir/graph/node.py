@@ -2,12 +2,12 @@ from ..ops.op_register import OpRegister
 
 class Node:
     def __init__(self, node_id, op_type):
-        self._id = node_id
+        self._node_id = node_id
         self._in_edges = []
         self._out_edges = []
         if op_type not in OpRegister:
             raise ValueError(f'Invalid op type {op_type}')
-        self._op = OpRegister[op_type]()
+        self._op = OpRegister[op_type](self)
 
     def add_in_edge(self, in_edge):
         """Adds an input edge."""
@@ -24,6 +24,10 @@ class Node:
     def get_out_edges(self):
         """Returns all output edges."""
         return self._out_edges
+
+    @property
+    def node_id(self):
+        return self._node_id
 
     @property
     def op(self):

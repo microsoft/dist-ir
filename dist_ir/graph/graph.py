@@ -5,11 +5,13 @@ from collections import OrderedDict
 
 from .node import Node
 from ..executor.backend_register import BackendRegister
+from ..ops.tensor import Tensor
 
 class Graph:
     def __init__(self, backend=None):
         self._nodes = OrderedDict()
-        self._node_id_counter = 0
+        self._tensors = OrderedDict()
+        self._node_id_counter = {}
         if backend is not None and backend not in BackendRegister:
             raise ValueError(f'Unknown backend {backend}')
         else:
@@ -29,15 +31,28 @@ class Graph:
            Returns:
              The newly created node.
         """
-        node_id = self._node_id_counter
-        self._node_id_counter += 1
+        if op_type not in self._node_id_counter:
+            self._node_id_counter[op_type] = 0
+        node_id = f'{op_type}_{self._node_id_counter[op_type]}'
+        self._node_id_counter[op_type] += 1
         node = Node(node_id, op_type)
         self.set_backend_for_node(node)
-        for input_node in inputs:
-            node.add_in_edge(input_node.node_id)
-            self._nodes[input_node.node_id].add_out_edge(node_id)
+        for in_edge in inputs:
+            if isinstance(in_edge, Node):
+                node.add_in_edge(in_edge.node_id)
+                self._nodes[in_edge.node_id].add_out_edge(node_id)
+            elif isinstance(in_edge, Tensor):
+                node.add_in_edge(in_edge.name)
+            else:
+                raise ValueError(f'Invalid in edge type {type(in_edge)}')
         self._nodes[node_id] = node
         return node
+
+    def add_tensor(self, name, data):
+        # TODO: Verify that the data type matches the backend
+        tensor = Tensor(name=name, data=data)
+        self._tensors[name] = tensor
+        return tensor
 
     def get_nodes_in_topological_order(self):
         """Return nodes in topological order."""
@@ -72,33 +87,36 @@ class Graph:
         # Execute ops in topological order.
         for node_id, node in nodes.items():
             in_edges = node.get_in_edges()
-            for input_node_id in in_edges:
-                if input_node_id not in outputs:
-                    raise RuntimeError(f'Could not find node {input_node_id} as input for node {node_id}')
-                inputs.append(outputs[input_node_id])
-                consumers[input_node_id] -= 1
+            for in_edge in in_edges:
+                if in_edge in self._nodes:
+                    input_node_id = in_edge
+                    if input_node_id not in outputs:
+                        raise RuntimeError(
+                            f'Could not find node {input_node_id} as '
+                             'input for node {node_id}')
+                    inputs.append(outputs[input_node_id])
+                    consumers[input_node_id] -= 1
+                elif in_edge in self._tensors:
+                    input_tensor_name = in_edge
+                    inputs.append(self._tensors[input_tensor_name])
+                else:
+                    raise RuntimeError(f'Invalid in edge {in_edge}')
             res = node.op.compute(*inputs)
             outputs[node_id] = res
             consumers[node_id] = len(node.get_out_edges())
 
             # Garbage collect any output tensors that have been fully consumed.
             to_free = []
-            for input_node_id in in_edges:
-                if consumers[input_node_id] == 0:
-                    to_free.append(input_node_id)
+            for in_edge in in_edges:
+                if in_edge in self._nodes:
+                    input_node_id = in_edge
+                    if consumers[input_node_id] == 0:
+                        if len(self._nodes[input_node_id].get_out_edges()) > 0:
+                            to_free.append(input_node_id)
             for input_node_id in to_free:
                 del outputs[input_node_id]
                 del consumers[input_node_id]
-
             inputs = []
 
-        # Populate the output data to return.
-        ret = []
-        for node_id in outputs:
-            ret.append(outputs[node_id])
-        if len(ret) == 0:
-            raise RuntimeError('Could not find any output!')
-        elif len(ret) > 1:
-            raise RuntimeError('Found more than 1 output tensor!')
-        elif len(ret) == 1:
-            return ret[0].data
+        # Return the outputs.
+        return outputs

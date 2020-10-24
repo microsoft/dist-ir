@@ -26,7 +26,7 @@ class Graph:
 
            Args:
              op_type: The node's op type.
-             inputs: The input nodes for this node.
+             inputs: The inputs for this node. These may either be other nodes or tensors.
 
            Returns:
              The newly created node.
@@ -49,15 +49,33 @@ class Graph:
         return node
 
     def add_tensor(self, name, data):
+        """Adds a new tensor to the graph and returns the tensor."""
         # TODO: Verify that the data type matches the backend
         tensor = Tensor(name=name, data=data)
         self._tensors[name] = tensor
         return tensor
 
+    def _get_nodes_in_topological_order_helper(self, node_id, visited, order):
+        visited[node_id] = True
+
+        out_edges = self._nodes[node_id].get_out_edges()
+        for out_edge in out_edges:
+            output_node_id = out_edge
+            if not visited[output_node_id]:
+                self._get_nodes_in_topological_order_helper(output_node_id, visited, order)
+
+        order.append(node_id)
+
     def get_nodes_in_topological_order(self):
         """Return nodes in topological order."""
-        # TODO
-        return self._nodes
+        visited = {}
+        for node_id in self._nodes:
+            visited[node_id] = False
+        order = []
+        for node_id in self._nodes:
+            if not visited[node_id]:
+                self._get_nodes_in_topological_order_helper(node_id, visited, order)
+        return order[::-1]
 
     def set_backend_for_node(self, node):
         """Sets the backend implementation for the given node."""
@@ -82,18 +100,19 @@ class Graph:
         """Executes the graph given the specified inputs and returns the final result."""
         consumers = {}
         outputs = {}
-        nodes = self.get_nodes_in_topological_order()
+        inputs = list(inputs)
+        node_ids = self.get_nodes_in_topological_order()
 
         # Execute ops in topological order.
-        for node_id, node in nodes.items():
+        for node_id in node_ids:
+            node = self._nodes[node_id]
             in_edges = node.get_in_edges()
             for in_edge in in_edges:
                 if in_edge in self._nodes:
                     input_node_id = in_edge
                     if input_node_id not in outputs:
                         raise RuntimeError(
-                            f'Could not find node {input_node_id} as '
-                             'input for node {node_id}')
+                            f'Could not find node {input_node_id} as input for node {node_id}')
                     inputs.append(outputs[input_node_id])
                     consumers[input_node_id] -= 1
                 elif in_edge in self._tensors:

@@ -1,6 +1,7 @@
 import numpy as np
 
 NumPyRegister = {
-    'add': np.add,
-    'matmul': np.matmul,
+    'Add': np.add,
+    'MatMul': np.matmul,
+    'Relu': lambda x: np.maximum(x, 0),
 }

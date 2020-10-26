@@ -3,7 +3,7 @@ from .tensor import Tensor
 
 class MatMul(Op):
     def __init__(self, node, impl=None):
-        super().__init__(node=node, op_type='matmul', impl=impl)
+        super().__init__(node=node, op_type='MatMul', impl=impl)
 
     def compute(self, t1: Tensor, t2: Tensor) -> Tensor:
         if self._impl is None:

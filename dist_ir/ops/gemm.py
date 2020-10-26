@@ -1,9 +1,9 @@
 from .op import Op
 from .tensor import Tensor
 
-class Add(Op):
+class GeMM(Op):
     def __init__(self, node, impl=None):
-        super().__init__(node=node, op_type='Add', impl=impl)
+        super().__init__(node=node, op_type='gemm', impl=impl)
 
     def compute(self, t1: Tensor, t2: Tensor) -> Tensor:
         if self._impl is None:

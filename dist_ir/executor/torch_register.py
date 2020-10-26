@@ -1,6 +1,6 @@
 import torch
 
 TorchRegister = {
-    'add': torch.add,
-    'matmul': torch.matmul,
+    'Add': torch.add,
+    'Matmul': torch.matmul,
 }

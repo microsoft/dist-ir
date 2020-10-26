@@ -82,7 +82,7 @@ class Graph:
         if self._backend is not None and node.op is not None:
             op_type = node.op.op_type
             if op_type not in BackendRegister[self._backend]:
-                raise ValueError(f'No {self._backend} implementation found for op {op_type}')
+                raise NotImplementedError(f'No {self._backend} implementation found for op {op_type}')
             else:
                 impl = BackendRegister[self._backend][op_type]
                 node.op.bind_impl(impl)

@@ -1,19 +1,17 @@
-#import os, sys
-#sys.path.append(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
-
 from collections import OrderedDict
 
 from .node import Node
 from ..executor.backend_register import BackendRegister
 from ..ops.tensor import Tensor
 
+
 class Graph:
     def __init__(self, backend=None):
         self._nodes = OrderedDict()
-        self._tensors = OrderedDict()
+        self._inputs = OrderedDict()
         self._node_id_counter = {}
         if backend is not None and backend not in BackendRegister:
-            raise ValueError(f'Unknown backend {backend}')
+            raise ValueError(f"Unknown backend {backend}")
         else:
             self._backend = backend
 
@@ -24,16 +22,16 @@ class Graph:
     def add_node(self, op_type, *inputs):
         """Adds a node to the graph.
 
-           Args:
-             op_type: The node's op type.
-             inputs: The inputs for this node. These may either be other nodes or tensors.
+        Args:
+          op_type: The node's op type.
+          inputs: The inputs for this node. These may either be other nodes or tensors.
 
-           Returns:
-             The newly created node.
+        Returns:
+          The newly created node.
         """
         if op_type not in self._node_id_counter:
             self._node_id_counter[op_type] = 0
-        node_id = f'{op_type}_{self._node_id_counter[op_type]}'
+        node_id = f"{op_type}_{self._node_id_counter[op_type]}"
         self._node_id_counter[op_type] += 1
         node = Node(node_id, op_type)
         self.set_backend_for_node(node)
@@ -44,15 +42,14 @@ class Graph:
             elif isinstance(in_edge, Tensor):
                 node.add_in_edge(in_edge.name)
             else:
-                raise ValueError(f'Invalid in edge type {type(in_edge)}')
+                raise ValueError(f"Invalid in edge type {type(in_edge)}")
         self._nodes[node_id] = node
         return node
 
-    def add_tensor(self, name, data):
-        """Adds a new tensor to the graph and returns the tensor."""
-        # TODO: Verify that the data type matches the backend
-        tensor = Tensor(name=name, data=data)
-        self._tensors[name] = tensor
+    def add_input(self, name, data=None):
+        """Adds an input tensor to the graph and returns the tensor."""
+        tensor = Tensor(name, data)
+        self._inputs[name] = tensor
         return tensor
 
     def _get_nodes_in_topological_order_helper(self, node_id, visited, order):
@@ -62,7 +59,9 @@ class Graph:
         for out_edge in out_edges:
             output_node_id = out_edge
             if not visited[output_node_id]:
-                self._get_nodes_in_topological_order_helper(output_node_id, visited, order)
+                self._get_nodes_in_topological_order_helper(
+                    output_node_id, visited, order
+                )
 
         order.append(node_id)
 
@@ -82,7 +81,9 @@ class Graph:
         if self._backend is not None and node.op is not None:
             op_type = node.op.op_type
             if op_type not in BackendRegister[self._backend]:
-                raise NotImplementedError(f'No {self._backend} implementation found for op {op_type}')
+                raise NotImplementedError(
+                    f"No {self._backend} implementation found for op {op_type}"
+                )
             else:
                 impl = BackendRegister[self._backend][op_type]
                 node.op.bind_impl(impl)
@@ -90,21 +91,29 @@ class Graph:
     def set_backend(self, backend):
         """Sets the backend implementation for all nodes in the graph."""
         if backend not in BackendRegister:
-            raise ValueError(f'Unknown backend {backend}')
+            raise ValueError(f"Unknown backend {backend}")
         else:
             self._backend = backend
         for node in self._nodes.values():
             self.set_backend_for_node(node)
 
-    def compute(self, *inputs):
-        """Executes the graph given the specified inputs and returns the final result."""
+    def compute(self, input_data):
+        """Executes the graph given the specified inputs and returns the final result.
+
+        Args:
+          input_data: A map from input tensor name to data represented in the
+                      specified backend.
+
+        Returns:
+          A map from output tensor name to output tensor.
+        """
         consumers = {}
         outputs = {}
-        inputs = list(inputs)
         node_ids = self.get_nodes_in_topological_order()
 
         # Execute ops in topological order.
         for node_id in node_ids:
+            inputs = []
             node = self._nodes[node_id]
             in_edges = node.get_in_edges()
             for in_edge in in_edges:
@@ -112,14 +121,21 @@ class Graph:
                     input_node_id = in_edge
                     if input_node_id not in outputs:
                         raise RuntimeError(
-                            f'Could not find node {input_node_id} as input for node {node_id}')
+                            f"Could not find node {input_node_id} as input for node {node_id}"
+                        )
                     inputs.append(outputs[input_node_id])
                     consumers[input_node_id] -= 1
-                elif in_edge in self._tensors:
+                elif in_edge in self._inputs:
                     input_tensor_name = in_edge
-                    inputs.append(self._tensors[input_tensor_name])
+                    if input_tensor_name not in input_data:
+                        raise ValueError(
+                            f"Could not find input {input_tensor_name} in input_data"
+                        )
+                    input_tensor = self._inputs[input_tensor_name]
+                    input_tensor.data = input_data[input_tensor_name]
+                    inputs.append(input_tensor)
                 else:
-                    raise RuntimeError(f'Invalid in edge {in_edge}')
+                    raise RuntimeError(f"Invalid in edge {in_edge}")
             res = node.op.compute(*inputs)
             outputs[node_id] = res
             consumers[node_id] = len(node.get_out_edges())
@@ -135,7 +151,6 @@ class Graph:
             for input_node_id in to_free:
                 del outputs[input_node_id]
                 del consumers[input_node_id]
-            inputs = []
 
         # Return the outputs.
         return outputs

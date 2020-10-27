@@ -19,6 +19,26 @@ class Graph:
         """Returns all nodes in the graph."""
         return self._nodes
 
+    def is_node(self, name):
+        """Checks whether a node exists with the specified name."""
+        return name in self._nodes
+
+    def is_input(self, name):
+        """Checks whether an input tensor exists with the specified name."""
+        return name in self._inputs
+
+    def get_node(self, name):
+        """Returns the node with the specified name if it exists."""
+        if name not in self._nodes:
+            return None
+        return self._nodes[name]
+
+    def get_input(self, name):
+        """Returns the input tensor with the specified name if it exists."""
+        if name not in self._inputs:
+            return None
+        return self._inputs[name]
+
     def add_node(self, op_type, *inputs):
         """Adds a node to the graph.
 
@@ -96,61 +116,3 @@ class Graph:
             self._backend = backend
         for node in self._nodes.values():
             self.set_backend_for_node(node)
-
-    def compute(self, input_data):
-        """Executes the graph given the specified inputs and returns the final result.
-
-        Args:
-          input_data: A map from input tensor name to data represented in the
-                      specified backend.
-
-        Returns:
-          A map from output tensor name to output tensor.
-        """
-        consumers = {}
-        outputs = {}
-        node_ids = self.get_nodes_in_topological_order()
-
-        # Execute ops in topological order.
-        for node_id in node_ids:
-            inputs = []
-            node = self._nodes[node_id]
-            in_edges = node.get_in_edges()
-            for in_edge in in_edges:
-                if in_edge in self._nodes:
-                    input_node_id = in_edge
-                    if input_node_id not in outputs:
-                        raise RuntimeError(
-                            f"Could not find node {input_node_id} as input for node {node_id}"
-                        )
-                    inputs.append(outputs[input_node_id])
-                    consumers[input_node_id] -= 1
-                elif in_edge in self._inputs:
-                    input_tensor_name = in_edge
-                    if input_tensor_name not in input_data:
-                        raise ValueError(
-                            f"Could not find input {input_tensor_name} in input_data"
-                        )
-                    input_tensor = self._inputs[input_tensor_name]
-                    input_tensor.data = input_data[input_tensor_name]
-                    inputs.append(input_tensor)
-                else:
-                    raise RuntimeError(f"Invalid in edge {in_edge}")
-            res = node.op.compute(*inputs)
-            outputs[node_id] = res
-            consumers[node_id] = len(node.get_out_edges())
-
-            # Garbage collect any output tensors that have been fully consumed.
-            to_free = []
-            for in_edge in in_edges:
-                if in_edge in self._nodes:
-                    input_node_id = in_edge
-                    if consumers[input_node_id] == 0:
-                        if len(self._nodes[input_node_id].get_out_edges()) > 0:
-                            to_free.append(input_node_id)
-            for input_node_id in to_free:
-                del outputs[input_node_id]
-                del consumers[input_node_id]
-
-        # Return the outputs.
-        return outputs

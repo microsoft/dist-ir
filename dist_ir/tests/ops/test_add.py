@@ -9,6 +9,7 @@ class TestAdd(unittest.TestCase):
     def __init__(self, testName, backend):
         super(TestAdd, self).__init__(testName)
         self._backend = backend
+        self._executor = dist_ir.executor.SequentialExecutor()
 
     def setUp(self):
         self._graph = dist_ir.graph.Graph(backend=self._backend)
@@ -33,7 +34,7 @@ class TestAdd(unittest.TestCase):
 
     def test_single_add(self):
         self._graph.add_node("Add", self._t1, self._t2)
-        outputs = self._graph.compute(self._input_data)
+        outputs = self._executor.compute(self._graph, self._input_data)
         result = outputs["Add_0"].data
         if self._backend == "numpy":
             self.assertTrue(
@@ -47,7 +48,7 @@ class TestAdd(unittest.TestCase):
     def test_double_add(self):
         x = self._graph.add_node("Add", self._t1, self._t2)
         self._graph.add_node("Add", self._t3, x)
-        outputs = self._graph.compute(self._input_data)
+        outputs = self._executor.compute(self._graph, self._input_data)
         result = outputs["Add_1"].data
         if self._backend == "numpy":
             self.assertTrue(
@@ -69,7 +70,7 @@ class TestAdd(unittest.TestCase):
     def test_double_add_inverted(self):
         x = self._graph.add_node("Add", self._t1, self._t2)
         self._graph.add_node("Add", x, self._t3)
-        outputs = self._graph.compute(self._input_data)
+        outputs = self._executor.compute(self._graph, self._input_data)
         result = outputs["Add_1"].data
         if self._backend == "numpy":
             self.assertTrue(

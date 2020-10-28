@@ -33,7 +33,7 @@ class TestAdd(unittest.TestCase):
         print(f"Backend: {self._backend}")
 
     def test_single_add(self):
-        self._graph.add_node("Add", self._t1, self._t2)
+        self._graph.add_node("Add_0", "Add", self._t1, self._t2)
         outputs = self._executor.compute(self._graph, self._input_data)
         result = outputs["Add_0"].data
         if self._backend == "numpy":
@@ -46,8 +46,8 @@ class TestAdd(unittest.TestCase):
             )
 
     def test_double_add(self):
-        x = self._graph.add_node("Add", self._t1, self._t2)
-        self._graph.add_node("Add", self._t3, x)
+        x = self._graph.add_node("Add_0", "Add", self._t1, self._t2)
+        self._graph.add_node("Add_1", "Add", self._t3, x)
         outputs = self._executor.compute(self._graph, self._input_data)
         result = outputs["Add_1"].data
         if self._backend == "numpy":
@@ -68,8 +68,8 @@ class TestAdd(unittest.TestCase):
             )
 
     def test_double_add_inverted(self):
-        x = self._graph.add_node("Add", self._t1, self._t2)
-        self._graph.add_node("Add", x, self._t3)
+        x = self._graph.add_node("Add_0", "Add", self._t1, self._t2)
+        self._graph.add_node("Add_1", "Add", x, self._t3)
         outputs = self._executor.compute(self._graph, self._input_data)
         result = outputs["Add_1"].data
         if self._backend == "numpy":

@@ -33,7 +33,7 @@ class TestMatMul(unittest.TestCase):
         print(f"Backend: {self._backend}")
 
     def test_single_matmul(self):
-        self._graph.add_node("MatMul", self._t1, self._t2)
+        self._graph.add_node("MatMul_0", "MatMul", self._t1, self._t2)
         outputs = self._executor.compute(self._graph, self._input_data)
         result = outputs["MatMul_0"].data
         if self._backend == "numpy":
@@ -46,8 +46,8 @@ class TestMatMul(unittest.TestCase):
             )
 
     def test_double_matmul(self):
-        x = self._graph.add_node("MatMul", self._t1, self._t2)
-        self._graph.add_node("MatMul", self._t3, x)
+        x = self._graph.add_node("MatMul_0", "MatMul", self._t1, self._t2)
+        self._graph.add_node("MatMul_1", "MatMul", self._t3, x)
         outputs = self._executor.compute(self._graph, self._input_data)
         result = outputs["MatMul_1"].data
         if self._backend == "numpy":
@@ -69,8 +69,8 @@ class TestMatMul(unittest.TestCase):
             )
 
     def test_double_matmul_inverted(self):
-        x = self._graph.add_node("MatMul", self._t1, self._t2)
-        self._graph.add_node("MatMul", x, self._t3)
+        x = self._graph.add_node("MatMul_0", "MatMul", self._t1, self._t2)
+        self._graph.add_node("MatMul_1", "MatMul", x, self._t3)
         outputs = self._executor.compute(self._graph, self._input_data)
         result = outputs["MatMul_1"].data
         if self._backend == "numpy":

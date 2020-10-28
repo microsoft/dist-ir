@@ -1,6 +1,9 @@
-class Tensor:
+from .value import Value
+
+
+class Tensor(Value):
     def __init__(self, name, data):
-        self.name = name
+        super().__init__(name)
         self.data = data
 
     def shape(self):

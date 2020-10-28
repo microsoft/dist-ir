@@ -2,7 +2,7 @@ from collections import OrderedDict
 
 from .node import Node
 from ..executor.backend_register import BackendRegister
-from ..ops.tensor import Tensor
+from .tensor import Tensor
 
 
 class Graph:
@@ -69,7 +69,7 @@ class Graph:
         self._op_counter[op_type] += 1
         return node
 
-    def add_input(self, name, data=None):
+    def add_input_tensor(self, name, data=None):
         """Adds an input tensor to the graph and returns the tensor."""
         tensor = Tensor(name, data)
         self._inputs[name] = tensor

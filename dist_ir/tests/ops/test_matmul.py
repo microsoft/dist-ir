@@ -15,14 +15,14 @@ class TestMatMul(unittest.TestCase):
         self._graph = dist_ir.graph.Graph(backend=self._backend)
         if self._backend == "numpy":
             data = np.random.normal(size=(4, 4))
-            self._t1 = self._graph.add_input(name="a")
-            self._t2 = self._graph.add_input(name="b")
-            self._t3 = self._graph.add_input(name="c")
+            self._t1 = self._graph.add_input_tensor(name="a")
+            self._t2 = self._graph.add_input_tensor(name="b")
+            self._t3 = self._graph.add_input_tensor(name="c")
         elif self._backend == "torch":
             data = torch.randn(size=(4, 4))
-            self._t1 = self._graph.add_input(name="a")
-            self._t2 = self._graph.add_input(name="b")
-            self._t3 = self._graph.add_input(name="c")
+            self._t1 = self._graph.add_input_tensor(name="a")
+            self._t2 = self._graph.add_input_tensor(name="b")
+            self._t3 = self._graph.add_input_tensor(name="c")
         else:
             raise ValueError(f"Unknown backend {self._backend}")
         self._input_data = {

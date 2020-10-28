@@ -9,6 +9,7 @@ class Graph:
     def __init__(self, backend=None):
         self._nodes = OrderedDict()
         self._inputs = OrderedDict()
+        self._op_counter = {}
         if backend is not None and backend not in BackendRegister:
             raise ValueError(f"Unknown backend {backend}")
         else:
@@ -48,8 +49,12 @@ class Graph:
         Returns:
           The newly created node.
         """
+        if op_type not in self._op_counter:
+            self._op_counter[op_type] = 0
         if name in self._nodes:
             raise ValueError(f"Node with name {name} already exists!")
+        elif name is None or name == "":
+            name = f"{op_type}/_{self._op_counter[op_type]}"
         node = Node(name, op_type)
         self.set_backend_for_node(node)
         for in_edge in inputs:
@@ -61,6 +66,7 @@ class Graph:
             else:
                 raise ValueError(f"Invalid in edge type {type(in_edge)}")
         self._nodes[name] = node
+        self._op_counter[op_type] += 1
         return node
 
     def add_input(self, name, data=None):

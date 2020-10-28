@@ -12,4 +12,4 @@ def import_from_onnx(onnx_model, backend):
 
     for node in onnx_model.graph.node:
         # TODO: Set inputs
-        dist_ir_graph.add_node(op_type=node.op_type)
+        dist_ir_graph.add_node(name=node.name, op_type=node.op_type)

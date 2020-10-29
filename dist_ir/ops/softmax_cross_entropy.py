@@ -1,5 +1,5 @@
 from .op import Op
-from .tensor import Tensor
+from ..graph.tensor import Tensor
 
 
 class SoftmaxCrossEntropy(Op):

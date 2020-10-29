@@ -1,5 +1,4 @@
 from ..op import Op
-from ..tensor import Tensor
 
 
 class ReduceSumTraining(Op):

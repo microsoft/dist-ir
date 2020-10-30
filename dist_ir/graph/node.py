@@ -1,14 +1,11 @@
-from ..ops.op_register import OpRegister
-
+from ..ops.op import Op
 
 class Node:
     def __init__(self, name, op_type):
         self._name = name
         self._in_edges = []
         self._out_edges = []
-        if op_type not in OpRegister:
-            raise ValueError(f"Invalid op type {op_type}")
-        self._op = OpRegister[op_type](self)
+        self._op = Op(self, op_type)
 
     def add_in_edge(self, in_edge):
         """Adds an input edge."""

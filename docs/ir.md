@@ -90,7 +90,7 @@ def mlp(
     xs: Tuple[Tensor[(B/N, F), 1], ..., Tensor[(B/N, F), N]] = scatter(x, dim=0, devices=[1..N])
     zs: Tuple[Tensor[(B/N), 1], ..., Tensor[(B/N), N]] = scatter(z, dim=0, devices=[1..N])
     wAs: Tuple[Tensor[(F, H), 1], ..., Tensor[(F, H), N]] = broadcast(wA, devices=[1..N])
-    wBs: Tuple[Tensor[(F, H), 1], ..., Tensor[(F, H), N]] = broadcast(wB, devices=[1..N])
+    wBs: Tuple[Tensor[(H, C), 1], ..., Tensor[(H, C), N]] = broadcast(wB, devices=[1..N])
     # If we don't want to represent training data sharding, we can start from here:
     (
         dwAis: Tuple[Tensor[(F, H), 1], ..., Tensor[(F, H), N]],
@@ -136,6 +136,66 @@ def mlp(
     # NOTE disadvantage: needs recompilation to redeploy on different #devices
 ```
 
-TODO HP and PP
+```Python
+# Horizontal parallel version:
+def mlp(
+    wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 0], x: Tensor[(B, F), 0], z: Tensor[B, 0]
+):
+    xs: Tuple[Tensor[(B, F), 1], ..., Tensor[(B, F), N]] = broadcast(x, devices=[1..N])
+    zs: Tuple[Tensor[(B), 1], ..., Tensor[(B), N]] = broadcast(z, devices=[1..N])
+    wAs: Tuple[Tensor[(F, H/N), 1], ..., Tensor[(F, H/N), N]] = scatter(wA, dim=1, devices=[1..N])
+    wBs: Tuple[Tensor[(H/N, C), 1], ..., Tensor[(H/N, C), N]] = scatter(wB, dim=0, devices=[1..N])
+    # Note that wA and wB are split on different dimensions
+    (
+        yis: Tuple[Tensor[(B, C), 1], ..., Tensor[(B, C), N]],
+        ais: Tuple[Tensor[(B, H/N), 1], ..., Tensor[(B, H/N), N]],
+    ) = pmap(
+        device_var=d,
+        fn=lambda (xi: Tensor[(B, F), d]), (wAi: Tensor[(F, H/N), d]),
+                (wBi: Tensor[(H/N, C), d]): {
+            ai: Tensor[(B, H/N), d] = MatMul(xi, wAi)
+            yi: Tensor[(B, C), d] = MatMul(ai, wBi)
+            return yi
+        },
+        (xs, wAs, wBs)
+    )
+    ys: Tuple[Tensor[(B, C), 1], ..., Tensor[(B, C), N]] = allreduce(yis)
+    (
+        wA1s: Tuple[Tensor[(F, H/N), 1], ..., Tensor[(F, H/N), N]],
+        wB1s: Tuple[Tensor[(H/N, C), 1], ..., Tensor[(H/N, C), N]],
+        ls: Tuple[Float[1], ..., Float[N]],
+    ) = pmap(
+        device_var=d,
+        fn=lambda (y: Tensor[(B, C), d]), (z: Tensor[(B), d]), (ai: Tensor[(B, H/N), d])
+                (wAi: Tensor[(F, H/N), d]), (wBi: Tensor[(H/N, C), d]): {
+            l: Float[d] = Loss(y, z)
+            dl: Float[d] = LossGrad(y, z, 1)
+            (dwBi, dai): Tuple[Tensor[(H/N, C), d], Tensor[(B, H/N), d]] = MatMulGrad(ai, wBi, dl)
+            (dwAi, _): Tuple[Tensor[(F, H/N), d], _] = MatMulGrad(xi, wAi, dai)
+            wB1i: Tensor[(H/N, C), d] = opt(wBi, dwBi)
+            wA1i: Tensor[(F, H/N), d] = opt(wAi, dwAi)
+            return wA1i, wB1i, l
+        },
+        (ys, zs, ais, wAs, wBs)
+    )
+    wA1: Tensor[(F, H), 0] = gather(wA1s[0], to_device=0)
+    wB1: Tensor[(H, C), 0] = gather(wB1s[0], to_device=0)
+    y = send(ys[0], to_device=0)
+    l = send(ls[0], to_device=0)
+    return wA1, wB1, y, l
+```
+
+TODO: pipeline parallel
+- tricky thing is to make the stages that execute in parallel explicit, so that cost model can be accurate
+- this means no using wait/record sync events, because some intelligence is needed to infer pipeline shape from that
+- brute force option is to unroll entire pipeline, but it will be nice if the stages aren't needlessly replicated
+- should we have some notion of functions? so the stages can just be function calls?
+
+#### Lowering pmap:
 
 Essentially, pmap is syntactic sugar. It can be unrolled: TODO
+
+## Miscellaneous:
+
+TODO is there a more general horizontal transform, beyond pattern matching on
+two layer FF or attention layers?

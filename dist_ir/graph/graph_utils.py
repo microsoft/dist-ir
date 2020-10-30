@@ -4,6 +4,8 @@ import onnx
 
 
 def import_from_onnx(onnx_model, backend):
+    # TODO: Remove prints?
+    # TODO: Support types beyond Tensor
     onnx_model = onnx.load(onnx_model)
     dist_ir_graph = Graph(backend=backend)
 
@@ -26,12 +28,15 @@ def import_from_onnx(onnx_model, backend):
         for value in node.input:
             if value in inputs:
                 print(f"Found input {value} in inputs")
+                per_node_inputs.append(inputs[value])
             elif value in output_src:
                 print(f"Found input {value} in output_src")
+                per_node_inputs.append(output_src[value])
             else:
                 print(f"---> Could not find input {value}!")
+                inputs[value] = dist_ir_graph.add_input_tensor(value)
+                per_node_inputs.append(inputs[value])
         print()
-        # TODO: Set inputs
-        dist_ir_graph.add_node(name=node.name, op_type=node.op_type)
+        dist_ir_node = dist_ir_graph.add_node(node.name, node.op_type, *per_node_inputs)
         for output in node.output:
-            output_src[output] = node
+            output_src[output] = dist_ir_node 

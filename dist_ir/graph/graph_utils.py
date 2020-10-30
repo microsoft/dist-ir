@@ -12,12 +12,12 @@ def import_from_onnx(onnx_model, backend):
 
     for value in onnx_model.graph.value_info:
         print(f"Adding input {value.name} from graph.value_info")
-        inputs[value.name] = dist_ir_graph.add_input(value.name)
+        inputs[value.name] = dist_ir_graph.add_input_tensor(value.name)
     print()
 
     for value in onnx_model.graph.input:
         print(f"Adding input {value.name} from graph.input")
-        inputs[value.name] = dist_ir_graph.add_input(value.name)
+        inputs[value.name] = dist_ir_graph.add_input_tensor(value.name)
     print()
 
     for node in onnx_model.graph.node:

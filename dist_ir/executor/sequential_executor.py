@@ -1,6 +1,36 @@
+from .backend_register import BackendRegister
+from ..graph.tensor import Tensor
+
 class SequentialExecutor:
-    def __init__(self):
-        pass
+    def __init__(self, backend):
+        if backend not in BackendRegister:
+            raise ValueError(f"Unknown backend {backend}")
+        self._backend = backend
+
+    def _resolve_inputs(self, inputs):
+        """Converts the given inputs into the form expected by the specified backend."""
+        resolved_inputs = []
+        for input in inputs:
+            # TODO: Support input types beyond Tensor
+            if not isinstance(input, Tensor):
+                raise ValueError(f"Invalid input type {type(input)}")
+            resolved_inputs.append(input.data)
+        return resolved_inputs
+
+    def _compute_node(self, node, inputs):
+        """Executes the given node and returns its outputs."""
+        op_type = node.op.op_type
+        if op_type not in BackendRegister[self._backend]:
+            raise NotImplementedError(
+                f"No {self._backend} implementation found for op {op_type}"
+            )
+        impl = BackendRegister[self._backend][op_type]
+        resolved_inputs = self._resolve_inputs(inputs)
+        output_name = f"{node.name}/output"
+        output_data = impl(*resolved_inputs)
+        # TODO: Support output types beyond Tensor
+        # TODO: Support multiple output values
+        return Tensor(name=output_name, data=output_data)
 
     def compute(self, graph, input_data):
         """Executes the graph given the specified inputs and returns the final result.
@@ -42,7 +72,7 @@ class SequentialExecutor:
                     inputs.append(input_tensor)
                 else:
                     raise RuntimeError(f"Invalid in edge {in_edge}")
-            res = node.op.compute(*inputs)
+            res = self._compute_node(node, inputs)
             outputs[node_id] = res
             consumers[node_id] = len(node.get_out_edges())
 

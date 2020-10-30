@@ -1,7 +1,6 @@
 from collections import OrderedDict
 
 from .node import Node
-from ..executor.backend_register import BackendRegister
 from .tensor import Tensor
 
 
@@ -10,10 +9,6 @@ class Graph:
         self._nodes = OrderedDict()
         self._inputs = OrderedDict()
         self._op_counter = {}
-        if backend is not None and backend not in BackendRegister:
-            raise ValueError(f"Unknown backend {backend}")
-        else:
-            self._backend = backend
 
     def get_nodes(self):
         """Returns all nodes in the graph."""
@@ -56,7 +51,6 @@ class Graph:
         elif name is None or name == "":
             name = f"{op_type}/_{self._op_counter[op_type]}"
         node = Node(name, op_type)
-        self.set_backend_for_node(node)
         for in_edge in inputs:
             if isinstance(in_edge, Node):
                 node.add_in_edge(in_edge.name)
@@ -94,24 +88,3 @@ class Graph:
             if name not in visited:
                 self._get_nodes_in_topological_order_helper(name, visited, order)
         return order[::-1]
-
-    def set_backend_for_node(self, node):
-        """Sets the backend implementation for the given node."""
-        if self._backend is not None and node.op is not None:
-            op_type = node.op.op_type
-            if op_type not in BackendRegister[self._backend]:
-                raise NotImplementedError(
-                    f"No {self._backend} implementation found for op {op_type}"
-                )
-            else:
-                impl = BackendRegister[self._backend][op_type]
-                node.op.bind_impl(impl)
-
-    def set_backend(self, backend):
-        """Sets the backend implementation for all nodes in the graph."""
-        if backend not in BackendRegister:
-            raise ValueError(f"Unknown backend {backend}")
-        else:
-            self._backend = backend
-        for node in self._nodes.values():
-            self.set_backend_for_node(node)

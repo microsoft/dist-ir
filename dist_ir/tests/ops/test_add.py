@@ -9,10 +9,10 @@ class TestAdd(unittest.TestCase):
     def __init__(self, testName, backend):
         super(TestAdd, self).__init__(testName)
         self._backend = backend
-        self._executor = dist_ir.executor.SequentialExecutor()
+        self._executor = dist_ir.executor.SequentialExecutor(self._backend)
 
     def setUp(self):
-        self._graph = dist_ir.graph.Graph(backend=self._backend)
+        self._graph = dist_ir.graph.Graph()
         if self._backend == "numpy":
             data = np.random.normal(size=(4, 4))
             self._t1 = self._graph.add_input_tensor(name="a")

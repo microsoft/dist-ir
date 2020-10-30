@@ -1,5 +1,6 @@
 from ..ops.op import Op
 
+
 class Node:
     def __init__(self, name, op_type):
         self._name = name

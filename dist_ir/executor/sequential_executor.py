@@ -1,6 +1,7 @@
 from .backend_register import BackendRegister
 from ..graph.tensor import Tensor
 
+
 class SequentialExecutor:
     def __init__(self, backend):
         if backend not in BackendRegister:

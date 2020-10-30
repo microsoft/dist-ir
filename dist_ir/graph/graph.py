@@ -97,5 +97,7 @@ class Graph:
         for name, node in self._nodes.items():
             for in_edge in node.get_in_edges():
                 if in_edge not in seen:
-                    raise ValueError(f"Node are not in topological order: node {name} has unseen edge {in_edge}")
+                    raise ValueError(
+                        f"Node are not in topological order: node {name} has unseen edge {in_edge}"
+                    )
             seen.add(name)

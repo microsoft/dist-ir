@@ -39,6 +39,6 @@ def import_from_onnx(onnx_model, backend):
         print()
         dist_ir_node = dist_ir_graph.add_node(node.name, node.op_type, *per_node_inputs)
         for output in node.output:
-            output_src[output] = dist_ir_node 
+            output_src[output] = dist_ir_node
 
     dist_ir_graph.verify_nodes_in_topological_order()

@@ -45,22 +45,21 @@ class SequentialExecutor:
         """
         consumers = {}
         outputs = {}
-        node_ids = graph.get_nodes_in_topological_order()
+        nodes = graph.get_nodes()
 
         # Execute ops in topological order.
-        for node_id in node_ids:
+        for node in nodes:
             inputs = []
-            node = graph.get_node(node_id)
             in_edges = node.get_in_edges()
             for in_edge in in_edges:
                 if graph.is_node(in_edge):
-                    input_node_id = in_edge
-                    if input_node_id not in outputs:
+                    input_node_name = in_edge
+                    if input_node_name not in outputs:
                         raise RuntimeError(
-                            f"Could not find node {input_node_id} as input for node {node_id}"
+                            f"Could not find node {input_node_name} as input for node {node.name}"
                         )
-                    inputs.append(outputs[input_node_id])
-                    consumers[input_node_id] -= 1
+                    inputs.append(outputs[input_node_name])
+                    consumers[input_node_name] -= 1
                 elif graph.is_input(in_edge):
                     input_tensor_name = in_edge
                     if input_tensor_name not in input_data:
@@ -73,20 +72,20 @@ class SequentialExecutor:
                 else:
                     raise RuntimeError(f"Invalid in edge {in_edge}")
             res = self._compute_node(node, inputs)
-            outputs[node_id] = res
-            consumers[node_id] = len(node.get_out_edges())
+            outputs[node.name] = res
+            consumers[node.name] = len(node.get_out_edges())
 
             # Garbage collect any output tensors that have been fully consumed.
             to_free = []
             for in_edge in in_edges:
                 if graph.is_node(in_edge):
-                    input_node_id = in_edge
-                    if consumers[input_node_id] == 0:
-                        if len(graph.get_node(input_node_id).get_out_edges()) > 0:
-                            to_free.append(input_node_id)
-            for input_node_id in to_free:
-                del outputs[input_node_id]
-                del consumers[input_node_id]
+                    input_node_name = in_edge
+                    if consumers[input_node_name] == 0:
+                        if len(graph.get_node(input_node_name).get_out_edges()) > 0:
+                            to_free.append(input_node_name)
+            for input_node_name in to_free:
+                del outputs[input_node_name]
+                del consumers[input_node_name]
 
         # Return the outputs.
         return outputs

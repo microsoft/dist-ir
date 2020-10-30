@@ -88,3 +88,14 @@ class Graph:
             if name not in visited:
                 self._get_nodes_in_topological_order_helper(name, visited, order)
         return order[::-1]
+
+    def verify_nodes_in_topological_order(self):
+        seen = set()
+        for input in self._inputs:
+            seen.add(input)
+
+        for name, node in self._nodes.items():
+            for in_edge in node.get_in_edges():
+                if in_edge not in seen:
+                    raise ValueError(f"Node are not in topological order: node {name} has unseen edge {in_edge}")
+            seen.add(name)

@@ -27,6 +27,12 @@ steps:
   displayName: 'Install dependencies'
 
 - script: |
-    pip install pytest pytest-azurepipelines
-    pytest
-  displayName: 'pytest'
+    pip install black
+    black --diff --check .
+  displayName: 'Check formatting (black)'
+
+# Disabling tests until we figure out how to run unittest recursively/move to pytest
+# - script: |
+#     pip install pytest pytest-azurepipelines
+#     pytest
+#   displayName: 'pytest'

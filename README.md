@@ -11,7 +11,7 @@ Our main goal is to represent distributed ML training, explicitly capturing the 
     - ops: TODO
     - tests: TODO merge with test
 - test: unit tests, small/toy example models
-- misc: scripts, prototypes, miscellaneous stuff
+- docs: documentation and notes
 
 # Running tests
 

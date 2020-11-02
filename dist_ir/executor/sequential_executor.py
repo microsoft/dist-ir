@@ -49,7 +49,8 @@ class SequentialExecutor:
         nodes = graph.get_nodes()
 
         # Execute ops in topological order.
-        for node in nodes:
+        for node_name in nodes:
+            node = nodes[node_name]
             inputs = []
             in_edges = node.get_in_edges()
             for in_edge in in_edges:

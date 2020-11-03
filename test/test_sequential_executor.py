@@ -31,9 +31,13 @@ class Helper:
         print(f"Backend: {self._backend}")
 
 
-@pytest.mark.parametrize("backend", ["numpy", "torch"])
-def test_single_add(backend):
-    h = Helper(backend)
+@pytest.fixture(params=["numpy", "torch"])
+def helper_obj(request):
+    return Helper(request.param)
+
+
+def test_single_add(helper_obj):
+    h = helper_obj
     h._graph.add_node("Add_0", "Add", h._t1, h._t2)
     outputs = h._executor.compute(h._graph, h._input_data)
     result = outputs["Add_0"].data
@@ -43,9 +47,8 @@ def test_single_add(backend):
         assert torch.all(result.eq(torch.add(h._t1.data, h._t2.data)))
 
 
-@pytest.mark.parametrize("backend", ["numpy", "torch"])
-def test_double_add(backend):
-    h = Helper(backend)
+def test_double_add(helper_obj):
+    h = helper_obj
     x = h._graph.add_node("Add_0", "Add", h._t1, h._t2)
     h._graph.add_node("Add_1", "Add", h._t3, x)
     outputs = h._executor.compute(h._graph, h._input_data)
@@ -60,9 +63,8 @@ def test_double_add(backend):
         )
 
 
-@pytest.mark.parametrize("backend", ["numpy", "torch"])
-def test_double_add_inverted(backend):
-    h = Helper(backend)
+def test_double_add_inverted(helper_obj):
+    h = helper_obj
     x = h._graph.add_node("Add_0", "Add", h._t1, h._t2)
     h._graph.add_node("Add_1", "Add", x, h._t3)
     outputs = h._executor.compute(h._graph, h._input_data)
@@ -74,4 +76,49 @@ def test_double_add_inverted(backend):
     elif h._backend == "torch":
         assert torch.all(
             result.eq(torch.add(torch.add(h._t1.data, h._t2.data), h._t3.data))
+        )
+
+
+def test_single_matmul(helper_obj):
+    h = helper_obj
+    h._graph.add_node("MatMul_0", "MatMul", h._t1, h._t2)
+    outputs = h._executor.compute(h._graph, h._input_data)
+    result = outputs["MatMul_0"].data
+    if h._backend == "numpy":
+        assert np.array_equal(result, np.matmul(h._t1.data, h._t2.data))
+    elif h._backend == "torch":
+        assert torch.all(result.eq(torch.matmul(h._t1.data, h._t2.data)))
+
+
+def test_double_matmul(helper_obj):
+    h = helper_obj
+    x = h._graph.add_node("MatMul_0", "MatMul", h._t1, h._t2)
+    h._graph.add_node("MatMul_1", "MatMul", h._t3, x)
+    outputs = h._executor.compute(h._graph, h._input_data)
+    result = outputs["MatMul_1"].data
+    if h._backend == "numpy":
+        assert np.array_equal(
+            result,
+            np.matmul(h._t3.data, np.matmul(h._t1.data, h._t2.data)),
+        )
+    elif h._backend == "torch":
+        assert torch.all(
+            result.eq(torch.matmul(h._t3.data, torch.matmul(h._t1.data, h._t2.data)))
+        )
+
+
+def test_double_matmul_inverted(helper_obj):
+    h = helper_obj
+    x = h._graph.add_node("MatMul_0", "MatMul", h._t1, h._t2)
+    h._graph.add_node("MatMul_1", "MatMul", x, h._t3)
+    outputs = h._executor.compute(h._graph, h._input_data)
+    result = outputs["MatMul_1"].data
+    if h._backend == "numpy":
+        assert np.array_equal(
+            result,
+            np.matmul(np.matmul(h._t1.data, h._t2.data), h._t3.data),
+        )
+    elif h._backend == "torch":
+        assert torch.all(
+            result.eq(torch.matmul(torch.matmul(h._t1.data, h._t2.data), h._t3.data))
         )

@@ -185,6 +185,114 @@ def mlp(
     return wA1, wB1, y, l
 ```
 
+```Python
+# Model parallel version:
+def mlp(
+    wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 1], x: Tensor[(B, F), 0], z: Tensor[B, 1]
+):
+    # Suffix indicates device (e.g. a0 is on device 0)
+    a0: Tensor[(B, H), 0] = MatMul(x, wA)
+    a1: Tensor[(B, H), 1] = send(a0, to_device=1)
+    y: Tensor[(B, C), 1] = MatMul(a1, wB)
+    l: Float[1] = Loss(y, z)
+    dl: Float[1] = LossGrad(y, z, 1)
+    (dwB, da1): Tuple[Tensor[(H, C), 1], Tensor[(B, H), 1]] = MatMulGrad(a1, wB, dl)
+    da0: Tensor[(B, H), 0] = send(da1, to_device=0) # Should this be a Tuple?
+    (dwA, _): Tuple[Tensor[(F, H), 0], _] = MatMulGrad(x, wA, da0)
+    wB1: Tensor[(H, C), 1] = opt(wB, dwB)
+    wA1: Tensor[(F, H), 0] = opt(wA, dwA)
+    return wA1, wB1, y, l
+```
+
+```Python
+# Pipeline parallel version (unrolled):
+def mlp(
+    wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 1], x: Tensor[(B, F), 0], z: Tuple[Tensor[B, 1], Tensor[B, 1]], K: Int[0]
+):
+    # Assume K = 2 and 2 stages split between devices 0 and 1
+    xs: Tuple[Tensor(B/K, F), 0] = split(x, partitions=K, dim=0)
+    zs: Tuple[Tensor(B/K, 1), 1] = split(z, partitions=K, dim=0) 
+    
+    # Stage 0 forward pass for microbatch 0
+    # Underscore indicates microbatch number (e.g. a0_0 is the activation on device 0 for microbatch 0)
+    a0_0: Tensor[(B/K, F), 0] = MatMul(xs[0], wA)
+    a1_0: Tensor[(B/K, H), 1] = send(a0_0, to_device=1)
+    
+    # Stage 0 forward pass for microbatch 1
+    a0_1: Tensor[(B/K, F), 0] = MatMul(xs[1], wA)
+    a1_1: Tensor[(B/K, H), 1] = send(a0_1, to_device=1)
+    
+    # Stage 1 forward pass for microbatch 0
+    y_0: Tensor[(B/K, C), 1] = MatMul(a1_0, wB)
+    l_0: Float[1] = Loss(y_0, zs[0])
+
+    # Stage 1 forward pass for microbatch 1
+    y_1: Tensor[(B/K, C), 1] = MatMul(a1_1, wB)
+    l_1: Float[1] = Loss(y_1, zs[1])
+
+    # Stage 1 backward pass for microbatch 0
+    dl_0: Float[1] = LossGrad(y_0, zs[0], 1)
+    (dwB_0, da1_0): Tuple[Tensor[(H, C), 1], Tensor[(B/K, H), 1]] = MatMulGrad(a1_0, wB, dl_0)
+    da0_0: Tensor[(B, H), 1] = send(da1_0, to_device=0) # Should this be a Tuple?
+    
+    # Stage 1 backward pass for microbatch 1
+    dl_1: Float[1] = LossGrad(y_1, zs[1], 1)
+    (dwB_1, da1_1): Tuple[Tensor[(H, C), 1], Tensor[(B/K, H), 1]] = MatMulGrad(a1_1, wB, dl_1)
+    da0_1: Tensor[(B, H), 0] = send(da1_1, to_device=0) # Should this be a Tuple?
+    (dwA_1, _): Tuple[Tensor[(F, H), 0], _] = MatMulGrad(xs[1], wA, da0_1)
+    
+    # Aggregate gradients and loss between microbatches
+    dwA: Tensor[(F, H), 0] = dwA_0 + dwA_1
+    dWB: Tensor[(F, H), 1] = dwB_0 + dwB_1
+    y: Tensor[(B, C), 1] = concat(y_0, y_1, dim=0)
+    l: Float[1] = l_0 + l_1
+    
+    wB1: Tensor[(H, C), 1] = opt(wB, dwB)
+    wA1: Tensor[(F, H), 0] = opt(wA, dwA)
+    return wA1, wB1, y, l
+```
+
+```Python
+# Pipeline parallel version (with PipelinePartition):
+def mlp(
+    wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 1], x: Tensor[(B, F), 0], z: Tuple[Tensor[B, 1], Tensor[B, 1]], K: Int[0]
+):
+    # Assume 2 stages split between devices 0 and 1
+    xs: Tuple[Tensor(B/K, F), 0] = split(x, partitions=K, dim=0)
+    zs: Tuple[Tensor(B/K, 1), 1] = split(z, partitions=K, dim=0) 
+    
+    (
+        dwAs: Tuple[Tensor[(F, H), 0], ..., Tensor[(F, H), 0]]
+        dwBs: Tuple[Tensor[(H, C), 1], ..., Tensor[(H, C), 1]]
+        ys: Tuple[Tensor[(B/K, C), 1], ..., Tensor[(B/K, C), 1]],
+        ls: Tuple[Float[1], ..., Float[1]]
+    ) = PipelinePartition(
+        fn=lambda(x_i: Tensor[(B/K, F), 0], z_i: Tensor[(B/K, 1), 1]): {
+            # Suffix indicates device (e.g. a0_i is on device 0)
+            # Underscore indicates microbatch number (e.g. a0_0 is the activation on device 0 for microbatch 0)
+            a0_i: Tensor[(B, H), 0] = MatMul(x_i, wA)
+            a1_i: Tensor[(B, H), 1] = send(a0_i, to_device=1)
+            y_i: Tensor[(B, C), 1] = MatMul(a1_i, wB)
+            l_i: Float[1] = Loss(y_i, z_i)
+            dl_i: Float[1] = LossGrad(y_i, z_i, 1)
+            (dwB_i, da1_i): Tuple[Tensor[(H, C), 1], Tensor[(B, H), 1]] = MatMulGrad(a1_i, wB_i, dl_i)
+            da0_i: Tensor[(B, H), 0] = send(da1_i, to_device=0) # Should this be a Tuple?
+            (dwA_i, _): Tuple[Tensor[(F, H), 0], _] = MatMulGrad(x_i, wA_i, da0_i)
+        }
+    )
+
+    # Aggregate gradients and loss between microbatches
+    dwA: Tensor[(F, H), 0] = sum(dwAs)
+    dWB: Tensor[(F, H), 1] = sum(dwBs)
+    y: Tensor[(B, C), 1] = concat(ys, dim=0)
+    l: Float[1] = sum(ls)
+
+    wB1: Tensor[(H, C), 1] = opt(wB, dwB)
+    wA1: Tensor[(F, H), 0] = opt(wA, dwA)
+    
+    return wA1, wB1, y, l
+```
+
 TODO: pipeline parallel
 - tricky thing is to make the stages that execute in parallel explicit, so that cost model can be accurate
 - this means no using wait/record sync events, because some intelligence is needed to infer pipeline shape from that

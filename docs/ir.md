@@ -212,35 +212,56 @@ def mlp(
     # Assume K = 2 and 2 stages split between devices 0 and 1
     xs: Tuple[Tensor(B/K, F), 0] = split(x, partitions=K, dim=0)
     zs: Tuple[Tensor(B/K, 1), 1] = split(z, partitions=K, dim=0) 
-    
-    # Stage 0 forward pass for microbatch 0
+
     # Underscore indicates microbatch number (e.g. a0_0 is the activation on device 0 for microbatch 0)
+
+    ################################ TIMESTEP 0 ###############################
+    # Stage 0 forward pass for microbatch 0
     a0_0: Tensor[(B/K, F), 0] = MatMul(xs[0], wA)
     a1_0: Tensor[(B/K, H), 1] = send(a0_0, to_device=1)
-    
-    # Stage 0 forward pass for microbatch 1
-    a0_1: Tensor[(B/K, F), 0] = MatMul(xs[1], wA)
-    a1_1: Tensor[(B/K, H), 1] = send(a0_1, to_device=1)
-    
-    # Stage 1 forward pass for microbatch 0
-    y_0: Tensor[(B/K, C), 1] = MatMul(a1_0, wB)
-    l_0: Float[1] = Loss(y_0, zs[0])
 
+    ################################ TIMESTEP 1 ###############################
+    (
+        a0_1: Tensor[(B/K, F), 0],
+        a1_1: Tensor[(B/K, H), 1],
+        y_0: Tensor[(B/K, C), 1],
+        l_1: Float[1]
+    ) = par(
+        # Stage 0 forward pass for microbatch 1
+        (MatMul(xs[1], wA), 0), (send(a0_1, to_device=1), 0),
+        # Stage 1 forward pass for microbatch 0
+        (MatMul(a1_0, wB), 1), (Loss(y_1, zs[1]), 1) # Should loss be run in a separate timestep?
+    )
+
+    ################################ TIMESTEP 2 ###############################
     # Stage 1 forward pass for microbatch 1
     y_1: Tensor[(B/K, C), 1] = MatMul(a1_1, wB)
     l_1: Float[1] = Loss(y_1, zs[1])
 
+    ################################ TIMESTEP 3 ###############################
     # Stage 1 backward pass for microbatch 0
     dl_0: Float[1] = LossGrad(y_0, zs[0], 1)
     (dwB_0, da1_0): Tuple[Tensor[(H, C), 1], Tensor[(B/K, H), 1]] = MatMulGrad(a1_0, wB, dl_0)
     da0_0: Tensor[(B, H), 1] = send(da1_0, to_device=0) # Should this be a Tuple?
     
-    # Stage 1 backward pass for microbatch 1
-    dl_1: Float[1] = LossGrad(y_1, zs[1], 1)
-    (dwB_1, da1_1): Tuple[Tensor[(H, C), 1], Tensor[(B/K, H), 1]] = MatMulGrad(a1_1, wB, dl_1)
-    da0_1: Tensor[(B, H), 0] = send(da1_1, to_device=0) # Should this be a Tuple?
+    ################################ TIMESTEP 4 ###############################
+    (
+        (dwA_0, _): Tuple[Tensor[(F, H), 0], _],
+        dl_1: Float[1],
+        (dwB_1, da1_1): Tuple[Tensor[(H, C), 1], Tensor[(B/K, H), 1]],
+        da0_1: Tensor[(B, H), 0],
+    ) = par(
+        # Stage 0 backward pass for microbatch 0
+        (MatMulGrad(xs[0], wA, da0_0), 0),
+        # Stage 1 backward pass for microbatch 1
+        (LossGrad(y_1, zs[1], 1), 1), (MatMulGrad(a1_1, wB, dl_1), 1), (send(da1_1, to_device=0), 1)
+    )
+
+    ################################ TIMESTEP 5 ###############################
+    # Stage 0 backward pass for microbatch 1
     (dwA_1, _): Tuple[Tensor[(F, H), 0], _] = MatMulGrad(xs[1], wA, da0_1)
     
+
     # Aggregate gradients and loss between microbatches
     dwA: Tensor[(F, H), 0] = dwA_0 + dwA_1
     dWB: Tensor[(F, H), 1] = dwB_0 + dwB_1

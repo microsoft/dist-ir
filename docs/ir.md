@@ -205,7 +205,7 @@ def mlp(
 ```
 
 ```Python
-# Pipeline parallel version (unrolled):
+# Pipeline parallel version (synchronous SGD, unrolled):
 def mlp(
     wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 1], x: Tensor[(B, F), 0], z: Tuple[Tensor[B, 1], Tensor[B, 1]], K: Int[0]
 ):
@@ -311,6 +311,28 @@ def mlp(
     wB1: Tensor[(H, C), 1] = opt(wB, dwB)
     wA1: Tensor[(F, H), 0] = opt(wA, dwA)
     
+    return wA1, wB1, y, l
+```
+
+```Python
+# With activation recomputation:
+def mlp(
+    wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 0], x: Tensor[(B, F), 0], z: Tensor[B, 0]
+):
+    a: Tensor[(B, H), 0] = MatMul(x, wA)
+    y: Tensor[(B, C), 0] = MatMul(a, wB)
+    # Release the memory used to store activation a
+    free(a)
+    l: Float[0] = Loss(y, z)
+    dl: Float[0] = LossGrad(y, z, 1)
+    # Recompute a
+    a: Tensor[(B, H), 0] = MatMul(x, wA)
+    (dwB, da): Tuple[Tensor[(H, C), 0], Tensor[(B, H), 0]] = MatMulGrad(a, wB, dl)
+    # Release the memory used to store activation a
+    free(a)
+    (dwA, _): Tuple[Tensor[(F, H), 0], _] = MatMulGrad(x, wA, da)
+    wB1: Tensor[(H, C), 0] = opt(wB, dwB)
+    wA1: Tensor[(F, H), 0] = opt(wA, dwA)
     return wA1, wB1, y, l
 ```
 

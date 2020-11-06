@@ -1,12 +1,12 @@
-from ..ops.op import Op
-
-
-class Node:
-    def __init__(self, name, op_type):
+class Op:
+    def __init__(self, name, op_type, in_edges=[], attributes={}, submodules=[]):
         self._name = name
-        self._in_edges = []
+        self._op_type = op_type
+        self._in_edges = in_edges
+        # TODO look up the op_type in some register and create out edges of appropriate type
         self._out_edges = []
-        self._op = Op(self, op_type)
+        self._attributes = attributes
+        self._submodules = submodules
 
     def add_in_edge(self, in_edge):
         """Adds an input edge."""
@@ -29,5 +29,5 @@ class Node:
         return self._name
 
     @property
-    def op(self):
-        return self._op
+    def op_type(self):
+        return self._op_type

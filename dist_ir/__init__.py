@@ -1,3 +1,3 @@
-from . import graph
-from . import ops
+from . import ir
+from .ir.importers import *
 from . import executor

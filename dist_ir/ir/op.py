@@ -5,7 +5,7 @@ class Op:
         self._in_edges = in_edges
         # TODO look up the op_type in some register and create out edges of appropriate type
         self._out_edges = []
-        self._attriubtes = attributes
+        self._attributes = attributes
         self._submodules = submodules
 
     def add_in_edge(self, in_edge):

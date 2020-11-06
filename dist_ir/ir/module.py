@@ -60,11 +60,13 @@ class Module:
         self._op_counter[op_type] += 1
         return op
 
-    def add_input_value(self, value):
-        """Adds an input value to the graph."""
+    def add_input_value(self, name, typ, shape=None):
+        """Adds an input value to the graph and returns the value."""
+        value = Value(name, typ)
         if value.name in self._inputs:
             raise ValueError(f"Module already has input value with name {value.name}")
         self._inputs[value.name] = value
+        return value
 
     def _get_ops_in_topological_order_helper(self, name, visited, order):
         visited.add(name)

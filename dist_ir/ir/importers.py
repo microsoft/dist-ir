@@ -1,25 +1,33 @@
-from .graph import Graph
+from .module import Module
+from .type import Tensor, Float
+from .value import Value
 
 import onnx
 
 
-def import_from_onnx(onnx_model, backend):
+def import_from_onnx(onnx_model):
     # TODO: Remove prints?
     # TODO: Support types beyond Tensor
     onnx_model = onnx.load(onnx_model)
-    dist_ir_graph = Graph(backend=backend)
+    dist_ir_module = Module()
 
     inputs = {}
     output_src = {}
 
+    def add_input(value):
+        # TODO lookup shape and dtype of input if exists
+        v = Value(value.name, Tensor(Float()))
+        dist_ir_module.add_input_value(v)
+        inputs[value.name] = v
+
     for value in onnx_model.graph.value_info:
         print(f"Adding input {value.name} from graph.value_info")
-        inputs[value.name] = dist_ir_graph.add_input_tensor(value.name)
+        add_input(value)
     print()
 
     for value in onnx_model.graph.input:
         print(f"Adding input {value.name} from graph.input")
-        inputs[value.name] = dist_ir_graph.add_input_tensor(value.name)
+        add_input(value)
     print()
 
     for node in onnx_model.graph.node:
@@ -34,11 +42,17 @@ def import_from_onnx(onnx_model, backend):
                 per_node_inputs.append(output_src[value])
             else:
                 print(f"---> Could not find input {value}!")
-                inputs[value] = dist_ir_graph.add_input_tensor(value)
-                per_node_inputs.append(inputs[value])
+                # TODO do something better here
+                v = Value(value, Tensor(Float()))
+                dist_ir_module.add_input_value(v)
+                inputs[value] = v
+                per_node_inputs.append(v)
         print()
-        dist_ir_node = dist_ir_graph.add_node(node.name, node.op_type, *per_node_inputs)
+        op = dist_ir_module.add_op(node.op_type, node.name, per_node_inputs)
         for output in node.output:
-            output_src[output] = dist_ir_node
+            # TODO lookup shape and dtype of input if exists
+            v = Value(output, Tensor(Float()))
+            output_src[output] = v
 
-    dist_ir_graph.verify_nodes_in_topological_order()
+    dist_ir_module.verify_ops_in_topological_order()
+    return dist_ir_module

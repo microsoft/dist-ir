@@ -1,5 +1,5 @@
 from .backend_register import BackendRegister
-from ..graph.tensor import Tensor
+from ..ir.type import Tensor
 
 
 class SequentialExecutor:
@@ -13,8 +13,8 @@ class SequentialExecutor:
         resolved_inputs = []
         for input in inputs:
             # TODO: Support input types beyond Tensor
-            if not isinstance(input, Tensor):
-                raise ValueError(f"Invalid input type {type(input)}")
+            if not isinstance(input.type, Tensor):
+                raise ValueError(f"Invalid input type {input.type}")
             resolved_inputs.append(input.data)
         return resolved_inputs
 

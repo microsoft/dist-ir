@@ -34,7 +34,17 @@ TODO
     - DistributedSimulator: an executor that uses profile data or flop counts to
         simulate the execution of a given DistIR module on a given hardware
         configuration (including communication bandwidths and processor speed).
-        Returns estimated execution time and live memory profile.
+        Returns estimated execution time and live memory profile. This can be
+        split into three subcomponents:
+        - Shape Inference: a pass that uses the shapes of inputs to calculate
+            the shapes of all intermediate values.
+        - Cost Inference: a pass that uses either shape information to compute
+            (or profiles the module and measures) the runtime and temporary
+            memory requirement of each op in the module.
+            This output can be cached.
+        - Simulator: takes a module and a mapping from op to time/memory
+            consumption and does a simulation to obtain a concurrent trace
+            (from which total runtime and memory usage plots can be derived).
 - Importers:
     - ONNX Importer: convert a `.onnx` file to a DistIR module. Can be given an
         intermediate graph from ORT (for example, after AD).

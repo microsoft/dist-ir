@@ -32,16 +32,22 @@ Value = {
     name: String
         # Again, does it need to be unique in a module?
     type: Type
-    device: Int
+    device: DeviceID
         # Which device this value lives on
+    # TODO pointer to source op that generated this value?
 }
 
 Type =
-    | Tensor{shape: Shape, dtype: Type}
+    | Tensor{shape: Optional[Shape], dtype: Type}
     | Float | Int | ...
 ```
 
-TODO should device be a field of Value, or should each Type have a device field?
+Notes:
+- All values have a device, but this can be 0 for default device.
+- Tensor shapes are optional, but we might want to enforce that we know input
+    shapes. We also want to retain flexibility in the definition of shape so
+    that we can handle things like flexible batch dimension.
+
 
 ## Representing distributed computation
 
@@ -204,6 +210,11 @@ def mlp(
     return wA1, wB1, y, l
 ```
 
+TODO do we really need par? Try cost model without par, see where it breaks?
+- If we don't have par, IR needs to maintain invariants:
+    Ordering of ops is topologically sorted (no forward dependencies)
+    Ordering specifies synchronization between devices via explicit communication ops (e.g. allreduce, send).
+
 ```Python
 # Pipeline parallel version (synchronous SGD, unrolled):
 def mlp(
@@ -222,7 +233,7 @@ def mlp(
 
     ################################ TIMESTEP 1 ###############################
     (
-        a0_1: Tensor[(B/K, F), 0],
+        a0_1: Tensor[(B/K, F), 0],  # TODO notation: which one is device and which one is microbatch? Use @?
         a1_1: Tensor[(B/K, H), 1],
         y_0: Tensor[(B/K, C), 1],
         l_1: Float[1]
@@ -272,6 +283,8 @@ def mlp(
     wA1: Tensor[(F, H), 0] = opt(wA, dwA)
     return wA1, wB1, y, l
 ```
+
+TODO add gradient accumulation so live memory isn't proportional to number of microbatches.
 
 ```Python
 # Pipeline parallel version (with PipelinePartition):
@@ -335,6 +348,13 @@ def mlp(
     wA1: Tensor[(F, H), 0] = opt(wA, dwA)
     return wA1, wB1, y, l
 ```
+
+TODO do we want explicit free?
+If so, then need to add it to input module after say importing from onnx,
+and need a free after last occurrence of every value.
+If not, then simulator has to do a liveness analysis. This isn't hard/expensive.
+But how do we deal with inplace operations? Have an attribute on those ops?
+(Let's do without free for now.)
 
 TODO: pipeline parallel
 - tricky thing is to make the stages that execute in parallel explicit, so that cost model can be accurate

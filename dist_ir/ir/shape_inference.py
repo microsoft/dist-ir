@@ -8,6 +8,8 @@ def infer_shapes_for_op(op: Op):
     op.reset_out_edges()
     if op.op_type == "Add":
         infer_shapes_for_add(op)
+    elif op.op_type == "Gemm":
+        raise NotImplementedError(f"Op type Gemm has not been implemented")
     elif op.op_type == "MatMul":
         infer_shapes_for_matmul(op)
     else:

@@ -2,7 +2,6 @@ from collections import OrderedDict, defaultdict
 from typing import List
 
 from .op import Op
-from .shape_inference import infer_shapes_for_op
 from .value import Value
 
 
@@ -52,15 +51,13 @@ class Module:
         elif name is None or name == "":
             name = f"{op_type}/_{self._op_counter[op_type]}"
         op = Op(name, op_type, in_edges=inputs)
-        # NOTE: Should this be moved to the Op constructor?
-        infer_shapes_for_op(op)
         self._ops[name] = op
         self._op_counter[op_type] += 1
         return op
 
-    def add_input_value(self, name, type):
+    def add_input_value(self, name, typ):
         """Adds an input value to the graph and returns the value."""
-        value = Value(name=name, type=type)
+        value = Value(name=name, type=typ)
         if value.name in self._inputs:
             raise ValueError(f"Module already has input value with name {value.name}")
         self._inputs[value.name] = value

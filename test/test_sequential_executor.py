@@ -41,12 +41,13 @@ def backend(request):
 def test_single_add(backend):
     h = Helper(backend)
     h._module.add_op("Add", "Add_0", [h._t1, h._t2])
+    h._module.find_output_values()
     outputs = h._executor.compute(h._module, h._input_data)
     result = outputs["Add_0/0"].data
     if h._backend == "numpy":
-        assert np.array_equal(result, np.add(h._t1.data, h._t2.data))
+        assert np.array_equal(result, np.add(h._input_data["a"], h._input_data["b"]))
     elif h._backend == "torch":
-        assert torch.all(result.eq(torch.add(h._t1.data, h._t2.data)))
+        assert torch.all(result.eq(torch.add(h._input_data["a"], h._input_data["b"])))
 
 
 def test_double_add(backend):
@@ -54,15 +55,22 @@ def test_double_add(backend):
     x = h._module.add_op("Add", "Add_0", [h._t1, h._t2])
     x_outputs = x.get_out_edges()
     h._module.add_op("Add", "Add_1", [h._t3, x_outputs[0]])
+    h._module.find_output_values()
     outputs = h._executor.compute(h._module, h._input_data)
     result = outputs["Add_1/0"].data
     if h._backend == "numpy":
         assert np.array_equal(
-            result, np.add(h._t3.data, np.add(h._t1.data, h._t2.data))
+            result,
+            np.add(h._input_data["c"], np.add(h._input_data["a"], h._input_data["b"])),
         )
     elif h._backend == "torch":
         assert torch.all(
-            result.eq(torch.add(h._t3.data, torch.add(h._t1.data, h._t2.data)))
+            result.eq(
+                torch.add(
+                    h._input_data["c"],
+                    torch.add(h._input_data["a"], h._input_data["b"]),
+                )
+            )
         )
 
 
@@ -71,27 +79,37 @@ def test_double_add_inverted(backend):
     x = h._module.add_op("Add", "Add_0", [h._t1, h._t2])
     x_outputs = x.get_out_edges()
     h._module.add_op("Add", "Add_1", [x_outputs[0], h._t3])
+    h._module.find_output_values()
     outputs = h._executor.compute(h._module, h._input_data)
     result = outputs["Add_1/0"].data
     if h._backend == "numpy":
         assert np.array_equal(
-            result, np.add(np.add(h._t1.data, h._t2.data), h._t3.data)
+            result,
+            np.add(np.add(h._input_data["a"], h._input_data["b"]), h._input_data["c"]),
         )
     elif h._backend == "torch":
         assert torch.all(
-            result.eq(torch.add(torch.add(h._t1.data, h._t2.data), h._t3.data))
+            result.eq(
+                torch.add(
+                    torch.add(h._input_data["a"], h._input_data["b"]),
+                    h._input_data["c"],
+                )
+            )
         )
 
 
 def test_single_matmul(backend):
     h = Helper(backend)
     h._module.add_op("MatMul", "MatMul_0", [h._t1, h._t2])
+    h._module.find_output_values()
     outputs = h._executor.compute(h._module, h._input_data)
     result = outputs["MatMul_0/0"].data
     if h._backend == "numpy":
-        assert np.array_equal(result, np.matmul(h._t1.data, h._t2.data))
+        assert np.array_equal(result, np.matmul(h._input_data["a"], h._input_data["b"]))
     elif h._backend == "torch":
-        assert torch.all(result.eq(torch.matmul(h._t1.data, h._t2.data)))
+        assert torch.all(
+            result.eq(torch.matmul(h._input_data["a"], h._input_data["b"]))
+        )
 
 
 def test_double_matmul(backend):
@@ -99,16 +117,24 @@ def test_double_matmul(backend):
     x = h._module.add_op("MatMul", "MatMul_0", [h._t1, h._t2])
     x_outputs = x.get_out_edges()
     h._module.add_op("MatMul", "MatMul_1", [h._t3, x_outputs[0]])
+    h._module.find_output_values()
     outputs = h._executor.compute(h._module, h._input_data)
     result = outputs["MatMul_1/0"].data
     if h._backend == "numpy":
         assert np.array_equal(
             result,
-            np.matmul(h._t3.data, np.matmul(h._t1.data, h._t2.data)),
+            np.matmul(
+                h._input_data["c"], np.matmul(h._input_data["a"], h._input_data["b"])
+            ),
         )
     elif h._backend == "torch":
         assert torch.all(
-            result.eq(torch.matmul(h._t3.data, torch.matmul(h._t1.data, h._t2.data)))
+            result.eq(
+                torch.matmul(
+                    h._input_data["c"],
+                    torch.matmul(h._input_data["a"], h._input_data["b"]),
+                )
+            )
         )
 
 
@@ -117,14 +143,22 @@ def test_double_matmul_inverted(backend):
     x = h._module.add_op("MatMul", "MatMul_0", [h._t1, h._t2])
     x_outputs = x.get_out_edges()
     h._module.add_op("MatMul", "MatMul_1", [x_outputs[0], h._t3])
+    h._module.find_output_values()
     outputs = h._executor.compute(h._module, h._input_data)
     result = outputs["MatMul_1/0"].data
     if h._backend == "numpy":
         assert np.array_equal(
             result,
-            np.matmul(np.matmul(h._t1.data, h._t2.data), h._t3.data),
+            np.matmul(
+                np.matmul(h._input_data["a"], h._input_data["b"]), h._input_data["c"]
+            ),
         )
     elif h._backend == "torch":
         assert torch.all(
-            result.eq(torch.matmul(torch.matmul(h._t1.data, h._t2.data), h._t3.data))
+            result.eq(
+                torch.matmul(
+                    torch.matmul(h._input_data["a"], h._input_data["b"]),
+                    h._input_data["c"],
+                )
+            )
         )

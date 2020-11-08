@@ -21,8 +21,12 @@ class Module:
         return name in self._ops
 
     def is_input(self, name):
-        """Checks whether an input value exists with the specified name."""
+        """checks whether an input value exists with the specified name."""
         return name in self._inputs
+
+    def is_output(self, name):
+        """checks whether an output value exists with the specified name."""
+        return name in self._outputs
 
     def get_op(self, name):
         """Returns the op with the specified name if it exists."""
@@ -62,6 +66,26 @@ class Module:
             raise ValueError(f"Module already has input value with name {value.name}")
         self._inputs[value.name] = value
         return value
+
+    def find_output_values(self):
+        """Marks all sink nodes in the graph as output values."""
+        all_values = {}
+        consumed_values = {}
+
+        for input_value_name, input_value in self._inputs.items():
+            all_values[input_value_name] = input_value
+
+        for op in self._ops.values():
+            for in_edge in op.get_in_edges():
+                consumed_values[in_edge.name] = in_edge
+            for out_edge in op.get_out_edges():
+                all_values[out_edge.name] = out_edge
+
+        output_value_names = set(all_values.keys()).difference(
+            set(consumed_values.keys())
+        )
+        for output_value_name in output_value_names:
+            self._outputs[output_value_name] = all_values[output_value_name]
 
     def _get_ops_in_topological_order_helper(self, name, visited, order):
         visited.add(name)

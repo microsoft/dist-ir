@@ -8,16 +8,6 @@ class SequentialExecutor:
             raise ValueError(f"Unknown backend {backend}")
         self._backend = backend
 
-    def _resolve_inputs(self, inputs):
-        """Converts the given inputs into the form expected by the specified backend."""
-        resolved_inputs = []
-        for input in inputs:
-            # TODO: Support input types beyond Tensor
-            if not isinstance(input.type, Tensor):
-                raise ValueError(f"Invalid input type {input.type}")
-            resolved_inputs.append(input.data)
-        return resolved_inputs
-
     def _compute_op(self, op, inputs):
         """Executes the given op and returns its outputs."""
         op_type = op.op_type
@@ -26,10 +16,9 @@ class SequentialExecutor:
                 f"No {self._backend} implementation found for op {op_type}"
             )
         impl = BackendRegister[self._backend][op_type]
-        resolved_inputs = self._resolve_inputs(inputs)
         out_edges = op.get_out_edges()
         # TODO: Support multiple output values
-        output_data = impl(*resolved_inputs)
+        output_data = impl(*inputs)
         return output_data
 
     def compute(self, module, input_data):
@@ -60,11 +49,9 @@ class SequentialExecutor:
                         raise ValueError(
                             f"Could not find input {input_name} in input_data"
                         )
-                    input_value = module.get_input(input_name)
-                    input_value.data = input_data[input_name]
+                    input_value = input_data[input_name]
                 elif input_name in output_data:
-                    input_value = in_edge
-                    in_edge.data = output_data[input_name]
+                    input_value = output_data[input_name]
                     consumers[input_name] -= 1
                 else:
                     raise ValueError(f"Invalid input {input_name} for op {op_name}")
@@ -76,8 +63,13 @@ class SequentialExecutor:
             output_data[out_edges[0].name] = res
             consumers[out_edges[0].name] = 1
 
-            # TODO: Garbage collect the fully consumed output tensors.
-            # This may require adding a pointer to the source op for each output tensor.
+            # Garbage collect the fully consumed output tensors.
+            to_free = []
+            for output_name in output_data:
+                if consumers[output_name] == 0 and not module.is_output(output_name):
+                    to_free.append(output_name)
+            for output_name in to_free:
+                del output_data[output_name]
 
         # Return the outputs.
         return output_data

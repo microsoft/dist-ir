@@ -13,14 +13,7 @@ class Op:
             self._in_edges = []
         else:
             self._in_edges = in_edges
-        self._out_edges = []
-        # TODO: Handle non-tensor inputs
-        input_shapes = tuple([in_edge.type.shape for in_edge in self._in_edges])
-        output_shapes = OpRegister[op_type].infer_shapes(input_shapes)
-        for i, output_shape in enumerate(output_shapes):
-            output_name = f"{self._name}/{i}"
-            output_value = Value(output_name, Tensor(Float(), output_shape))
-            self._out_edges.append(output_value)
+        self._out_edges = OpRegister[op_type].infer_types(self._name, self._in_edges)
         if attributes is None:
             self._attributes = {}
         else:

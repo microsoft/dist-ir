@@ -1,5 +1,5 @@
 from collections import OrderedDict, defaultdict
-from typing import List
+from typing import List, Tuple, Union
 
 from .op import Op
 from .value import Value
@@ -40,7 +40,9 @@ class Module:
             return None
         return self._inputs[name]
 
-    def add_op(self, op_type, name=None, inputs: List[Value] = None):
+    def add_op(
+        self, op_type, name=None, inputs: List[Value] = None
+    ) -> Union[None, Value, Tuple[Value, ...]]:
         """Adds an op to the graph.
 
         Args:
@@ -48,7 +50,7 @@ class Module:
           inputs: The inputs for this op (Values).
 
         Returns:
-          The newly created op.
+          The outputs of the newly created op.
         """
         if name in self._ops:
             raise ValueError(f"op with name {name} already exists!")
@@ -57,7 +59,23 @@ class Module:
         op = Op(name, op_type, in_edges=inputs)
         self._ops[name] = op
         self._op_counter[op_type] += 1
-        return op
+
+        # Update the module outputs.
+        out_edges = op.get_out_edges()
+        for out_edge in out_edges:
+            self._outputs[out_edge.name] = out_edge
+        for in_edge in inputs:
+            if in_edge.name in self._outputs:
+                del self._outputs[in_edge.name]
+
+        # Return the op outputs.
+        num_out_edges = len(out_edges)
+        if num_out_edges == 0:
+            return None
+        elif num_out_edges == 1:
+            return out_edges[0]
+        else:
+            return tuple(out_edges)
 
     def add_input_value(self, name, typ):
         """Adds an input value to the graph and returns the value."""

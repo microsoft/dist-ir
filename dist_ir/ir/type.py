@@ -32,9 +32,11 @@ class Tensor(Type):
 
     # TODO have a global cache to avoid creating multiple objects of same type?
 
-    def __init__(self, dtype: Type, shape: Optional[Tuple[int]] = None):
+    def __init__(self, dtype: Type = None, shape: Optional[Tuple[int]] = None):
         self._shape = shape
-        assert isinstance(dtype, Type) and not isinstance(dtype, Tensor)
+        assert dtype is None or (
+            isinstance(dtype, Type) and not isinstance(dtype, Tensor)
+        )
         self._dtype = dtype
 
     def __repr__(self):

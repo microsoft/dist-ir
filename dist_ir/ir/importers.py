@@ -16,8 +16,7 @@ def import_from_onnx(onnx_model):
 
     def add_input(value):
         # TODO lookup shape and dtype of input if exists
-        v = Value(value.name, Tensor(Float()))
-        dist_ir_module.add_input_value(v)
+        v = dist_ir_module.add_input_value(value.name, Tensor(Float()))
         inputs[value.name] = v
 
     for value in onnx_model.graph.value_info:
@@ -43,8 +42,7 @@ def import_from_onnx(onnx_model):
             else:
                 print(f"---> Could not find input {value}!")
                 # TODO do something better here
-                v = Value(value, Tensor(Float()))
-                dist_ir_module.add_input_value(v)
+                v = dist_ir_module.add_input_value(value, Tensor(Float()))
                 inputs[value] = v
                 per_node_inputs.append(v)
         print()

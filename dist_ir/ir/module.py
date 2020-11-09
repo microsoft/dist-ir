@@ -21,11 +21,11 @@ class Module:
         return name in self._ops
 
     def is_input(self, name):
-        """checks whether an input value exists with the specified name."""
+        """Checks whether an input value exists with the specified name."""
         return name in self._inputs
 
     def is_output(self, name):
-        """checks whether an output value exists with the specified name."""
+        """Checks whether an output value exists with the specified name."""
         return name in self._outputs
 
     def get_op(self, name):
@@ -134,7 +134,7 @@ class Module:
 
         for name, op in self._ops.items():
             for in_edge in op.get_in_edges():
-                if in_edge not in seen:
+                if in_edge.name not in seen:
                     raise ValueError(
                         f"Ops are not in topological order: op {name} has unseen edge {in_edge}"
                     )

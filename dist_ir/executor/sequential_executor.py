@@ -34,7 +34,6 @@ class SequentialExecutor:
         """
         output_data = {}
         consumers = {}
-        sinks = set()
         ops = module.get_ops()
 
         # Execute ops in topological order.

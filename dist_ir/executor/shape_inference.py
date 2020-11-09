@@ -1,6 +1,6 @@
 from ..ir.type import Float
 from ..ir.type import Tensor
-from ...ir.value import Value
+from ..ir.value import Value
 
 from typing import Tuple
 

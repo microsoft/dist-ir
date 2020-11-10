@@ -7,7 +7,7 @@ class OpRegisterEntry:
         self._input_types = input_types
         self._output_types = output_types
 
-    def infer_types(self, op_name, inputs):
+    def infer_types(self, op_name, inputs, output_names=None):
         if len(inputs) != len(self._input_types):
             raise ValueError(
                 f"Op {op_name}: Expected {len(self._input_types)} inputs, got {len(inputs)}"
@@ -17,9 +17,16 @@ class OpRegisterEntry:
                 raise ValueError(
                     f"Op {op_name}: Expected input of type {input_type} for input {i}, got input of type {type(input)}"
                 )
+        if output_names is not None and len(output_names) != len(self._output_types):
+            raise ValueError(
+                f"Op {op_name}: Expected {len(output_names)} outputs, got {len(self._output_types)}"
+            )
         output_values = []
         for i, output_type in enumerate(self._output_types):
-            output_name = f"{op_name}/{i}"
+            if output_names is not None and output_names[i] != "":
+                output_name = output_names[i]
+            else:
+                output_name = f"{op_name}/{i}"
             output_values.append(Value(output_name, type=output_type()))
         return output_values
 
@@ -27,7 +34,7 @@ class OpRegisterEntry:
 OpRegister = {
     "Add": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
     "BroadcastGradientArgs": OpRegisterEntry(
-        input_types=[Tensor, Tensor], output_types=[Tensor]
+        input_types=[Tensor, Tensor], output_types=[Tensor, Tensor]
     ),
     "Gemm": OpRegisterEntry(
         input_types=[Tensor, Tensor, Tensor], output_types=[Tensor]
@@ -40,11 +47,11 @@ OpRegister = {
     "ReluGrad": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
     "Reshape": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
     "SGDOptimizer": OpRegisterEntry(
-        input_types=[Tensor, Tensor, Tensor], output_types=[Tensor]
+        input_types=[Tensor, Tensor, Tensor], output_types=[Tensor, Tensor]
     ),
     "Shape": OpRegisterEntry(input_types=[Tensor], output_types=[Tensor]),
     "SoftmaxCrossEntropy": OpRegisterEntry(
-        input_types=[Tensor, Tensor], output_types=[Tensor]
+        input_types=[Tensor, Tensor], output_types=[Tensor, Tensor]
     ),
     "SoftmaxCrossEntropyGrad": OpRegisterEntry(
         input_types=[Tensor, Tensor, Tensor], output_types=[Tensor]

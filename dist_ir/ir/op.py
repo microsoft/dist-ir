@@ -4,7 +4,15 @@ from .value import Value
 
 
 class Op:
-    def __init__(self, name, op_type, in_edges=None, attributes=None, submodules=None):
+    def __init__(
+        self,
+        name,
+        op_type,
+        in_edges=None,
+        attributes=None,
+        submodules=None,
+        output_names=None,
+    ):
         if op_type not in OpRegister:
             raise ValueError(f"Invalid op type {op_type}")
         self._name = name
@@ -13,7 +21,9 @@ class Op:
             self._in_edges = []
         else:
             self._in_edges = in_edges
-        self._out_edges = OpRegister[op_type].infer_types(self._name, self._in_edges)
+        self._out_edges = OpRegister[op_type].infer_types(
+            self._name, self._in_edges, output_names
+        )
         if attributes is None:
             self._attributes = {}
         else:

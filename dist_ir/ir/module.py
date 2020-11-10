@@ -41,7 +41,11 @@ class Module:
         return self._inputs[name]
 
     def add_op(
-        self, op_type, name=None, inputs: List[Value] = None
+        self,
+        op_type,
+        name=None,
+        inputs: List[Value] = None,
+        output_names: List[str] = None,
     ) -> Union[None, Value, Tuple[Value, ...]]:
         """Adds an op to the graph.
 
@@ -56,7 +60,7 @@ class Module:
             raise ValueError(f"op with name {name} already exists!")
         elif name is None or name == "":
             name = f"{op_type}/_{self._op_counter[op_type]}"
-        op = Op(name, op_type, in_edges=inputs)
+        op = Op(name, op_type, in_edges=inputs, output_names=output_names)
         self._ops[name] = op
         self._op_counter[op_type] += 1
 
@@ -139,3 +143,5 @@ class Module:
                         f"Ops are not in topological order: op {name} has unseen edge {in_edge}"
                     )
             seen.add(name)
+            for out_edge in op.get_out_edges():
+                seen.add(out_edge.name)

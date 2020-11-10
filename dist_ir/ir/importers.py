@@ -31,7 +31,7 @@ def import_from_onnx(onnx_model):
 
     for node in onnx_model.graph.node:
         per_node_inputs = []
-        print(f"Getting inputs for node {node.name}...")
+        print(f"Getting inputs for node {node.name} ({node.op_type})...")
         for value in node.input:
             if value in inputs:
                 print(f"Found input {value} in inputs")
@@ -46,7 +46,10 @@ def import_from_onnx(onnx_model):
                 inputs[value] = v
                 per_node_inputs.append(v)
         print()
-        op = dist_ir_module.add_op(node.op_type, node.name, per_node_inputs)
+        output_names = node.output
+        op = dist_ir_module.add_op(
+            node.op_type, node.name, per_node_inputs, output_names
+        )
         for output in node.output:
             # TODO lookup shape and dtype of input if exists
             v = Value(output, Tensor(Float()))

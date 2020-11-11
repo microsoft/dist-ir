@@ -1,5 +1,5 @@
 from collections import OrderedDict, defaultdict
-from typing import List, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union
 
 from .op import Op
 from .value import Value
@@ -12,8 +12,29 @@ class Module:
         self._outputs = OrderedDict()
         self._op_counter = defaultdict(int)
 
+    def __str__(self):
+        output = ""
+        output += "Module inputs:\n"
+        for input_value in self._inputs.values():
+            output += "  " + str(input_value) + "\n"
+        output += "\n"
+        output += "Module outputs:\n"
+        for input_value in self._outputs.values():
+            output += "  " + str(input_value) + "\n"
+        output += "\n"
+        output += "Ops:\n"
+        for op in self._ops.values():
+            output += str(op) + "\n"
+        return output
+
+    @property
+    def inputs(self):
+        """Returns the module's input values."""
+        return self._inputs.values()
+
+    # TODO: Convert to property
     def get_ops(self):
-        """Returns all ops in the graph."""
+        """Returns all ops in the module."""
         return self._ops
 
     def is_op(self, name):
@@ -45,6 +66,7 @@ class Module:
         op_type,
         name=None,
         inputs: List[Value] = None,
+        attributes: Dict[str, Any] = None,
         output_names: List[str] = None,
     ) -> Union[None, Value, Tuple[Value, ...]]:
         """Adds an op to the graph.
@@ -60,7 +82,13 @@ class Module:
             raise ValueError(f"op with name {name} already exists!")
         elif name is None or name == "":
             name = f"{op_type}/_{self._op_counter[op_type]}"
-        op = Op(name, op_type, in_edges=inputs, output_names=output_names)
+        op = Op(
+            name,
+            op_type,
+            in_edges=inputs,
+            attributes=attributes,
+            output_names=output_names,
+        )
         self._ops[name] = op
         self._op_counter[op_type] += 1
 
@@ -81,9 +109,9 @@ class Module:
         else:
             return tuple(out_edges)
 
-    def add_input_value(self, name, typ):
+    def add_input_value(self, name, value_type):
         """Adds an input value to the graph and returns the value."""
-        value = Value(name=name, type=typ)
+        value = Value(name=name, value_type=value_type)
         if value.name in self._inputs:
             raise ValueError(f"Module already has input value with name {value.name}")
         self._inputs[value.name] = value

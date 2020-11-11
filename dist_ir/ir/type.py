@@ -46,6 +46,10 @@ class Tensor(Type):
     def shape(self):
         return self._shape
 
+    @shape.setter
+    def shape(self, shape):
+        self._shape = shape
+
     @property
     def dtype(self):
         return self._dtype

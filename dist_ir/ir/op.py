@@ -21,9 +21,6 @@ class Op:
             self._in_edges = []
         else:
             self._in_edges = in_edges
-        self._out_edges = OpRegister[op_type].infer_types(
-            self._name, self._in_edges, output_names
-        )
         if attributes is None:
             self._attributes = {}
         else:
@@ -32,6 +29,20 @@ class Op:
             self._submodules = []
         else:
             self._submodules = submodules
+        self._out_edges = []
+        OpRegister[op_type].infer_types(self, output_names)
+
+    def __str__(self):
+        output = ""
+        output += f"Name: {self._name}\n"
+        output += f"Op type: {self._op_type}\n"
+        output += "Inputs:\n"
+        for in_edge in self._in_edges:
+            output += "  " + str(in_edge) + "\n"
+        output += "Outputs:\n"
+        for out_edge in self._out_edges:
+            output += "  " + str(out_edge) + "\n"
+        return output
 
     def add_in_edge(self, in_edge):
         """Adds an input edge."""
@@ -52,6 +63,10 @@ class Op:
     def reset_out_edges(self):
         """Clears any existing output edges."""
         self._out_edges = []
+
+    def get_attribute(self, attribute_name):
+        """Returns the specified attributes, or throws error if it does not exist."""
+        return self._attributes[attribute_name]
 
     @property
     def name(self):

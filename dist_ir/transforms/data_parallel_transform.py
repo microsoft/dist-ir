@@ -16,7 +16,8 @@ class DataParallelTransform:
             value_map[device] = {}
         pmap_inputs = []
 
-        for input_value in module.inputs:
+        input_values = module.get_inputs()
+        for input_value in input_values:
             if input_value.name == self._partitioned_input_name:
                 v = transformed_module.add_input_value(
                     input_value.name, input_value.type
@@ -49,9 +50,10 @@ class DataParallelTransform:
                     value_map[device][input_value.name] = broadcasted_v[device]
                     pmap_inputs.append(broadcasted_v[device])
 
+        output_values = module.get_outputs()
         pmap_output_names = []
         for device in devices:
-            for output_value in module.outputs:
+            for output_value in output_values:
                 pmap_output_names.append(f"{output_value.name}_{device}")
 
         partitioned_output_values = transformed_module.add_op(
@@ -64,15 +66,15 @@ class DataParallelTransform:
         )
 
         output_map = {}
-        num_output_values = len(module.outputs)
+        num_output_values = len(output_values)
         for device in devices:
             output_map[device] = {}
-            for i, output_value_name in enumerate(module._outputs.keys()):
-                output_map[device][output_value_name] = partitioned_output_values[
+            for i, output_value in enumerate(output_values):
+                output_map[device][output_value.name] = partitioned_output_values[
                     device * num_output_values + i
                 ]
 
-        for output_value in module.outputs:
+        for output_value in output_values:
             allreduce_inputs = [
                 output_map[device][output_value.name] for device in devices
             ]

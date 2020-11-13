@@ -55,11 +55,11 @@ class Op:
                 )
         return output
 
-    def add_in_edge(self, in_edge):
+    def add_in_edge(self, in_edge: Value):
         """Adds an input edge."""
         self._in_edges.append(in_edge)
 
-    def add_out_edge(self, out_edge):
+    def add_out_edge(self, out_edge: Value):
         """Adds an output edge."""
         self._out_edges.append(out_edge)
 
@@ -71,13 +71,13 @@ class Op:
         """Returns all output edges."""
         return self._out_edges
 
-    def reset_out_edges(self):
-        """Clears any existing output edges."""
-        self._out_edges = []
-
     def get_attribute(self, attribute_name):
         """Returns the specified attributes, or throws error if it does not exist."""
         return self._attributes[attribute_name]
+
+    def get_submodule(self, idx):
+        """Returns the submodule at the specified index."""
+        return self._submodules[idx]
 
     @property
     def name(self):

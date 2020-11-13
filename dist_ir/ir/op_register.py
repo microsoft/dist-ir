@@ -14,13 +14,15 @@ class OpRegisterEntry:
             output_name = output_names[0]
         else:
             output_name = f"{op.name}/{0}"
-        op._out_edges.append(Value(name=output_name, value_type=None))
+        op.add_out_edge(Value(name=output_name, value_type=None))
 
     def _infer_types_for_pmap(self, op, output_names):
         devices = op.get_attribute("devices")
         num_outputs = 0
         for device in devices:
-            for out_edge in op._submodules[0].outputs:
+            submodule = op.get_submodule(0)
+            submodule_outputs = submodule.get_outputs()
+            for out_edge in submodule_outputs:
                 if output_names is not None:
                     output_name = output_names[num_outputs]
                 else:
@@ -28,7 +30,7 @@ class OpRegisterEntry:
                 output_value = Value(
                     output_name, value_type=copy.deepcopy(out_edge.type), device=device
                 )
-                op._out_edges.append(output_value)
+                op.add_out_edge(output_value)
                 num_outputs += 1
 
     def _infer_types_for_broadcast_and_scatter(self, op, output_names):
@@ -49,7 +51,7 @@ class OpRegisterEntry:
                 if isinstance(output_type, Tensor):
                     output_type.shape = None
             output_value = Value(output_name, value_type=output_type, device=devices[i])
-            op._out_edges.append(output_value)
+            op.add_out_edge(output_value)
 
     def infer_types(self, op, output_names=None):
         # Handle ops with a variable number of inputs.
@@ -101,9 +103,7 @@ class OpRegisterEntry:
                 output_name = output_names[i]
             else:
                 output_name = f"{op.name}/{i}"
-            op._out_edges.append(
-                Value(output_name, value_type=output_type(), device=device)
-            )
+            op.add_out_edge(Value(output_name, value_type=output_type(), device=device))
 
 
 OpRegister = {

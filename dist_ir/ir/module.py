@@ -29,16 +29,6 @@ class Module:
             output += str(op) + "\n"
         return output
 
-    @property
-    def inputs(self):
-        """Returns the module's input values."""
-        return self._inputs.values()
-
-    @property
-    def outputs(self):
-        """Returns the module's output values."""
-        return self._outputs.values()
-
     # TODO: Convert to property
     def get_ops(self):
         """Returns all ops in the module."""
@@ -67,6 +57,13 @@ class Module:
         if name not in self._inputs:
             return None
         return self._inputs[name]
+
+    def get_inputs(self):
+        """Returns the module inputs."""
+        return self._inputs.values()
+
+    def get_outputs(self):
+        return self._outputs.values()
 
     def add_op(
         self,
@@ -111,6 +108,10 @@ class Module:
         # Update the module outputs.
         out_edges = op.get_out_edges()
         for out_edge in out_edges:
+            if out_edge.name in self._outputs:
+                raise ValueError(
+                    f"Module already has output value with name {out_edge.name}"
+                )
             self._outputs[out_edge.name] = out_edge
         for in_edge in inputs:
             if in_edge.name in self._outputs:

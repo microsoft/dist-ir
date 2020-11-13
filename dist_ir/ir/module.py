@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections import OrderedDict, defaultdict
 from typing import Any, Dict, List, Tuple, Union
 
@@ -31,6 +33,11 @@ class Module:
     def inputs(self):
         """Returns the module's input values."""
         return self._inputs.values()
+
+    @property
+    def outputs(self):
+        """Returns the module's output values."""
+        return self._outputs.values()
 
     # TODO: Convert to property
     def get_ops(self):
@@ -67,13 +74,20 @@ class Module:
         name=None,
         inputs: List[Value] = None,
         attributes: Dict[str, Any] = None,
+        submodules: List[Module] = None,
+        metadata: Dict[str, Any] = None,
         output_names: List[str] = None,
     ) -> Union[None, Value, Tuple[Value, ...]]:
         """Adds an op to the graph.
 
         Args:
           op_type: The op's type.
-          inputs: The inputs for this op (Values).
+          name: The op's name.
+          inputs: The input values for this op.
+          attributes: Any op-specific attributes.
+          submodules: Any submodules this op is wrapping.
+          metadata: Any op-specific metadata.
+          output_names: An optinal list of output value names.
 
         Returns:
           The outputs of the newly created op.
@@ -81,12 +95,14 @@ class Module:
         if name in self._ops:
             raise ValueError(f"op with name {name} already exists!")
         elif name is None or name == "":
-            name = f"{op_type}/_{self._op_counter[op_type]}"
+            name = f"{op_type}_#{self._op_counter[op_type]}"
         op = Op(
             name,
             op_type,
             in_edges=inputs,
             attributes=attributes,
+            submodules=submodules,
+            metadata=metadata,
             output_names=output_names,
         )
         self._ops[name] = op

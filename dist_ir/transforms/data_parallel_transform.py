@@ -10,7 +10,12 @@ class DataParallelTransform:
     def apply(self, module):
         transformed_module = Module()
 
-        partitioned_values = {}
+        value_map = {}
+        devices = list(range(self._num_partitions))
+        for device in devices:
+            value_map[device] = {}
+        pmap_inputs = []
+
         for input_value in module.inputs:
             if input_value.name == self._partitioned_input_name:
                 v = transformed_module.add_input_value(
@@ -26,7 +31,9 @@ class DataParallelTransform:
                     },
                     output_names=[f"{v.name}_{i}" for i in range(self._num_partitions)],
                 )
-                partitioned_values[input_value.name] = scattered_v
+                for device in devices:
+                    value_map[device][input_value.name] = scattered_v[device]
+                    pmap_inputs.append(scattered_v[device])
             else:
                 v = transformed_module.add_input_value(
                     input_value.name, input_value.type
@@ -35,31 +42,44 @@ class DataParallelTransform:
                     "Broadcast",
                     name=f"Broadcast/{v.name}",
                     inputs=[v],
-                    attributes={"devices": list(range(self._num_partitions))},
+                    attributes={"devices": devices},
                     output_names=[f"{v.name}_{i}" for i in range(self._num_partitions)],
                 )
-                partitioned_values[input_value.name] = broadcasted_v
+                for device in devices:
+                    value_map[device][input_value.name] = broadcasted_v[device]
+                    pmap_inputs.append(broadcasted_v[device])
 
-        ops = module.get_ops()
-        for i in range(self._num_partitions):
-            for op_name, op in ops.items():
-                inputs = []
-                output_names = []
-                for in_edge in op.get_in_edges():
-                    inputs.append(partitioned_values[in_edge.name][i])
-                for out_edge in op.get_out_edges():
-                    partitioned_values[out_edge.name] = []
-                    output_names.append(f"{out_edge.name}_{i}")
-                # TODO: Handle attributes and submodules
-                outputs = transformed_module.add_op(
-                    op.op_type,
-                    name=f"{op_name}_{i}",
-                    inputs=inputs,
-                    output_names=output_names,
-                )
-                if not isinstance(outputs, tuple):
-                    outputs = (outputs,)
-                for j, out_edge in enumerate(op.get_out_edges()):
-                    partitioned_values[out_edge.name].append(outputs[j])
+        pmap_output_names = []
+        for device in devices:
+            for output_value in module.outputs:
+                pmap_output_names.append(f"{output_value.name}_{device}")
+
+        partitioned_output_values = transformed_module.add_op(
+            "Pmap",
+            inputs=pmap_inputs,
+            attributes={"devices": devices},
+            metadata={"value_map": value_map},
+            submodules=[module],
+            output_names=pmap_output_names,
+        )
+
+        output_map = {}
+        num_output_values = len(module.outputs)
+        for device in devices:
+            output_map[device] = {}
+            for i, output_value_name in enumerate(module._outputs.keys()):
+                output_map[device][output_value_name] = partitioned_output_values[
+                    device * num_output_values + i
+                ]
+
+        for output_value in module.outputs:
+            allreduce_inputs = [
+                output_map[device][output_value.name] for device in devices
+            ]
+            transformed_module.add_op(
+                "Allreduce",
+                inputs=allreduce_inputs,
+                output_names=[output_value.name],
+            )
 
         return transformed_module

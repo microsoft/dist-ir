@@ -11,6 +11,7 @@ class Op:
         in_edges=None,
         attributes=None,
         submodules=None,
+        metadata=None,
         output_names=None,
     ):
         if op_type not in OpRegister:
@@ -29,6 +30,10 @@ class Op:
             self._submodules = []
         else:
             self._submodules = submodules
+        if metadata is None:
+            self._metadata = {}
+        else:
+            self._metadata = metadata
         self._out_edges = []
         OpRegister[op_type].infer_types(self, output_names)
 
@@ -42,6 +47,12 @@ class Op:
         output += "Outputs:\n"
         for out_edge in self._out_edges:
             output += "  " + str(out_edge) + "\n"
+        if len(self._submodules) > 0:
+            output += "Submodules:\n"
+            for submodule in self._submodules:
+                output += "\n".join(
+                    ["  " + line for line in str(submodule).split("\n")]
+                )
         return output
 
     def add_in_edge(self, in_edge):

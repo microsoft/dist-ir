@@ -56,7 +56,6 @@ def _infer_shapes_for_loss_grad(op, inputs, input_shapes, outputs):
 
 def _infer_shapes_for_pmap(op, inputs, input_shapes, outputs):
     value_name_map = op.get_metadata("value_name_map")
-    print(value_name_map)
     value_map = {}
     for input in inputs:
         value_map[input.name] = input
@@ -68,6 +67,7 @@ def _infer_shapes_for_pmap(op, inputs, input_shapes, outputs):
         for output in submodule.get_outputs():
             mapped_output_name = value_name_map[device][output.name]
             if isinstance(output.type, Tensor):
+                value_map[mapped_output_name].type.dtype = output.type.dtype
                 value_map[mapped_output_name].type.shape = output.type.shape
 
 
@@ -99,7 +99,6 @@ ShapeInferenceRegister = {
 
 def infer_shapes(module, value_name_map=None, value_map=None, device=None):
     for op_name, op in module.get_ops().items():
-        print(f"Inferring shapes for op {op_name} ({op.op_type})")
         inputs = op.get_in_edges()
         outputs = op.get_out_edges()
         input_shapes = []

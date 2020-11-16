@@ -35,12 +35,32 @@ class OpRegisterEntry:
                 f"Op {op.name}: Received inputs from multiple devices ({devices})"
             )
         device = list(devices)[0]
+        dtypes = set(
+            [input.type.dtype for input in inputs if isinstance(input.type, Tensor)]
+        )
+        if len(dtypes) > 1:
+            raise ValueError(
+                f"Op {op.name}: Received inputs with multiple dtypes ({dtypes})"
+            )
+        elif len(dtypes) == 1:
+            dtype = list(dtypes)[0]
+        else:
+            dtype = None
         for i, output_type in enumerate(self._output_types):
             if output_names is not None and output_names[i] != "":
                 output_name = output_names[i]
             else:
                 output_name = f"{op.name}/{i}"
-            op.add_out_edge(Value(output_name, value_type=output_type(), device=device))
+            if output_type == Tensor:
+                op.add_out_edge(
+                    Value(
+                        output_name, value_type=output_type(dtype=dtype), device=device
+                    )
+                )
+            else:
+                op.add_out_edge(
+                    Value(output_name, value_type=output_type(), device=device)
+                )
 
 
 class AllreduceOpRegisterEntry(OpRegisterEntry):

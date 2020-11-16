@@ -79,6 +79,10 @@ class Op:
         """Returns the submodule at the specified index."""
         return self._submodules[idx]
 
+    def get_metadata(self, key):
+        """Returns the metadata with the given key."""
+        return self._metadata[key]
+
     @property
     def name(self):
         return self._name

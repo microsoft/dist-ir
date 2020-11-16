@@ -10,10 +10,10 @@ class DataParallelTransform:
     def apply(self, module):
         transformed_module = Module()
 
-        value_map = {}
+        value_name_map = {}
         devices = list(range(self._num_partitions))
         for device in devices:
-            value_map[device] = {}
+            value_name_map[device] = {}
         pmap_inputs = []
 
         input_values = module.get_inputs()
@@ -28,12 +28,13 @@ class DataParallelTransform:
                     inputs=[v],
                     attributes={
                         "devices": list(range(self._num_partitions)),
+                        "num_splits": self._num_partitions,
                         "split_dim": self._partition_dim,
                     },
                     output_names=[f"{v.name}_{i}" for i in range(self._num_partitions)],
                 )
                 for device in devices:
-                    value_map[device][input_value.name] = scattered_v[device]
+                    value_name_map[device][input_value.name] = scattered_v[device].name
                     pmap_inputs.append(scattered_v[device])
             else:
                 v = transformed_module.add_input_value(
@@ -47,37 +48,34 @@ class DataParallelTransform:
                     output_names=[f"{v.name}_{i}" for i in range(self._num_partitions)],
                 )
                 for device in devices:
-                    value_map[device][input_value.name] = broadcasted_v[device]
+                    value_name_map[device][input_value.name] = broadcasted_v[
+                        device
+                    ].name
                     pmap_inputs.append(broadcasted_v[device])
 
         output_values = module.get_outputs()
         pmap_output_names = []
         for device in devices:
-            for output_value in output_values:
-                pmap_output_names.append(f"{output_value.name}_{device}")
+            for i, output_value in enumerate(output_values):
+                pmap_output_name = f"{output_value.name}_{device}"
+                value_name_map[device][output_value.name] = pmap_output_name
+                pmap_output_names.append(pmap_output_name)
 
         partitioned_output_values = transformed_module.add_op(
             "Pmap",
             inputs=pmap_inputs,
             attributes={"devices": devices},
-            metadata={"value_map": value_map},
+            metadata={"value_name_map": value_name_map},
             submodules=[module],
             output_names=pmap_output_names,
         )
 
-        output_map = {}
-        num_output_values = len(output_values)
-        for device in devices:
-            output_map[device] = {}
-            for i, output_value in enumerate(output_values):
-                output_map[device][output_value.name] = partitioned_output_values[
-                    device * num_output_values + i
-                ]
-
-        for output_value in output_values:
-            allreduce_inputs = [
-                output_map[device][output_value.name] for device in devices
-            ]
+        for j, output_value in enumerate(output_values):
+            allreduce_inputs = []
+            for i, device in enumerate(devices):
+                allreduce_inputs.append(
+                    partitioned_output_values[i * len(output_values) + j]
+                )
             transformed_module.add_op(
                 "Allreduce",
                 inputs=allreduce_inputs,

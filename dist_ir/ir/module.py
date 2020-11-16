@@ -63,6 +63,7 @@ class Module:
         return self._inputs.values()
 
     def get_outputs(self):
+        """Returns the module outputs."""
         return self._outputs.values()
 
     def add_op(

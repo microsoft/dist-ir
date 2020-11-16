@@ -2,51 +2,29 @@ import pytest
 
 from dist_ir.ir import Module
 from dist_ir.transforms import DataParallelTransform
+from dist_ir.executor.shape_inference import infer_shapes
 from dist_ir.ir.type import Float, Tensor
 
 
-def test_single_matmul():
+def test_matmul():
     module = Module()
 
     a = module.add_input_value("a", Tensor(Float(), (4, 4)))
     b = module.add_input_value("b", Tensor(Float(), (4, 4)))
     x = module.add_op("MatMul", "MatMul", inputs=[a, b], output_names=["x"])
-    transform = DataParallelTransform(
-        partitioned_input_name="a", partition_dim=0, num_partitions=2
-    )
-    transformed_module = transform.apply(module)
+
     print("-" * 88)
     print("Original module")
     print("-" * 88)
     print(module)
     print()
-    print("-" * 88)
-    print("Transformed module")
-    print("-" * 88)
-    print(transformed_module)
 
+    infer_shapes(module)
 
-def test_double_matmul():
-    module = Module()
-
-    a = module.add_input_value("a", Tensor(Float(), (4, 4)))
-    b = module.add_input_value("b", Tensor(Float(), (4, 4)))
-    c = module.add_input_value("c", Tensor(Float(), (4, 4)))
-    x = module.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
-    y = module.add_op("MatMul", "MatMul1", inputs=[x, c], output_names=["y"])
-    transform = DataParallelTransform(
-        partitioned_input_name="a", partition_dim=0, num_partitions=2
-    )
-    transformed_module = transform.apply(module)
     print("-" * 88)
-    print("Original module")
+    print("Module after shape inference")
     print("-" * 88)
     print(module)
-    print()
-    print("-" * 88)
-    print("Transformed module")
-    print("-" * 88)
-    print(transformed_module)
 
 
 def test_backward_pass():
@@ -60,23 +38,26 @@ def test_backward_pass():
     y = module.add_op("MatMul", "MatMul1", inputs=[a, wB], output_names=["y"])
     l = module.add_op("Loss", "Loss", inputs=[y, z], output_names=["l"])
     dl = module.add_op("LossGrad", "LossGrad", inputs=[y, z], output_names=["dl"])
-    dwB, da = module.add_op(
-        "MatMulGrad", "MatMul1Grad", inputs=[a, wB, dl], output_names=["dwB", "da"]
+    da, dwB = module.add_op(
+        "MatMulGrad", "MatMul1Grad", inputs=[a, wB, dl], output_names=["da", "dWB"]
     )
-    dwA, dx = module.add_op(
-        "MatMulGrad", "MatMul0Grad", inputs=[x, wA, da], output_names=["dwA", "dx"]
+    dx, dwA = module.add_op(
+        "MatMulGrad", "MatMul0Grad", inputs=[x, wA, da], output_names=["dx", "dwA"]
     )
     transform = DataParallelTransform(
         partitioned_input_name="x", partition_dim=0, num_partitions=2
     )
     transformed_module = transform.apply(module)
+
     print("-" * 88)
     print("Original module")
     print("-" * 88)
-    print(module)
+    print(transformed_module)
     print()
+
+    infer_shapes(transformed_module)
     print("-" * 88)
-    print("Transformed module")
+    print("Module after shape inference")
     print("-" * 88)
     print(transformed_module)
 

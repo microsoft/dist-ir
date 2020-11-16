@@ -18,6 +18,14 @@ class Value:
     def type(self):
         return self._type
 
+    @type.setter
+    def type(self, typ):
+        self._type = typ
+
     @property
     def device(self):
         return self._device
+
+    @device.setter
+    def device(self, device):
+        self._device = device

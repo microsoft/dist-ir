@@ -1,4 +1,4 @@
-from .type import Tensor
+from .type import Primitive, Tensor
 from .value import Value
 
 import copy
@@ -19,7 +19,7 @@ class OpRegisterEntry:
         for i, (input, input_type) in enumerate(zip(inputs, self._input_types)):
             if not isinstance(input.type, input_type):
                 raise ValueError(
-                    f"Op {op.name}: Expected input of type {input_type} for input {i}, got input of type {type(input)}"
+                    f"Op {op.name}: Expected input of type {input_type} for input {i}, got input of type {input.type}"
                 )
 
         # Verify that the number of output names is correct if specified.
@@ -105,7 +105,8 @@ OpRegister = {
     "Gemm": OpRegisterEntry(
         input_types=[Tensor, Tensor, Tensor], output_types=[Tensor]
     ),
-    "Loss": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
+    "Loss": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Primitive]),
+    # Change output type to Primitive
     "LossGrad": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
     "MatMul": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
     "MatMulGrad": OpRegisterEntry(

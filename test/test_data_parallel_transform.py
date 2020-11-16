@@ -49,5 +49,33 @@ def test_double_matmul():
     print(transformed_module)
 
 
-if __name__ == "__main__":
-    test_double_matmul()
+def test_backward_pass():
+    module = Module()
+
+    x = module.add_input_value("x", Tensor(Float(), (16, 4)))
+    z = module.add_input_value("z", Tensor(Float(), (16)))
+    wA = module.add_input_value("wA", Tensor(Float(), (4, 4)))
+    wB = module.add_input_value("wB", Tensor(Float(), (4, 4)))
+    a = module.add_op("MatMul", "MatMul0", inputs=[x, wA], output_names=["a"])
+    y = module.add_op("MatMul", "MatMul1", inputs=[a, wB], output_names=["y"])
+    l = module.add_op("Loss", "Loss", inputs=[y, z], output_names=["l"])
+    dl = module.add_op("LossGrad", "LossGrad", inputs=[l, z], output_names=["dl"])
+    dwB, da = module.add_op(
+        "MatMulGrad", "MatMul1Grad", inputs=[a, wB, dl], output_names=["dwB", "da"]
+    )
+    dwA, dx = module.add_op(
+        "MatMulGrad", "MatMul0Grad", inputs=[x, wA, da], output_names=["dwA", "dx"]
+    )
+    transform = DataParallelTransform(
+        partitioned_input_name="x", partition_dim=0, num_partitions=2
+    )
+    transformed_module = transform.apply(module)
+    print("-" * 88)
+    print("Original module")
+    print("-" * 88)
+    print(module)
+    print()
+    print("-" * 88)
+    print("Transformed module")
+    print("-" * 88)
+    print(transformed_module)

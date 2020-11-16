@@ -105,7 +105,12 @@ OpRegister = {
     "Gemm": OpRegisterEntry(
         input_types=[Tensor, Tensor, Tensor], output_types=[Tensor]
     ),
+    "Loss": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
+    "LossGrad": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
     "MatMul": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
+    "MatMulGrad": OpRegisterEntry(
+        input_types=[Tensor, Tensor, Tensor], output_types=[Tensor, Tensor]
+    ),
     "ReduceSumTraining": OpRegisterEntry(
         input_types=[Tensor, Tensor], output_types=[Tensor]
     ),

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from collections import OrderedDict, defaultdict
 from typing import Any, Dict, List, Tuple, Union
 
@@ -72,7 +70,7 @@ class Module:
         name=None,
         inputs: List[Value] = None,
         attributes: Dict[str, Any] = None,
-        submodules: List[Module] = None,
+        submodules: List["Module"] = None,
         metadata: Dict[str, Any] = None,
         output_names: List[str] = None,
     ) -> Union[None, Value, Tuple[Value, ...]]:

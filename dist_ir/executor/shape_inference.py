@@ -135,6 +135,10 @@ def _infer_shapes(module, value_name_map=None, value_map=None, device=None):
     for op_name, op in module.get_ops().items():
         inputs = op.get_in_edges()
         outputs = op.get_out_edges()
+
+        # If within a Pmap context, the module inputs and output values might be mapped
+        # to partitioned values. We need to resolve these mappings to ensure we infer
+        # shapes for the correct values on each device.
         mapped_inputs = _map_values(inputs, value_name_map, value_map, device)
         mapped_outputs = _map_values(outputs, value_name_map, value_map, device)
 

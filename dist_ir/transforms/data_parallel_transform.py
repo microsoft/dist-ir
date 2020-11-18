@@ -27,7 +27,7 @@ class DataParallelTransform:
         transformed_module = Module()
 
         # Initialize a map for keeping track of which partitioned values on each device
-        # correspond to values in the submodule.
+        # correspond with the input and output values of the original module.
         value_name_map = {}
         devices = list(range(self._num_partitions))
         for device in devices:

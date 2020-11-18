@@ -48,7 +48,10 @@ def import_from_onnx(onnx_model):
         print()
         output_names = node.output
         op = dist_ir_module.add_op(
-            node.op_type, node.name, per_node_inputs, output_names
+            op_type=node.op_type,
+            name=node.name,
+            inputs=per_node_inputs,
+            output_names=output_names,
         )
         for output in node.output:
             # TODO lookup shape and dtype of input if exists

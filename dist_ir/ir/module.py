@@ -1,5 +1,5 @@
 from collections import OrderedDict, defaultdict
-from typing import List, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union
 
 from .op import Op
 from .value import Value
@@ -12,8 +12,24 @@ class Module:
         self._outputs = OrderedDict()
         self._op_counter = defaultdict(int)
 
+    def __str__(self):
+        output = ""
+        output += "Module inputs:\n"
+        for input_value in self._inputs.values():
+            output += "  " + str(input_value) + "\n"
+        output += "\n"
+        output += "Module outputs:\n"
+        for input_value in self._outputs.values():
+            output += "  " + str(input_value) + "\n"
+        output += "\n"
+        output += "Ops:\n"
+        for op in self._ops.values():
+            output += str(op) + "\n"
+        return output
+
+    # TODO: Convert to property
     def get_ops(self):
-        """Returns all ops in the graph."""
+        """Returns all ops in the module."""
         return self._ops
 
     def is_op(self, name):
@@ -40,18 +56,34 @@ class Module:
             return None
         return self._inputs[name]
 
+    def get_inputs(self):
+        """Returns the module inputs."""
+        return self._inputs.values()
+
+    def get_outputs(self):
+        """Returns the module outputs."""
+        return self._outputs.values()
+
     def add_op(
         self,
         op_type,
         name=None,
         inputs: List[Value] = None,
+        attributes: Dict[str, Any] = None,
+        submodules: List["Module"] = None,
+        metadata: Dict[str, Any] = None,
         output_names: List[str] = None,
     ) -> Union[None, Value, Tuple[Value, ...]]:
         """Adds an op to the graph.
 
         Args:
           op_type: The op's type.
-          inputs: The inputs for this op (Values).
+          name: The op's name.
+          inputs: The input values for this op.
+          attributes: Any op-specific attributes.
+          submodules: Any submodules this op is wrapping.
+          metadata: Any op-specific metadata.
+          output_names: An optinal list of output value names.
 
         Returns:
           The outputs of the newly created op.
@@ -59,14 +91,26 @@ class Module:
         if name in self._ops:
             raise ValueError(f"op with name {name} already exists!")
         elif name is None or name == "":
-            name = f"{op_type}/_{self._op_counter[op_type]}"
-        op = Op(name, op_type, in_edges=inputs, output_names=output_names)
+            name = f"{op_type}_#{self._op_counter[op_type]}"
+        op = Op(
+            name,
+            op_type,
+            in_edges=inputs,
+            attributes=attributes,
+            submodules=submodules,
+            metadata=metadata,
+            output_names=output_names,
+        )
         self._ops[name] = op
         self._op_counter[op_type] += 1
 
         # Update the module outputs.
         out_edges = op.get_out_edges()
         for out_edge in out_edges:
+            if out_edge.name in self._outputs:
+                raise ValueError(
+                    f"Module already has output value with name {out_edge.name}"
+                )
             self._outputs[out_edge.name] = out_edge
         for in_edge in inputs:
             if in_edge.name in self._outputs:
@@ -81,9 +125,9 @@ class Module:
         else:
             return tuple(out_edges)
 
-    def add_input_value(self, name, typ):
+    def add_input_value(self, name, value_type):
         """Adds an input value to the graph and returns the value."""
-        value = Value(name=name, type=typ)
+        value = Value(name=name, value_type=value_type)
         if value.name in self._inputs:
             raise ValueError(f"Module already has input value with name {value.name}")
         self._inputs[value.name] = value
@@ -133,15 +177,15 @@ class Module:
 
     def verify_ops_in_topological_order(self):
         seen = set()
-        for input in self._inputs:
-            seen.add(input)
+        for input_name in self._inputs:
+            seen.add(input_name)
 
-        for name, op in self._ops.items():
+        for op_name, op in self._ops.items():
             for in_edge in op.get_in_edges():
                 if in_edge.name not in seen:
                     raise ValueError(
-                        f"Ops are not in topological order: op {name} has unseen edge {in_edge}"
+                        f"Ops are not in topological order: op {op_name} has "
+                        f"unseen edge {in_edge}"
                     )
-            seen.add(name)
             for out_edge in op.get_out_edges():
                 seen.add(out_edge.name)

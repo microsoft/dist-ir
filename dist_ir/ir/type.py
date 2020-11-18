@@ -11,8 +11,15 @@ class Type(ABC):
 # TODO might want to have f32, i32 etc instead?
 
 
+class Primitive(Type):
+    """A class to encapsulate primitive data types."""
+
+    def __repr__(self):
+        return "Primitive"
+
+
 @singleton
-class Int(Type):
+class Int(Primitive):
     """The integer type. A singleton class."""
 
     def __repr__(self):
@@ -20,7 +27,7 @@ class Int(Type):
 
 
 @singleton
-class Float(Type):
+class Float(Primitive):
     """The float type. A singleton class."""
 
     def __repr__(self):
@@ -46,6 +53,14 @@ class Tensor(Type):
     def shape(self):
         return self._shape
 
+    @shape.setter
+    def shape(self, shape):
+        self._shape = shape
+
     @property
     def dtype(self):
         return self._dtype
+
+    @dtype.setter
+    def dtype(self, dtype):
+        self._dtype = dtype

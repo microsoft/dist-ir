@@ -106,6 +106,7 @@ ShapeInferenceRegister = {
 
 
 def _map_values(values, value_name_map, value_map, device):
+    """Tries to resolve the given values according to the specified maps."""
     if value_name_map is None:
         return values
     mapped_values = []
@@ -119,6 +120,18 @@ def _map_values(values, value_name_map, value_map, device):
 
 
 def _infer_shapes(module, value_name_map=None, value_map=None, device=None):
+    """Helper function for inferring shapes.
+
+    Inputs:
+      module: The module to infer shapes for.
+      value_name_map: A map from value name to another map between device
+                      and mapped value name. This is used to resolve values
+                      in a Pmap submodule for data parallelism.
+      value_map: A map from value name to value.
+      device: The device the module is executing on. This is relevant for data
+              parallel execution where each replica is given to a particular device.
+    """
+
     for op_name, op in module.get_ops().items():
         inputs = op.get_in_edges()
         outputs = op.get_out_edges()
@@ -129,4 +142,5 @@ def _infer_shapes(module, value_name_map=None, value_map=None, device=None):
 
 
 def infer_shapes(module):
+    """Infers shapes for the given module."""
     _infer_shapes(module)

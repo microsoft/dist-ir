@@ -179,15 +179,15 @@ class Module:
 
     def verify_ops_in_topological_order(self):
         seen = set()
-        for input in self._inputs:
-            seen.add(input)
+        for input_name in self._inputs:
+            seen.add(input_name)
 
-        for name, op in self._ops.items():
+        for op_name, op in self._ops.items():
             for in_edge in op.get_in_edges():
                 if in_edge.name not in seen:
                     raise ValueError(
-                        f"Ops are not in topological order: op {name} has unseen edge {in_edge}"
+                        f"Ops are not in topological order: op {op_name} has "
+                        f"unseen edge {in_edge}"
                     )
-            seen.add(name)
             for out_edge in op.get_out_edges():
                 seen.add(out_edge.name)

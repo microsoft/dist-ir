@@ -5,56 +5,66 @@ from ..ir.value import Value
 import copy
 
 
-def _error_invalid_shapes(input_shapes):
+def _get_shapes(values):
+    shapes = []
+    for value in values:
+        if isinstance(value.type, Tensor):
+            shapes.append(value.type.shape)
+        else:
+            shapes.append(None)
+    return shapes
+
+
+def _error_invalid_shapes(op, input_shapes):
     raise ValueError(
         f"Op {op.name} (op.type): Incompatible input shapes {input_shapes}"
     )
 
 
-def _infer_shapes_for_add(op, inputs, input_shapes, outputs):
+def _infer_shapes_for_add(op, inputs, outputs):
     # TODO: Handle input tensors with > 2 dimensions
+    input_shapes = _get_shapes(inputs)
     if input_shapes[0] != input_shapes[1]:
-        _error_invalid_shapes()
+        _error_invalid_shapes(op, input_shapes)
 
     output_shape = (input_shapes[0][0], input_shapes[0][1])
     output_type = Tensor(dtype=inputs[0].type.dtype, shape=output_shape)
     outputs[0].type = output_type
 
 
-def _infer_shapes_for_allreduce(op, inputs, input_shapes, outputs):
-    pass
+def _infer_shapes_for_allreduce(op, inputs, outputs):
+    outputs[0].type = copy.deepcopy(inputs[0].type)
 
 
-def _infer_shapes_for_broadcast(op, inputs, input_shapes, outputs):
-
+def _infer_shapes_for_broadcast(op, inputs, outputs):
     for output in outputs:
-        output.type.shape = copy.deepcopy(inputs[0].type.shape)
+        output.type = copy.deepcopy(inputs[0].type)
 
 
-def _infer_shapes_for_matmul(op, inputs, input_shapes, outputs):
+def _infer_shapes_for_matmul(op, inputs, outputs):
     # TODO: Handle input tensors with > 2 dimensions
+    input_shapes = _get_shapes(inputs)
     if input_shapes[0][1] != input_shapes[1][0]:
-        _error_invalid_shapes()
+        _error_invalid_shapes(op, input_shapes)
 
     output_shape = (input_shapes[0][0], input_shapes[1][1])
-    output_type = Tensor(dtype=inputs[0].type.dtype, shape=output_shape)
-    outputs[0].type = output_type
+    outputs[0].type = Tensor(dtype=inputs[0].type.dtype, shape=output_shape)
 
 
-def _infer_shapes_for_matmul_grad(op, inputs, input_shapes, outputs):
+def _infer_shapes_for_matmul_grad(op, inputs, outputs):
     for i, output in enumerate(outputs):
-        output.type.shape = copy.deepcopy(input_shapes[i])
+        output.type = copy.deepcopy(inputs[i].type)
 
 
-def _infer_shapes_for_loss(op, inputs, input_shapes, outputs):
-    pass
+def _infer_shapes_for_loss(op, inputs, outputs):
+    outputs[0].type = Tensor(Float(), (1,))
 
 
-def _infer_shapes_for_loss_grad(op, inputs, input_shapes, outputs):
-    outputs[0].shape = Tensor(Float(), (1,))
+def _infer_shapes_for_loss_grad(op, inputs, outputs):
+    outputs[0].type = Tensor(Float(), (1,))
 
 
-def _infer_shapes_for_pmap(op, inputs, input_shapes, outputs):
+def _infer_shapes_for_pmap(op, inputs, outputs):
     value_name_map = op.get_metadata("value_name_map")
     value_map = {}
     for input in inputs:
@@ -63,21 +73,19 @@ def _infer_shapes_for_pmap(op, inputs, input_shapes, outputs):
         value_map[output.name] = output
     submodule = op.get_submodule(0)
     for device in value_name_map:
-        infer_shapes(submodule, value_name_map, value_map, device)
-        for output in submodule.get_outputs():
-            mapped_output_name = value_name_map[device][output.name]
-            if isinstance(output.type, Tensor):
-                value_map[mapped_output_name].type.dtype = output.type.dtype
-                value_map[mapped_output_name].type.shape = output.type.shape
+        per_device_submodule = copy.deepcopy(submodule)
+        _infer_shapes(per_device_submodule, value_name_map, value_map, device)
 
 
-def _infer_shapes_for_scatter(op, inputs, input_shapes, outputs):
+def _infer_shapes_for_scatter(op, inputs, outputs):
+    input_shapes = _get_shapes(inputs)
     split_dim = op.get_attribute("split_dim")
     num_splits = op.get_attribute("num_splits")
 
+    assert type(input_shapes[0]) == tuple
     output_shape = list(input_shapes[0])
     if output_shape[split_dim] % num_splits != 0:
-        _error_invalid_shapes()
+        _error_invalid_shapes(op, input_shapes)
     output_shape[split_dim] //= num_splits
 
     for output in outputs:
@@ -97,18 +105,28 @@ ShapeInferenceRegister = {
 }
 
 
-def infer_shapes(module, value_name_map=None, value_map=None, device=None):
+def _map_values(values, value_name_map, value_map, device):
+    if value_name_map is None:
+        return values
+    mapped_values = []
+    for value in values:
+        if value.name in value_name_map[device]:
+            mapped_value_name = value_name_map[device][value.name]
+            mapped_values.append(value_map[mapped_value_name])
+        else:
+            mapped_values.append(value)
+    return mapped_values
+
+
+def _infer_shapes(module, value_name_map=None, value_map=None, device=None):
     for op_name, op in module.get_ops().items():
         inputs = op.get_in_edges()
         outputs = op.get_out_edges()
-        input_shapes = []
-        for input in inputs:
-            if value_name_map is not None and input.name in value_name_map[device]:
-                input_name = value_name_map[device][input.name]
-                input = value_map[input_name]
-            if isinstance(input.type, Tensor):
-                input_shapes.append(input.type.shape)
-            else:
-                input_shapes.append(None)
+        mapped_inputs = _map_values(inputs, value_name_map, value_map, device)
+        mapped_outputs = _map_values(outputs, value_name_map, value_map, device)
 
-        ShapeInferenceRegister[op.op_type](op, inputs, input_shapes, outputs)
+        ShapeInferenceRegister[op.op_type](op, mapped_inputs, mapped_outputs)
+
+
+def infer_shapes(module):
+    _infer_shapes(module)

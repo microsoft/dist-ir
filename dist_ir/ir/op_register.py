@@ -125,7 +125,7 @@ OpRegister = {
     "Gemm": OpRegisterEntry(
         input_types=[Tensor, Tensor, Tensor], output_types=[Tensor]
     ),
-    "Loss": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Primitive]),
+    "Loss": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
     # Change output type to Primitive
     "LossGrad": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
     "MatMul": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
@@ -138,6 +138,7 @@ OpRegister = {
     "Relu": OpRegisterEntry(input_types=[Tensor], output_types=[Tensor]),
     "ReluGrad": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
     "Reshape": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
+    "Opt": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
     "Pmap": PmapOpRegisterEntry(input_types=None, output_types=None),
     "Scatter": BroadcastScatterOpRegisterEntry(input_types=[Tensor], output_types=None),
     "SGDOptimizer": OpRegisterEntry(

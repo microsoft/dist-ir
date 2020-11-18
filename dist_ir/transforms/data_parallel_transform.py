@@ -2,9 +2,8 @@ from ..ir.module import Module
 
 
 class DataParallelTransform:
-    def __init__(self, partitioned_input_name, partition_dim, num_partitions):
-        self._partitioned_input_name = partitioned_input_name
-        self._partition_dim = partition_dim
+    def __init__(self, partition_map, num_partitions):
+        self._partition_map = partition_map
         self._num_partitions = num_partitions
 
     def apply(self, module):
@@ -18,7 +17,7 @@ class DataParallelTransform:
 
         input_values = module.get_inputs()
         for input_value in input_values:
-            if input_value.name == self._partitioned_input_name:
+            if input_value.name in self._partition_map:
                 v = transformed_module.add_input_value(
                     input_value.name, input_value.type
                 )
@@ -29,7 +28,7 @@ class DataParallelTransform:
                     attributes={
                         "devices": list(range(self._num_partitions)),
                         "num_splits": self._num_partitions,
-                        "split_dim": self._partition_dim,
+                        "split_dim": self._partition_map[input_value.name],
                     },
                     output_names=[f"{v.name}_{i}" for i in range(self._num_partitions)],
                 )
@@ -78,6 +77,7 @@ class DataParallelTransform:
                 )
             transformed_module.add_op(
                 "Allreduce",
+                name=f"Allreduce/{output_value.name}",
                 inputs=allreduce_inputs,
                 output_names=[output_value.name],
             )

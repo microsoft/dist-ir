@@ -6,9 +6,11 @@ used in large-scale distributed training, while at the same time enabling fast
 cost models.
 
 Distributed strategies we want to support:
-- D
-- H
-- P
+- Data parallelism
+- Horizontal parallelism
+- Pipeline parallelism
+- Megatron
+- ZeRO partitioning
 - Stashing & recomputation
 - Overlapping computation and communication
 

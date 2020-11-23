@@ -1,4 +1,6 @@
 from abc import ABC
+from functools import reduce
+from operator import mul
 from typing import Tuple, Optional
 
 from .utils import singleton
@@ -11,27 +13,28 @@ class Type(ABC):
 # TODO might want to have f32, i32 etc instead?
 
 
-class Primitive(Type):
-    """A class to encapsulate primitive data types."""
-
-    def __repr__(self):
-        return "Primitive"
-
-
 @singleton
-class Int(Primitive):
+class Int(Type):
     """The integer type. A singleton class."""
 
     def __repr__(self):
         return "Int"
 
+    @property
+    def size(self):
+        return 4
+
 
 @singleton
-class Float(Primitive):
+class Float(Type):
     """The float type. A singleton class."""
 
     def __repr__(self):
         return "Float"
+
+    @property
+    def size(self):
+        return 4
 
 
 class Tensor(Type):
@@ -41,9 +44,6 @@ class Tensor(Type):
 
     def __init__(self, dtype: Type = None, shape: Optional[Tuple[int]] = None):
         self._shape = shape
-        assert dtype is None or (
-            isinstance(dtype, Type) and not isinstance(dtype, Tensor)
-        )
         self._dtype = dtype
 
     def __repr__(self):
@@ -64,3 +64,6 @@ class Tensor(Type):
     @dtype.setter
     def dtype(self, dtype):
         self._dtype = dtype
+
+    def size(self):
+        return reduce(mul, self._shape)

@@ -11,6 +11,7 @@ class Module:
         self._inputs = OrderedDict()
         self._outputs = OrderedDict()
         self._op_counter = defaultdict(int)
+        self._consumers = defaultdict(int)
 
     def __str__(self):
         output = ""
@@ -68,6 +69,7 @@ class Module:
         self,
         op_type,
         name=None,
+        device=None,
         inputs: List[Value] = None,
         attributes: Dict[str, Any] = None,
         submodules: List["Module"] = None,
@@ -79,6 +81,7 @@ class Module:
         Args:
           op_type: The op's type.
           name: The op's name.
+          device: The device to place the op on.
           inputs: The input values for this op.
           attributes: Any op-specific attributes.
           submodules: Any submodules this op is wrapping.
@@ -95,6 +98,7 @@ class Module:
         op = Op(
             name,
             op_type,
+            device=device,
             in_edges=inputs,
             attributes=attributes,
             submodules=submodules,
@@ -112,8 +116,10 @@ class Module:
                     f"Module already has output value with name {out_edge.name}"
                 )
             self._outputs[out_edge.name] = out_edge
+            self._consumers[out_edge.name] = 0
         for in_edge in inputs:
             if in_edge.name in self._outputs:
+                self._consumers[in_edge.name] += 1
                 del self._outputs[in_edge.name]
 
         # Return the op outputs.
@@ -125,13 +131,16 @@ class Module:
         else:
             return tuple(out_edges)
 
-    def add_input_value(self, name, value_type):
+    def add_input_value(self, name, value_type, device=None):
         """Adds an input value to the graph and returns the value."""
-        value = Value(name=name, value_type=value_type)
+        value = Value(name=name, value_type=value_type, device=device)
         if value.name in self._inputs:
             raise ValueError(f"Module already has input value with name {value.name}")
         self._inputs[value.name] = value
         return value
+
+    def get_consumers_for_out_edge(self, name):
+        return self._consumers[name]
 
     def find_output_values(self):
         """Marks all sink nodes in the graph as output values."""

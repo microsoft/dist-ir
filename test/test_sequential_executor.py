@@ -44,7 +44,7 @@ def backend(request):
 
 def test_single_add(backend):
     h = Helper(backend)
-    h._module.add_op("Add", "Add_0", [h._t1, h._t2])
+    h._module.add_op("Add", "Add_0", inputs=[h._t1, h._t2])
     output_data = h._executor.compute(h._module, h._input_data)
     result = output_data["Add_0/0"]
     if h._backend == "numpy":
@@ -55,8 +55,8 @@ def test_single_add(backend):
 
 def test_double_add(backend):
     h = Helper(backend)
-    x = h._module.add_op("Add", "Add_0", [h._t1, h._t2])
-    h._module.add_op("Add", "Add_1", (h._t3, x))
+    x = h._module.add_op("Add", "Add_0", inputs=[h._t1, h._t2])
+    h._module.add_op("Add", "Add_1", inputs=[h._t3, x])
     output_data = h._executor.compute(h._module, h._input_data)
     result = output_data["Add_1/0"]
     if h._backend == "numpy":
@@ -75,8 +75,8 @@ def test_double_add(backend):
 
 def test_double_add_inverted(backend):
     h = Helper(backend)
-    x = h._module.add_op("Add", "Add_0", [h._t1, h._t2])
-    h._module.add_op("Add", "Add_1", [x, h._t3])
+    x = h._module.add_op("Add", "Add_0", inputs=[h._t1, h._t2])
+    h._module.add_op("Add", "Add_1", inputs=[x, h._t3])
     output_data = h._executor.compute(h._module, h._input_data)
     result = output_data["Add_1/0"]
     if h._backend == "numpy":
@@ -95,7 +95,7 @@ def test_double_add_inverted(backend):
 
 def test_single_matmul(backend):
     h = Helper(backend)
-    h._module.add_op("MatMul", "MatMul_0", [h._t1, h._t2])
+    h._module.add_op("MatMul", "MatMul_0", inputs=[h._t1, h._t2])
     output_data = h._executor.compute(h._module, h._input_data)
     result = output_data["MatMul_0/0"]
     if h._backend == "numpy":
@@ -106,8 +106,8 @@ def test_single_matmul(backend):
 
 def test_double_matmul(backend):
     h = Helper(backend)
-    x = h._module.add_op("MatMul", "MatMul_0", [h._t1, h._t2])
-    h._module.add_op("MatMul", "MatMul_1", [h._t3, x])
+    x = h._module.add_op("MatMul", "MatMul_0", inputs=[h._t1, h._t2])
+    h._module.add_op("MatMul", "MatMul_1", inputs=[h._t3, x])
     output_data = h._executor.compute(h._module, h._input_data)
     result = output_data["MatMul_1/0"]
     if h._backend == "numpy":
@@ -128,8 +128,8 @@ def test_double_matmul(backend):
 
 def test_double_matmul_inverted(backend):
     h = Helper(backend)
-    x = h._module.add_op("MatMul", "MatMul_0", [h._t1, h._t2])
-    h._module.add_op("MatMul", "MatMul_1", [x, h._t3])
+    x = h._module.add_op("MatMul", "MatMul_0", inputs=[h._t1, h._t2])
+    h._module.add_op("MatMul", "MatMul_1", inputs=[x, h._t3])
     output_data = h._executor.compute(h._module, h._input_data)
     result = output_data["MatMul_1/0"]
     if h._backend == "numpy":

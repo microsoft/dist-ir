@@ -1,4 +1,4 @@
-from .type import Primitive, Tensor
+from .type import Tensor
 from .value import Value
 
 import copy
@@ -29,38 +29,14 @@ class OpRegisterEntry:
             )
 
         # Construct the output values and add them to the op's out edge list.
-        devices = set([input.device for input in inputs])
-        if len(devices) > 1:
-            raise ValueError(
-                f"Op {op.name}: Received inputs from multiple devices ({devices})"
-            )
-        device = list(devices)[0]
-        dtypes = set(
-            [input.type.dtype for input in inputs if isinstance(input.type, Tensor)]
-        )
-        if len(dtypes) > 1:
-            raise ValueError(
-                f"Op {op.name}: Received inputs with multiple dtypes ({dtypes})"
-            )
-        elif len(dtypes) == 1:
-            dtype = list(dtypes)[0]
-        else:
-            dtype = None
         for i, output_type in enumerate(self._output_types):
             if output_names is not None and output_names[i] != "":
                 output_name = output_names[i]
             else:
                 output_name = f"{op.name}/{i}"
-            if output_type == Tensor:
-                op.add_out_edge(
-                    Value(
-                        output_name, value_type=output_type(dtype=dtype), device=device
-                    )
-                )
-            else:
-                op.add_out_edge(
-                    Value(output_name, value_type=output_type(), device=device)
-                )
+            op.add_out_edge(
+                Value(output_name, value_type=output_type(), device=op.device)
+            )
 
 
 class AllreduceOpRegisterEntry(OpRegisterEntry):
@@ -90,7 +66,7 @@ class BroadcastScatterOpRegisterEntry(OpRegisterEntry):
                 split_dim = op.get_attribute("split_dim")
                 if isinstance(output_type, Tensor):
                     output_type.shape = None
-            output_value = Value(output_name, value_type=output_type, device=devices[i])
+            output_value = Value(output_name, value_type=output_type, device=device)
             op.add_out_edge(output_value)
 
 
@@ -126,7 +102,6 @@ OpRegister = {
         input_types=[Tensor, Tensor, Tensor], output_types=[Tensor]
     ),
     "Loss": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
-    # Change output type to Primitive
     "LossGrad": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
     "MatMul": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
     "MatMulGrad": OpRegisterEntry(

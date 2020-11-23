@@ -1,5 +1,5 @@
 class Value:
-    def __init__(self, name, value_type, device=0):
+    def __init__(self, name, value_type, device=None):
         self._name = name
         self._type = value_type
         self._device = device

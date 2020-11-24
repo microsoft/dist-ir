@@ -45,7 +45,7 @@ class AllreduceOpRegisterEntry(OpRegisterEntry):
             output_name = output_names[0]
         else:
             output_name = f"{op.name}/{0}"
-        op.add_out_edge(Value(name=output_name, value_type=None))
+        op.add_out_edge(Value(name=output_name, value_type=None, device=op.device))
 
 
 class BroadcastScatterOpRegisterEntry(OpRegisterEntry):
@@ -54,7 +54,8 @@ class BroadcastScatterOpRegisterEntry(OpRegisterEntry):
         devices = op.get_attribute("devices")
         if output_names is not None and len(output_names) != len(devices):
             raise ValueError(
-                f"Op {op.name}: Expected {len(devices)} output names but got {len(output_names)}"
+                f"Op {op.name}: Expected {len(devices)} output names but got "
+                f"{len(output_names)}"
             )
         for i, device in enumerate(devices):
             if output_names is not None:

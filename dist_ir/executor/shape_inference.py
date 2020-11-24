@@ -1,6 +1,7 @@
 from ..ir.type import Float
 from ..ir.type import Tensor
 from ..ir.value import Value
+from . import utils
 
 import copy
 
@@ -80,7 +81,7 @@ def _infer_shapes_for_pmap(op, inputs, outputs):
 def _infer_shapes_for_scatter(op, inputs, outputs):
     input_shapes = _get_shapes(inputs)
     split_dim = op.get_attribute("split_dim")
-    num_splits = op.get_attribute("num_splits")
+    num_splits = len(op.get_attribute("devices"))
 
     assert type(input_shapes[0]) == tuple
     output_shape = list(input_shapes[0])
@@ -105,20 +106,6 @@ ShapeInferenceRegister = {
 }
 
 
-def _map_values(values, value_name_map, value_map, device):
-    """Tries to resolve the given values according to the specified maps."""
-    if value_name_map is None:
-        return values
-    mapped_values = []
-    for value in values:
-        if value.name in value_name_map[device]:
-            mapped_value_name = value_name_map[device][value.name]
-            mapped_values.append(value_map[mapped_value_name])
-        else:
-            mapped_values.append(value)
-    return mapped_values
-
-
 def _infer_shapes(module, value_name_map=None, value_map=None, device=None):
     """Helper function for inferring shapes.
 
@@ -139,8 +126,8 @@ def _infer_shapes(module, value_name_map=None, value_map=None, device=None):
         # If within a Pmap context, the module inputs and output values might be mapped
         # to partitioned values. We need to resolve these mappings to ensure we infer
         # shapes for the correct values on each device.
-        mapped_inputs = _map_values(inputs, value_name_map, value_map, device)
-        mapped_outputs = _map_values(outputs, value_name_map, value_map, device)
+        mapped_inputs = utils.map_values(inputs, value_name_map, value_map, device)
+        mapped_outputs = utils.map_values(outputs, value_name_map, value_map, device)
 
         ShapeInferenceRegister[op.op_type](op, mapped_inputs, mapped_outputs)
 

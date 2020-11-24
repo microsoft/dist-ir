@@ -61,7 +61,9 @@ class DataParallelTransform:
                     pmap_inputs.append(scattered_v[i])
             else:
                 v = transformed_module.add_input_value(
-                    input_value.name, input_value.type
+                    input_value.name,
+                    input_value.type,
+                    input_value.device,
                 )
                 broadcasted_v = transformed_module.add_op(
                     "Broadcast",

@@ -8,6 +8,13 @@ Module = {
     outputs: List[Value]
 }
 
+Device = {
+    device_id: Int
+        # Unique device ID
+    device_type: String
+        # Device type (e.g. "gpu")
+}
+
 Op = {
     name: String
         # Do we need this to be unique in a module? Across all modules?
@@ -19,6 +26,8 @@ Op = {
         # To support ops that have more than one output
     attributes: Dict[String, Any]
         # Constant data for ops, e.g. stride of convolution or devices to scatter
+    device: Device
+        # The device the op is assigned to (can be None if op has not been assigned)
     submodules: List[Module]
 }
 
@@ -40,6 +49,14 @@ Value = {
 Type =
     | Tensor{shape: Optional[Shape], dtype: Type}
     | Float | Int | ...
+
+Topology = {
+    devices: List[Device]
+        # The list of all devices in the topology.
+    bandwidths: Dict[Device, Dict[Device, Float]]
+        # The bandwidth between each device.
+}
+
 ```
 
 Notes:

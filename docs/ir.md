@@ -390,10 +390,10 @@ two layer FF or attention layers?
 
 ## TODO
 - ~~Add `Tuple` type and make sure `Scatter`, `Broadcast`, `Allreduce`, etc. use this~~
-- Add variable device
+- ~~Add variable device~~
 - ~~Move device from `Value` to `Type`~~
-- Make `Pmap` operate over `Tuple` types and variable devices
-- Remove deep copies of submodule from `Pmap` code in `ShapeInference` and `DistributedSimulator`
+- ~~Make `Pmap` operate over `Tuple` types and variable devices~~
+- ~~Remove deep copies of submodule from `Pmap` code in `ShapeInference`~~ and `DistributedSimulator`
 - Explicitly move all input tensors for a given op to the same device when applicable
 - ~~Remove device from op~~
 - Fix tests to account for fixed `Pmap` implementation

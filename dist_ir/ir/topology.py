@@ -19,6 +19,7 @@ class Topology:
         return device
 
     def set_bandwidth(self, device_a: Device, device_b: Device, bandwidth: float):
+        """Sets the bandwidth between two devices in Gbps."""
         # TODO: Support different bandwidths in each direction?
         self._bandwidths[device_a][device_b] = bandwidth
         self._bandwidths[device_b][device_a] = bandwidth

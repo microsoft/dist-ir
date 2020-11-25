@@ -108,3 +108,7 @@ def test_mnist():
     assert transformed_module.is_op("Allreduce/dx")
     assert transformed_module.is_op("Allreduce/dwA")
     assert transformed_module.is_op("Allreduce/dwB")
+
+
+if __name__ == "__main__":
+    test_mnist()

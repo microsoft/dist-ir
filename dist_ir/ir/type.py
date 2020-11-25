@@ -1,6 +1,6 @@
 from abc import ABC
 from functools import reduce
-from operator import mul
+from operator import add, mul
 from typing import Generic, Optional, Tuple, TypeVar
 
 from .device import Device
@@ -20,6 +20,9 @@ class Type:
     @device.setter
     def device(self, device):
         self._device = device
+
+    def get_all_devices(self):
+        return set(self._device.bound_devices)
 
 
 # TODO might want to have f32, i32 etc instead?
@@ -75,6 +78,13 @@ class Tensor(Type):
             f"(Tensor(shape={self._shape}, dtype={self._dtype}, device={self._device})"
         )
 
+    def __eq__(self, other):
+        return (
+            self._dtype == other._dtype
+            and self._shape == other._shape
+            and self._device == other._device
+        )
+
     @property
     def shape(self):
         return self._shape
@@ -92,7 +102,7 @@ class Tensor(Type):
         self._dtype = dtype
 
     def size(self):
-        return reduce(mul, self._shape)
+        return reduce(mul, self._shape) * self._dtype.size
 
 
 class ValueTuple(Type, Generic[T]):
@@ -113,3 +123,12 @@ class ValueTuple(Type, Generic[T]):
     @property
     def types(self):
         return self._types
+
+    def get_all_devices(self):
+        devices = set()
+        for typ in self._types:
+            devices.update(typ.get_all_devices())
+        return devices
+
+    def size(self):
+        return reduce(add, [typ.size() for typ in self._types])

@@ -2,7 +2,6 @@ from ..ir.type import Float
 from ..ir.type import Tensor, ValueTuple
 from ..ir.value import Value
 from ..ir.device import Device
-from . import utils
 
 import copy
 
@@ -77,13 +76,10 @@ def _infer_shapes_for_loss_grad(op, inputs, outputs):
 def _infer_shapes_for_pmap(op, inputs, outputs):
     submodule = op.get_submodule(0)
 
-    d = Device.get_new_device_variable()
-
     for (pmap_input, submodule_input) in zip(inputs, submodule.get_inputs()):
         if isinstance(submodule_input.type, Tensor):
             assert isinstance(pmap_input.type, ValueTuple)
             submodule_input.type.shape = pmap_input.type.types[0].shape
-        submodule_input.type.device = d
 
     _infer_shapes(submodule)
 

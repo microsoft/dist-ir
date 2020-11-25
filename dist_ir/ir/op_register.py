@@ -1,3 +1,4 @@
+from .device import Device
 from .type import Tensor, ValueTuple
 from .value import Value
 
@@ -85,7 +86,17 @@ class PmapOpRegisterEntry(OpRegisterEntry):
     def infer_types(self, op, output_names=None):
         devices = op.get_attribute("devices")
         submodule = op.get_submodule(0)
+        submodule_inputs = submodule.get_inputs()
         submodule_outputs = submodule.get_outputs()
+        # TODO: If we want a more robust solution for nested pmaps, move the
+        # parameterization over device variable to the module code
+        d = Device.get_new_device_variable(devices)
+        for in_edge in submodule_inputs:
+            in_edge.type.device = d
+
+        # TODO: Change the submodule input type names to indicate they are
+        # parameterized over the devices
+
         for i, out_edge in enumerate(submodule_outputs):
             output_types = []
             for device in devices:

@@ -9,6 +9,12 @@ class Value:
     def __repr__(self):
         return str(self)
 
+    def __hash__(self):
+        return hash(repr(self))
+
+    def __eq__(self, other):
+        return self._name == other._name and self._type == other._type
+
     @property
     def name(self):
         return self._name

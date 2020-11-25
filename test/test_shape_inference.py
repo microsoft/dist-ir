@@ -135,7 +135,9 @@ def test_pmap():
     )
 
     submodule = Module()
-    x = submodule.add_input_value("x", Tensor(Float(), (16, 4)))
+    # TODO: Add a check in shape inference to not overwrite if there is already a shape
+    # If there is an existing shape, validate that it is what we expect, otherwise throw error
+    x = submodule.add_input_value("x", Tensor(Float(), (8, 4)))
     wA = submodule.add_input_value("wA", Tensor(Float(), (4, 2)))
     wB = submodule.add_input_value("wB", Tensor(Float(), (2, 1)))
     y = submodule.add_op("MatMul", "MatMul0", inputs=[x, wA], output_names=["y"])
@@ -182,3 +184,7 @@ def test_scatter():
     assert xs.type.types[0].device == d0
     assert xs.type.types[1].shape == (2, 4)
     assert xs.type.types[1].device == d1
+
+
+if __name__ == "__main__":
+    test_pmap()

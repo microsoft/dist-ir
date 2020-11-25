@@ -98,7 +98,6 @@ class Module:
         op = Op(
             name,
             op_type,
-            device=device,
             in_edges=inputs,
             attributes=attributes,
             submodules=submodules,
@@ -131,9 +130,9 @@ class Module:
         else:
             return tuple(out_edges)
 
-    def add_input_value(self, name, value_type, device=None):
+    def add_input_value(self, name, value_type):
         """Adds an input value to the graph and returns the value."""
-        value = Value(name=name, value_type=value_type, device=device)
+        value = Value(name=name, value_type=value_type)
         if value.name in self._inputs:
             raise ValueError(f"Module already has input value with name {value.name}")
         self._inputs[value.name] = value

@@ -1,4 +1,4 @@
-from .type import Tensor
+from .type import Tensor, ValueTuple
 from .value import Value
 
 import copy
@@ -14,18 +14,21 @@ class OpRegisterEntry:
         inputs = op.get_in_edges()
         if len(inputs) != len(self._input_types):
             raise ValueError(
-                f"Op {op.name}: Expected {len(self._input_types)} inputs, got {len(inputs)}"
+                f"Op {op.name}: Expected {len(self._input_types)} inputs, "
+                f"got {len(inputs)}"
             )
         for i, (input, input_type) in enumerate(zip(inputs, self._input_types)):
             if not isinstance(input.type, input_type):
                 raise ValueError(
-                    f"Op {op.name}: Expected input of type {input_type} for input {i}, got input of type {input.type}"
+                    f"Op {op.name}: Expected input of type {input_type} for "
+                    f"input {i}, got input of type {input.type}"
                 )
 
         # Verify that the number of output names is correct if specified.
         if output_names is not None and len(output_names) != len(self._output_types):
             raise ValueError(
-                f"Op {op.name}: Expected {len(output_names)} outputs, got {len(self._output_types)}"
+                f"Op {op.name}: Expected {len(output_names)} outputs, "
+                f"got {len(self._output_types)}"
             )
 
         # Construct the output values and add them to the op's out edge list.
@@ -40,35 +43,44 @@ class OpRegisterEntry:
 
 
 class AllreduceOpRegisterEntry(OpRegisterEntry):
+    # TODO: Remove this and handle generic types in OpRegisterEntry
     def infer_types(self, op, output_names=None):
+        inputs = op.get_in_edges()
+        if len(inputs) != 1:
+            raise ValueError(f"Op {op.name}: Expected 1 input, got {len(inputs)}")
+        elif not isinstance(inputs[0].type, ValueTuple):
+            raise ValueError(
+                f"Op {op.name}: Expected input of type {self._input_types[0]}, "
+                f"got input of type {inputs[0].type}"
+            )
         if output_names is not None:
             output_name = output_names[0]
         else:
             output_name = f"{op.name}/{0}"
-        op.add_out_edge(Value(name=output_name, value_type=None, device=op.device))
+        output_value_type = copy.deepcopy(inputs[0].type)
+        op.add_out_edge(Value(name=output_name, value_type=output_value_type))
 
 
 class BroadcastScatterOpRegisterEntry(OpRegisterEntry):
+    # TODO: Remove this and handle generic types in OpRegisterEntry
     def infer_types(self, op, output_names=None):
         inputs = op.get_in_edges()
         devices = op.get_attribute("devices")
-        if output_names is not None and len(output_names) != len(devices):
+        if output_names is not None and len(output_names) != 1:
             raise ValueError(
-                f"Op {op.name}: Expected {len(devices)} output names but got "
-                f"{len(output_names)}"
+                f"Op {op.name}: Expected 1 output name but got {len(output_names)}"
             )
+        output_types = []
         for i, device in enumerate(devices):
-            if output_names is not None:
-                output_name = output_names[i]
-            else:
-                output_name = f"{op_name}/{i}"
             output_type = copy.deepcopy(inputs[0].type)
+            output_type.device = device
             if op.op_type == "Scatter":
                 split_dim = op.get_attribute("split_dim")
                 if isinstance(output_type, Tensor):
                     output_type.shape = None
-            output_value = Value(output_name, value_type=output_type, device=device)
-            op.add_out_edge(output_value)
+            output_types.append(output_type)
+        output_value = Value(output_names[0], value_type=ValueTuple(output_types))
+        op.add_out_edge(output_value)
 
 
 class PmapOpRegisterEntry(OpRegisterEntry):
@@ -92,9 +104,11 @@ class PmapOpRegisterEntry(OpRegisterEntry):
 
 OpRegister = {
     "Add": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
-    "Allreduce": AllreduceOpRegisterEntry(input_types=None, output_types=[Tensor]),
+    "Allreduce": AllreduceOpRegisterEntry(
+        input_types=[ValueTuple[Tensor]], output_types=[ValueTuple[Tensor]]
+    ),
     "Broadcast": BroadcastScatterOpRegisterEntry(
-        input_types=[Tensor], output_types=None
+        input_types=[Tensor], output_types=[ValueTuple[Tensor]]
     ),
     "BroadcastGradientArgs": OpRegisterEntry(
         input_types=[Tensor, Tensor], output_types=[Tensor, Tensor]
@@ -116,7 +130,9 @@ OpRegister = {
     "Reshape": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
     "Opt": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
     "Pmap": PmapOpRegisterEntry(input_types=None, output_types=None),
-    "Scatter": BroadcastScatterOpRegisterEntry(input_types=[Tensor], output_types=None),
+    "Scatter": BroadcastScatterOpRegisterEntry(
+        input_types=[Tensor], output_types=[ValueTuple[Tensor]]
+    ),
     "SGDOptimizer": OpRegisterEntry(
         input_types=[Tensor, Tensor, Tensor], output_types=[Tensor, Tensor]
     ),

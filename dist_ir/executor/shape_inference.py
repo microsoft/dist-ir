@@ -38,8 +38,13 @@ def _infer_shapes_for_allreduce(op, inputs, outputs):
 
 
 def _infer_shapes_for_broadcast(op, inputs, outputs):
-    for output in outputs:
-        output.type = copy.deepcopy(inputs[0].type)
+    input_type = inputs[0].type
+    devices = op.get_attribute("devices")
+    output_types = []
+    for (output_type, device) in zip(outputs[0].type.types, devices):
+        if isinstance(output_type, Tensor) and isinstance(input_type, Tensor):
+            output_type.shape = copy.deepcopy(input_type.shape)
+        output_type.device = device
 
 
 def _infer_shapes_for_matmul(op, inputs, outputs):
@@ -79,18 +84,15 @@ def _infer_shapes_for_pmap(op, inputs, outputs):
 
 
 def _infer_shapes_for_scatter(op, inputs, outputs):
-    input_shapes = _get_shapes(inputs)
+    input_type = inputs[0].type
     split_dim = op.get_attribute("split_dim")
-    num_splits = len(op.get_attribute("devices"))
-
-    assert type(input_shapes[0]) == tuple
-    output_shape = list(input_shapes[0])
-    if output_shape[split_dim] % num_splits != 0:
-        _error_invalid_shapes(op, input_shapes)
-    output_shape[split_dim] //= num_splits
-
-    for output in outputs:
-        output.type.shape = tuple(output_shape)
+    devices = op.get_attribute("devices")
+    for (output_type, device) in zip(outputs[0].type.types, devices):
+        if isinstance(output_type, Tensor) and isinstance(input_type, Tensor):
+            output_shape = list(input_type.shape)
+            output_shape[split_dim] //= len(devices)
+            output_type.shape = tuple(output_shape)
+        output_type.device = device
 
 
 ShapeInferenceRegister = {

@@ -8,7 +8,6 @@ class Op:
         self,
         name,
         op_type,
-        device=None,
         in_edges=None,
         attributes=None,
         submodules=None,
@@ -19,7 +18,6 @@ class Op:
             raise ValueError(f"Invalid op type {op_type}")
         self._name = name
         self._op_type = op_type
-        self._device = device
         if in_edges is None:
             self._in_edges = []
         else:
@@ -95,11 +93,3 @@ class Op:
     @property
     def op_type(self):
         return self._op_type
-
-    @property
-    def device(self):
-        return self._device
-
-    @device.setter
-    def device(self, device):
-        self._device = device

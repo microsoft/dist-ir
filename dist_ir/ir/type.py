@@ -1,13 +1,25 @@
 from abc import ABC
 from functools import reduce
 from operator import mul
-from typing import Tuple, Optional
+from typing import Generic, Optional, Tuple, TypeVar
 
+from .device import Device
 from .utils import singleton
 
+T = TypeVar("T")
 
-class Type(ABC):
-    pass
+
+class Type:
+    def __init__(self, device: Optional[Device] = None):
+        self._device = device
+
+    @property
+    def device(self):
+        return self._device
+
+    @device.setter
+    def device(self, device):
+        self._device = device
 
 
 # TODO might want to have f32, i32 etc instead?
@@ -42,7 +54,13 @@ class Tensor(Type):
 
     # TODO have a global cache to avoid creating multiple objects of same type?
 
-    def __init__(self, dtype: Type = None, shape: Optional[Tuple[int]] = None):
+    def __init__(
+        self,
+        dtype: Type = None,
+        shape: Optional[Tuple[int]] = None,
+        device: Device = None,
+    ):
+        Type.__init__(self, device)
         self._shape = shape
         self._dtype = dtype
 
@@ -67,3 +85,13 @@ class Tensor(Type):
 
     def size(self):
         return reduce(mul, self._shape)
+
+
+class ValueTuple(Type, Generic[T]):
+    def __init__(self, types: Tuple[T]):
+        Type.__init__(self, None)
+        self._types = types
+
+    @property
+    def types(self):
+        return self._types

@@ -112,44 +112,53 @@ def test_matmul_grad():
 def test_pmap():
     module = Module()
 
+    d0 = Device(0, "gpu")
+    d1 = Device(1, "gpu")
+
+    xs = module.add_input_value(
+        "xs",
+        ValueTuple(
+            (Tensor(Float(), (8, 4), device=d0), Tensor(Float(), (8, 4), device=d1))
+        ),
+    )
+    wAs = module.add_input_value(
+        "wAs",
+        ValueTuple(
+            (Tensor(Float(), (4, 2), device=d0), Tensor(Float(), (4, 2), device=d1))
+        ),
+    )
+    wBs = module.add_input_value(
+        "wBs",
+        ValueTuple(
+            (Tensor(Float(), (2, 1), device=d0), Tensor(Float(), (2, 1), device=d1))
+        ),
+    )
+
     submodule = Module()
-    a = submodule.add_input_value("a", Tensor(Float(), (8, 4)))
-    b = submodule.add_input_value("b", Tensor(Float(), (4, 2)))
-    x = submodule.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
+    x = submodule.add_input_value("x", Tensor(Float(), (16, 4)))
+    wA = submodule.add_input_value("wA", Tensor(Float(), (4, 2)))
+    wB = submodule.add_input_value("wB", Tensor(Float(), (2, 1)))
+    y = submodule.add_op("MatMul", "MatMul0", inputs=[x, wA], output_names=["y"])
+    z = submodule.add_op("MatMul", "MatMul1", inputs=[y, wB], output_names=["z"])
 
-    pmap_inputs = [
-        module.add_input_value("a_0", Tensor(Float(), (4, 4))),
-        module.add_input_value("a_1", Tensor(Float(), (4, 4))),
-        module.add_input_value("b_0", Tensor(Float(), (4, 2))),
-        module.add_input_value("b_1", Tensor(Float(), (4, 2))),
-    ]
-    pmap_output_names = ["x_0", "x_1"]
-    value_name_map = {
-        0: {
-            "a": "a_0",
-            "b": "b_0",
-            "x": "x_0",
-        },
-        1: {
-            "a": "a_1",
-            "b": "b_1",
-            "x": "x_1",
-        },
-    }
-
-    (x_0, x_1) = module.add_op(
+    zis = module.add_op(
         "Pmap",
-        inputs=pmap_inputs,
-        attributes={"devices": [0, 1]},
+        inputs=[xs, wAs, wBs],
+        attributes={"devices": [d0, d1]},
         submodules=[submodule],
-        metadata={"value_name_map": value_name_map},
-        output_names=pmap_output_names,
+        output_names=["zis"],
     )
 
     infer_shapes(module)
 
-    assert x_0.type.shape == (4, 2)
-    assert x_1.type.shape == (4, 2)
+    print(module)
+
+    # TODO: Verify submodule shapes and devices
+
+    assert zis.type.types[0].shape == (8, 1)
+    assert zis.type.types[0].device == d0
+    assert zis.type.types[1].shape == (8, 1)
+    assert zis.type.types[1].device == d1
 
 
 def test_scatter():
@@ -173,7 +182,3 @@ def test_scatter():
     assert xs.type.types[0].device == d0
     assert xs.type.types[1].shape == (2, 4)
     assert xs.type.types[1].device == d1
-
-
-if __name__ == "__main__":
-    test_allreduce()

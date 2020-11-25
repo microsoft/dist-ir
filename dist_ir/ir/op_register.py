@@ -37,9 +37,7 @@ class OpRegisterEntry:
                 output_name = output_names[i]
             else:
                 output_name = f"{op.name}/{i}"
-            op.add_out_edge(
-                Value(output_name, value_type=output_type(), device=op.device)
-            )
+            op.add_out_edge(Value(output_name, value_type=output_type()))
 
 
 class AllreduceOpRegisterEntry(OpRegisterEntry):
@@ -86,20 +84,20 @@ class BroadcastScatterOpRegisterEntry(OpRegisterEntry):
 class PmapOpRegisterEntry(OpRegisterEntry):
     def infer_types(self, op, output_names=None):
         devices = op.get_attribute("devices")
-        num_outputs = 0
-        for device in devices:
-            submodule = op.get_submodule(0)
-            submodule_outputs = submodule.get_outputs()
-            for out_edge in submodule_outputs:
-                if output_names is not None:
-                    output_name = output_names[num_outputs]
-                else:
-                    output_name = f"{out_edge.name}_{device}"
-                output_value = Value(
-                    output_name, value_type=copy.deepcopy(out_edge.type), device=device
-                )
-                op.add_out_edge(output_value)
-                num_outputs += 1
+        submodule = op.get_submodule(0)
+        submodule_outputs = submodule.get_outputs()
+        for i, out_edge in enumerate(submodule_outputs):
+            output_types = []
+            for device in devices:
+                output_type = copy.deepcopy(out_edge.type)
+                output_type.device = device
+                output_types.append(output_type)
+            if output_names is None:
+                output_name = f"{output.name}is"
+            else:
+                output_name = output_names[i]
+            output_value = Value(output_name, value_type=ValueTuple(output_types))
+            op.add_out_edge(output_value)
 
 
 OpRegister = {

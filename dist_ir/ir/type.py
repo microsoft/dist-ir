@@ -29,8 +29,11 @@ class Type:
 class Int(Type):
     """The integer type. A singleton class."""
 
-    def __repr__(self):
+    def __str__(self):
         return "Int"
+
+    def __repr__(self):
+        return str(self)
 
     @property
     def size(self):
@@ -41,8 +44,11 @@ class Int(Type):
 class Float(Type):
     """The float type. A singleton class."""
 
+    def __str__(self):
+        return f"Float"
+
     def __repr__(self):
-        return "Float"
+        return str(self)
 
     @property
     def size(self):
@@ -65,7 +71,9 @@ class Tensor(Type):
         self._dtype = dtype
 
     def __repr__(self):
-        return f"Tensor({self._shape}, {self._dtype})"
+        return (
+            f"(Tensor(shape={self._shape}, dtype={self._dtype}, device={self._device})"
+        )
 
     @property
     def shape(self):
@@ -91,6 +99,16 @@ class ValueTuple(Type, Generic[T]):
     def __init__(self, types: Tuple[T]):
         Type.__init__(self, None)
         self._types = types
+
+    def __str__(self):
+        output = "("
+        for i in range(len(self._types) - 1):
+            output += str(self._types[i]) + ", "
+        output += str(self._types[-1]) + ")"
+        return output
+
+    def __repr__(self):
+        return str(self)
 
     @property
     def types(self):

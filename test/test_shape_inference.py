@@ -3,7 +3,7 @@ import pytest
 from dist_ir.ir import Module
 from dist_ir.ir.device import Device
 from dist_ir.executor.shape_inference import infer_shapes
-from dist_ir.ir.type import Float, Tensor, ValueTuple
+from dist_ir.ir.type import Float, Tensor, TupleType
 
 
 def test_add_valid():
@@ -34,7 +34,7 @@ def test_allreduce():
 
     xis = module.add_input_value(
         "xis",
-        ValueTuple(
+        TupleType(
             (Tensor(Float(), (4, 4), device=d0), Tensor(Float(), (4, 4), device=d1))
         ),
     )
@@ -46,7 +46,7 @@ def test_allreduce():
     )
     infer_shapes(module)
 
-    assert isinstance(xs.type, ValueTuple)
+    assert isinstance(xs.type, TupleType)
     for i, value_type in enumerate(xis.type.types):
         assert value_type.shape == xs.type.types[i].shape
         assert value_type.device == xs.type.types[i].device
@@ -68,7 +68,7 @@ def test_broadcast():
     )
     infer_shapes(module)
 
-    assert isinstance(xs.type, ValueTuple)
+    assert isinstance(xs.type, TupleType)
     assert xs.type.types[0].shape == (4, 4)
     assert xs.type.types[0].device == d0
     assert xs.type.types[1].shape == (4, 4)
@@ -117,19 +117,19 @@ def test_pmap():
 
     xs = module.add_input_value(
         "xs",
-        ValueTuple(
+        TupleType(
             (Tensor(Float(), (8, 4), device=d0), Tensor(Float(), (8, 4), device=d1))
         ),
     )
     wAs = module.add_input_value(
         "wAs",
-        ValueTuple(
+        TupleType(
             (Tensor(Float(), (4, 2), device=d0), Tensor(Float(), (4, 2), device=d1))
         ),
     )
     wBs = module.add_input_value(
         "wBs",
-        ValueTuple(
+        TupleType(
             (Tensor(Float(), (2, 1), device=d0), Tensor(Float(), (2, 1), device=d1))
         ),
     )
@@ -179,7 +179,7 @@ def test_scatter():
     )
     infer_shapes(module)
 
-    assert isinstance(xs.type, ValueTuple)
+    assert isinstance(xs.type, TupleType)
     assert xs.type.types[0].shape == (2, 4)
     assert xs.type.types[0].device == d0
     assert xs.type.types[1].shape == (2, 4)

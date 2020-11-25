@@ -105,7 +105,7 @@ class Tensor(Type):
         return reduce(mul, self._shape) * self._dtype.size
 
 
-class ValueTuple(Type, Generic[T]):
+class TupleType(Type, Generic[T]):
     def __init__(self, types: Tuple[T]):
         Type.__init__(self, None)
         self._types = types

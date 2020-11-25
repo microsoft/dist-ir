@@ -1,5 +1,5 @@
 from ..ir.type import Float
-from ..ir.type import Tensor, ValueTuple
+from ..ir.type import Tensor, TupleType
 from ..ir.value import Value
 from ..ir.device import Device
 
@@ -78,14 +78,14 @@ def _infer_shapes_for_pmap(op, inputs, outputs):
 
     for (pmap_input, submodule_input) in zip(inputs, submodule.get_inputs()):
         if isinstance(submodule_input.type, Tensor):
-            assert isinstance(pmap_input.type, ValueTuple)
+            assert isinstance(pmap_input.type, TupleType)
             submodule_input.type.shape = pmap_input.type.types[0].shape
 
     _infer_shapes(submodule)
 
     for (pmap_output, submodule_output) in zip(outputs, submodule.get_outputs()):
         if isinstance(submodule_output.type, Tensor):
-            assert isinstance(pmap_output.type, ValueTuple)
+            assert isinstance(pmap_output.type, TupleType)
             for pmap_output_type in pmap_output.type.types:
                 pmap_output_type.shape = submodule_output.type.shape
                 pmap_output_type.dtype = submodule_output.type.dtype

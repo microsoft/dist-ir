@@ -1,5 +1,5 @@
 from .device import Device
-from .type import Tensor, ValueTuple
+from .type import Tensor, TupleType
 from .value import Value
 
 import copy
@@ -47,7 +47,7 @@ class AllreduceOpRegisterEntry(OpRegisterEntry):
         inputs = op.get_in_edges()
         if len(inputs) != 1:
             raise ValueError(f"Op {op.name}: Expected 1 input, got {len(inputs)}")
-        elif not isinstance(inputs[0].type, ValueTuple):
+        elif not isinstance(inputs[0].type, TupleType):
             raise ValueError(
                 f"Op {op.name}: Expected input of type {self._input_types[0]}, "
                 f"got input of type {inputs[0].type}"
@@ -78,7 +78,7 @@ class BroadcastScatterOpRegisterEntry(OpRegisterEntry):
                 if isinstance(output_type, Tensor):
                     output_type.shape = None
             output_types.append(output_type)
-        output_value = Value(output_names[0], value_type=ValueTuple(output_types))
+        output_value = Value(output_names[0], value_type=TupleType(output_types))
         op.add_out_edge(output_value)
 
 
@@ -107,17 +107,17 @@ class PmapOpRegisterEntry(OpRegisterEntry):
                 output_name = f"{output.name}is"
             else:
                 output_name = output_names[i]
-            output_value = Value(output_name, value_type=ValueTuple(output_types))
+            output_value = Value(output_name, value_type=TupleType(output_types))
             op.add_out_edge(output_value)
 
 
 OpRegister = {
     "Add": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
     "Allreduce": AllreduceOpRegisterEntry(
-        input_types=[ValueTuple[Tensor]], output_types=[ValueTuple[Tensor]]
+        input_types=[TupleType[Tensor]], output_types=[TupleType[Tensor]]
     ),
     "Broadcast": BroadcastScatterOpRegisterEntry(
-        input_types=[Tensor], output_types=[ValueTuple[Tensor]]
+        input_types=[Tensor], output_types=[TupleType[Tensor]]
     ),
     "BroadcastGradientArgs": OpRegisterEntry(
         input_types=[Tensor, Tensor], output_types=[Tensor, Tensor]
@@ -140,7 +140,7 @@ OpRegister = {
     "Opt": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
     "Pmap": PmapOpRegisterEntry(input_types=None, output_types=None),
     "Scatter": BroadcastScatterOpRegisterEntry(
-        input_types=[Tensor], output_types=[ValueTuple[Tensor]]
+        input_types=[Tensor], output_types=[TupleType[Tensor]]
     ),
     "SGDOptimizer": OpRegisterEntry(
         input_types=[Tensor, Tensor, Tensor], output_types=[Tensor, Tensor]

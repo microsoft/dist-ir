@@ -393,9 +393,11 @@ two layer FF or attention layers?
 - ~~Add variable device~~
 - ~~Move device from `Value` to `Type`~~
 - ~~Make `Pmap` operate over `Tuple` types and variable devices~~
-- ~~Remove deep copies of submodule from `Pmap` code in `ShapeInference`~~ and `DistributedSimulator`
+- ~~Remove deep copies of submodule from `Pmap` code in `ShapeInference` and `DistributedSimulator`~~
 - Explicitly move all input tensors for a given op to the same device when applicable
 - ~~Remove device from op~~
-- Fix tests to account for fixed `Pmap` implementation
-- Add lookup table as input to simulator to compute costs using black box functions for each op (parameterized by device characteristics)
+- ~~Fix tests to account for fixed `Pmap` implementation~~
+- ~~Add lookup table as input to simulator to compute costs using black box functions for each op (parameterized by device characteristics)~~
 - Add functionality to `SequentialExecutor` to handle `Pmap`
+- Take union of input and output devices when synchronizing in `DistributedSimulator`
+- Create fresh context for `Pmap` in `DistributedSimulator` instead of recursively passing same state

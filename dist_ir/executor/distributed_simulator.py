@@ -19,8 +19,6 @@ class DistributedSimulator:
         live_memory,
     ):
 
-        # TODO: Manage memory
-
         for op_name, op in module.get_ops().items():
             in_edges = op.get_in_edges()
             out_edges = op.get_out_edges()
@@ -56,6 +54,7 @@ class DistributedSimulator:
                     devices = value.type.get_all_devices()
                     for device in devices:
                         live_memory[device] -= value.type.size()
+                    values_to_free.append(value)
             for value_to_free in values_to_free:
                 del consumers[value_to_free]
 

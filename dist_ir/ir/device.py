@@ -38,7 +38,7 @@ class Device:
         return self._bound_devices is not None
 
     @classmethod
-    def get_new_device_variable(cls, bound_devices):
+    def get_new_device_variable(cls, device_type, bound_devices):
         device_id = f"d{cls.device_variable_id}"
         cls.device_variable_id += 1
-        return Device(device_id, None, bound_devices=bound_devices)
+        return Device(device_id, device_type, bound_devices=bound_devices)

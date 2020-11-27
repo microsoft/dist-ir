@@ -90,7 +90,8 @@ class PmapOpRegisterEntry(OpRegisterEntry):
         submodule_outputs = submodule.get_outputs()
         # TODO: If we want a more robust solution for nested pmaps, move the
         # parameterization over device variable to the module code
-        d = Device.get_new_device_variable(devices)
+        # TODO: Handle multiple device types?
+        d = Device.get_new_device_variable(devices[0].device_type, devices)
         for in_edge in submodule_inputs:
             in_edge.type.device = d
 

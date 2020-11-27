@@ -399,5 +399,5 @@ two layer FF or attention layers?
 - ~~Fix tests to account for fixed `Pmap` implementation~~
 - ~~Add lookup table as input to simulator to compute costs using black box functions for each op (parameterized by device characteristics)~~
 - Add functionality to `SequentialExecutor` to handle `Pmap`
-- Take union of input and output devices when synchronizing in `DistributedSimulator`
-- Create fresh context for `Pmap` in `DistributedSimulator` instead of recursively passing same state
+- ~~Take union of input and output devices when synchronizing in `DistributedSimulator`~~
+- ~~Create fresh context for `Pmap` in `DistributedSimulator` instead of recursively passing same state~~

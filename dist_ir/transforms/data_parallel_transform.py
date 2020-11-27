@@ -1,5 +1,7 @@
 from ..ir.module import Module
 
+import copy
+
 
 class DataParallelTransform:
     """Partitions a module using data parallelism.
@@ -31,7 +33,9 @@ class DataParallelTransform:
         input_values = module.get_inputs()
         pmap_input_values = []
         for input_value in input_values:
-            v = transformed_module.add_input_value(input_value.name, input_value.type)
+            v = transformed_module.add_input_value(
+                input_value.name, copy.deepcopy(input_value.type)
+            )
             if input_value.name in self._partition_map:
                 vs = transformed_module.add_op(
                     "Scatter",

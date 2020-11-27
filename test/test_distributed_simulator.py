@@ -21,9 +21,9 @@ def test_single_device():
     device_throughputs = {"gpu": 1.0e13}
     cost_model = CostModel(device_throughputs)
     simulator = DistributedSimulator(topology, cost_model)
-    timestamps, peak_memory = simulator.simulate(module)
-    assert d in timestamps
-    assert d in peak_memory
+    simulator_state = simulator.simulate(module)
+    assert d in simulator_state.timestamps
+    assert d in simulator_state.peak_memory
     # TODO: Check specific values
 
 
@@ -35,9 +35,9 @@ def test_data_parallel():
     d1 = topology.add_device("gpu")
     topology.set_bandwidth(d0, d1, 2)
 
-    a = module.add_input_value("a", Tensor(Float(), (4, 4)))
-    b = module.add_input_value("b", Tensor(Float(), (4, 4)))
-    c = module.add_input_value("c", Tensor(Float(), (4, 4)))
+    a = module.add_input_value("a", Tensor(Float(), (4, 4), device=d0))
+    b = module.add_input_value("b", Tensor(Float(), (4, 4), device=d0))
+    c = module.add_input_value("c", Tensor(Float(), (4, 4), device=d0))
     x = module.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
     y = module.add_op("MatMul", "MatMul1", inputs=[x, c], output_names=["y"])
     transform = DataParallelTransform(partition_map={"a": 0}, devices=[d0, d1])
@@ -48,11 +48,11 @@ def test_data_parallel():
     device_throughputs = {"gpu": 1.0e13}
     cost_model = CostModel(device_throughputs)
     simulator = DistributedSimulator(topology, cost_model)
-    timestamps, peak_memory = simulator.simulate(transformed_module)
-    assert d0 in timestamps
-    assert d1 in timestamps
-    assert d0 in peak_memory
-    assert d1 in peak_memory
+    simulator_state = simulator.simulate(transformed_module)
+    assert d0 in simulator_state.timestamps
+    assert d1 in simulator_state.timestamps
+    assert d0 in simulator_state.peak_memory
+    assert d1 in simulator_state.peak_memory
     # TODO: Check specific values
 
 

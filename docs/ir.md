@@ -26,8 +26,6 @@ Op = {
         # To support ops that have more than one output
     attributes: Dict[String, Any]
         # Constant data for ops, e.g. stride of convolution or devices to scatter
-    device: Device
-        # The device the op is assigned to (can be None if op has not been assigned)
     submodules: List[Module]
 }
 
@@ -47,8 +45,9 @@ Value = {
 }
 
 Type =
-    | Tensor{shape: Optional[Shape], dtype: Type}
+    | Tensor{shape: Optional[Shape], dtype: Type, device: Device}
     | Float | Int | ...
+    | TupleType{elems: List[Type]}
 
 Topology = {
     devices: List[Device]
@@ -401,3 +400,17 @@ two layer FF or attention layers?
 - Add functionality to `SequentialExecutor` to handle `Pmap`
 - ~~Take union of input and output devices when synchronizing in `DistributedSimulator`~~
 - ~~Create fresh context for `Pmap` in `DistributedSimulator` instead of recursively passing same state~~
+
+- Can we do without a special BroadcastScatterOpRegisterEntry?
+- Why do we even need types at op creation time?
+- Think about best way to create pmap device variable: before/after submodule creation?
+
+- Add syntax of textual representation and examples of supported ops
+- Make sure parallel examples are consistent with above syntax
+
+- Maybe one problem with the return value of a pmap or scatter is that we are expecting things to have types but not shapes at module creation time, and then run a shape inference pass later to fill in the shapes. Would it be cleaner to just infer shapes and fill in a "full" type at op-creation time? Will we ever need to run shape inference later?
+
+
+## Problems
+
+- Should a tensor never have a device? What if a pmap's submodule expects a tensor? Then how do we enforce that it is on device d? Is it better to go back to all values have an `Option[Device]`?

@@ -1,3 +1,4 @@
+from ..ir import Module
 from ..ir.type import Tensor
 from . import utils
 from .shape_inference import ShapeInferenceRegister
@@ -30,7 +31,7 @@ class DistributedSimulator:
         self._topology = topology
         self._cost_model = cost_model
 
-    def _simulate(self, module, state):
+    def _simulate(self, module: Module, state: DistributedSimulatorState):
 
         for op_name, op in module.get_ops().items():
             in_edges = op.get_in_edges()

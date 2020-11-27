@@ -77,8 +77,10 @@ def _infer_shapes_for_pmap(op, inputs, outputs):
     submodule = op.get_submodule(0)
 
     for (pmap_input, submodule_input) in zip(inputs, submodule.get_inputs()):
+        assert isinstance(pmap_input.type, TupleType)
+        # TODO check that all elements of the tuple have the same type and, if
+        # they are tensors, that they have the same shape
         if isinstance(submodule_input.type, Tensor):
-            assert isinstance(pmap_input.type, TupleType)
             submodule_input.type.shape = pmap_input.type.types[0].shape
 
     _infer_shapes(submodule)
@@ -123,11 +125,19 @@ def _infer_shapes(module):
       module: The module to infer shapes for.
     """
 
-    for op_name, op in module.get_ops().items():
+    for _, op in module.get_ops().items():
         inputs = op.get_in_edges()
         outputs = op.get_out_edges()
 
+        # Invariant: types and shapes of input are already inferred
+        for input in inputs:
+            assert input.type is not None
+            if isinstance(input.type, Tensor):
+                assert input.type.shape is not None
+
         ShapeInferenceRegister[op.op_type](op, inputs, outputs)
+        # TODO maybe the register gives back the output types and we can check
+        # here if they match existing types (if any) and if not, replace them
 
 
 def infer_shapes(module):

@@ -5,6 +5,11 @@ BYTES_IN_GB = 8.0e9
 
 
 class CostModel:
+    """A cost model -- mapping from op type to cost functions. These cost
+    functions expect as input the TODO and output a map from devices to runtime.
+    (TODO temporary memory)
+    """
+
     def __init__(self, device_throughputs):
         self._device_throughputs = device_throughputs
         self._op_register = {

@@ -18,9 +18,9 @@ def test_single_device():
     b = module.add_input_value("b", Tensor(dtype=Float(), shape=(4, 4), device=d))
     x = module.add_op("MatMul", "MatMul0", inputs=[a, b])
     infer_shapes(module)
-    device_throughputs = {"gpu": 1.0e13}
-    cost_model = CostModel(device_throughputs)
-    simulator = DistributedSimulator(topology, cost_model)
+    device_speeds = {"gpu": 1.0e13}
+    cost_model = CostModel(topology, device_speeds)
+    simulator = DistributedSimulator(cost_model)
     simulator_state = simulator.simulate(module)
     assert d in simulator_state.timestamps
     assert d in simulator_state.peak_memory
@@ -45,9 +45,9 @@ def test_data_parallel():
 
     infer_shapes(transformed_module)
     print(transformed_module)
-    device_throughputs = {"gpu": 1.0e13}
-    cost_model = CostModel(device_throughputs)
-    simulator = DistributedSimulator(topology, cost_model)
+    device_speeds = {"gpu": 1.0e13}
+    cost_model = CostModel(topology, device_speeds)
+    simulator = DistributedSimulator(cost_model)
     simulator_state = simulator.simulate(transformed_module)
     assert d0 in simulator_state.timestamps
     assert d1 in simulator_state.timestamps

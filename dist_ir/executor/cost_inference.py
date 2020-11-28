@@ -10,8 +10,9 @@ class CostModel:
     (TODO temporary memory)
     """
 
-    def __init__(self, device_throughputs):
-        self._device_throughputs = device_throughputs
+    def __init__(self, topology, device_speeds):
+        self._topology = topology
+        self._device_speeds = device_speeds
         self._op_register = {
             "Allreduce": self._infer_costs_for_allreduce,
             "Broadcast": self._infer_costs_for_broadcast_scatter,
@@ -19,41 +20,35 @@ class CostModel:
             "Scatter": self._infer_costs_for_broadcast_scatter,
         }
 
-    @property
-    def device_type(self):
-        return self._device_type
-
-    def _infer_costs_for_allreduce(self, op, in_edges, out_edges, topology):
+    def _infer_costs_for_allreduce(self, op, inputs, outputs):
         costs = {}
-        output_devices = utils.get_all_devices(out_edges)
+        output_devices = utils.get_all_devices(outputs)
         for device in output_devices:
             # TODO: Compute cost properly
             costs[device] = 0
 
         return costs
 
-    def _infer_costs_for_matmul(self, op, in_edges, out_edges, topology):
-        costs = {}
-        device = in_edges[0].type.device
+    def _infer_costs_for_matmul(self, op, inputs, outputs):
+        device = inputs[0].type.device
         # TODO: Verify all input and output devices are the same?
         # TODO: Check this cost computation
-        a_matrix_shape = in_edges[0].type.shape
-        b_matrix_shape = in_edges[1].type.shape
+        a_matrix_shape = inputs[0].type.shape
+        b_matrix_shape = inputs[1].type.shape
         flops = 2 * a_matrix_shape[1] * a_matrix_shape[0] * b_matrix_shape[1]
         # TODO: Use a better way of computing runtime from FLOPs
-        runtime = flops / self._device_throughputs[device.device_type]
-        costs[device] = runtime
-        return costs
+        runtime = flops / self._device_speeds[device.device_type]
+        return {device: runtime}
 
-    def _infer_costs_for_broadcast_scatter(self, op, in_edges, out_edges, topology):
+    def _infer_costs_for_broadcast_scatter(self, op, inputs, outputs):
         costs = {}
-        input_device = in_edges[0].type.device
+        input_device = inputs[0].type.device
         costs[input_device] = 0
-        input_size = in_edges[0].type.size() * in_edges[0].type.dtype.size
+        input_size = inputs[0].type.size() * inputs[0].type.dtype.size
         input_size_gb = input_size / BYTES_IN_GB
-        output_devices = utils.get_all_devices(out_edges)
+        output_devices = utils.get_all_devices(outputs)
         for output_device in output_devices:
-            bandwidth = topology.get_bandwidth(input_device, output_device)
+            bandwidth = self._topology.get_bandwidth(input_device, output_device)
             transfer_time = input_size_gb / bandwidth
             # NOTE: This assumes all tensors can be sent concurrently
             # TODO: Do we need to model the link capacity?
@@ -62,8 +57,8 @@ class CostModel:
 
         return costs
 
-    def infer_costs(self, op, topology):
-        in_edges = op.get_in_edges()
-        out_edges = op.get_out_edges()
+    def infer_costs(self, op):
+        inputs = op.get_in_edges()
+        outputs = op.get_out_edges()
 
-        return self._op_register[op.op_type](op, in_edges, out_edges, topology)
+        return self._op_register[op.op_type](op, inputs, outputs)

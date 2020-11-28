@@ -72,7 +72,7 @@ class BroadcastScatterOpRegisterEntry(OpRegisterEntry):
         output_types = []
         for i, device in enumerate(devices):
             output_type = copy.deepcopy(inputs[0].type)
-            output_type.device = device
+            output_type.set_device(device)
             if op.op_type == "Scatter":
                 split_dim = op.get_attribute("split_dim")
                 if isinstance(output_type, Tensor):
@@ -91,21 +91,21 @@ class PmapOpRegisterEntry(OpRegisterEntry):
         # TODO: If we want a more robust solution for nested pmaps, move the
         # parameterization over device variable to the module code
         # TODO: Handle multiple device types?
-        d = Device.get_new_device_variable(devices[0].device_type, devices)
+        d = Device.get_new_device_variable(devices[0].device_type)
         for in_edge in submodule_inputs:
-            in_edge.type.device = d
+            in_edge.type.set_device(d)
 
-        # TODO: Change the submodule input type names to indicate they are
+        # TODO: Change the submodule input names to indicate they are
         # parameterized over the devices
 
         for i, out_edge in enumerate(submodule_outputs):
             output_types = []
             for device in devices:
                 output_type = copy.deepcopy(out_edge.type)
-                output_type.device = device
+                output_type.set_device(device)
                 output_types.append(output_type)
             if output_names is None:
-                output_name = f"{output.name}is"
+                output_name = f"{out_edge.name}is"
             else:
                 output_name = output_names[i]
             output_value = Value(output_name, value_type=TupleType(output_types))

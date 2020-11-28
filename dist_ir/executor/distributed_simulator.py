@@ -4,31 +4,19 @@ from . import utils
 from .shape_inference import ShapeInferenceRegister
 
 import copy
+from collections import defaultdict
 
 
 class DistributedSimulatorState:
     def __init__(self):
-        self.timestamps = {}
-        self.consumers = {}
-        self.peak_memory = {}
-        self.live_memory = {}
-
-    def update(self, other):
-        def update_state_dict(a, b):
-            for device in b:
-                for bound_device in device.bound_devices:
-                    a[bound_device] += b[device]
-
-        update_state_dict(self.timestamps, other.timestamps)
-        update_state_dict(self.peak_memory, other.peak_memory)
-        update_state_dict(self.live_memory, other.live_memory)
-
-        # TODO: Update consumers?
+        self.timestamps = defaultdict(lambda: 0.0)
+        self.consumers = defaultdict(lambda: 0)
+        self.peak_memory = defaultdict(lambda: 0.0)
+        self.live_memory = defaultdict(lambda: 0.0)
 
 
 class DistributedSimulator:
-    def __init__(self, topology, cost_model):
-        self._topology = topology
+    def __init__(self, cost_model):
         self._cost_model = cost_model
 
     def _simulate(self, module: Module, state: DistributedSimulatorState):
@@ -43,12 +31,7 @@ class DistributedSimulator:
             input_and_output_devices = input_devices.union(output_devices)
             if len(input_and_output_devices) > 1:
                 max_timestamp = max(
-                    [
-                        0
-                        if device not in state.timestamps
-                        else state.timestamps[device]
-                        for device in input_and_output_devices
-                    ]
+                    [state.timestamps[device] for device in input_and_output_devices]
                 )
                 for device in input_and_output_devices:
                     state.timestamps[device] = max_timestamp
@@ -60,12 +43,23 @@ class DistributedSimulator:
                 submodule = op.get_submodule(0)
                 submodule_state = DistributedSimulatorState()
                 self._simulate(submodule, submodule_state)
-                state.update(submodule_state)
+                device_vars = submodule_state.timestamps.keys()
+                bound_devices = op.get_attribute("devices")
+                for device_var in device_vars:
+                    for bound_device in bound_devices:
+                        state.timestamps[bound_device] += submodule_state.timestamps[
+                            device_var
+                        ]
+                        state.live_memory[bound_device] += submodule_state.live_memory[
+                            device_var
+                        ]
+                        state.peak_memory[bound_device] += submodule_state.peak_memory[
+                            device_var
+                        ]
+                        # TODO: Update consumers?
             else:
-                costs = self._cost_model.infer_costs(op, self._topology)
+                costs = self._cost_model.infer_costs(op)
                 for device in costs:
-                    if device not in state.timestamps:
-                        state.timestamps[device] = 0
                     state.timestamps[device] += costs[device]
 
             # Update the live memory.
@@ -75,24 +69,18 @@ class DistributedSimulator:
                 )
                 output_devices = out_edge.type.get_all_devices()
                 for output_device in output_devices:
-                    if output_device not in state.live_memory:
-                        state.live_memory[output_device] = 0
                     state.live_memory[output_device] += out_edge.type.size()
-            values_to_free = []
+            # TODO: Can we optimize this using a priority queue?
             for value in state.consumers:
                 if state.consumers[value] == 0 and not module.is_input(value.name):
                     devices = value.type.get_all_devices()
                     for device in devices:
                         state.live_memory[device] -= value.type.size()
-                    values_to_free.append(value)
-            for value_to_free in values_to_free:
-                del state.consumers[value_to_free]
 
             # Update the peak memory.
             for device in state.live_memory:
                 state.peak_memory[device] = max(
-                    0 if device not in state.peak_memory else state.peak_memory[device],
-                    state.live_memory[device],
+                    state.peak_memory[device], state.live_memory[device]
                 )
 
     def simulate(self, module):

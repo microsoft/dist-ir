@@ -81,7 +81,6 @@ class Module:
         Args:
           op_type: The op's type.
           name: The op's name.
-          device: The device to place the op on.
           inputs: The input values for this op.
           attributes: Any op-specific attributes.
           submodules: Any submodules this op is wrapping.

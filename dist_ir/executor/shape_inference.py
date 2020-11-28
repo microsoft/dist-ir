@@ -45,8 +45,8 @@ def _infer_shapes_for_broadcast(op, inputs, outputs):
     output_types = []
     for (output_type, device) in zip(outputs[0].type.types, devices):
         if isinstance(output_type, Tensor) and isinstance(input_type, Tensor):
-            output_type.shape = copy.deepcopy(input_type.shape)
-        output_type.device = device
+            output_type.shape = input_type.shape
+        output_type.set_device(device)
 
 
 def _infer_shapes_for_matmul(op, inputs, outputs):
@@ -102,7 +102,7 @@ def _infer_shapes_for_scatter(op, inputs, outputs):
             output_shape = list(input_type.shape)
             output_shape[split_dim] //= len(devices)
             output_type.shape = tuple(output_shape)
-        output_type.device = device
+        output_type.set_device(device)
 
 
 ShapeInferenceRegister = {

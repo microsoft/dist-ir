@@ -2,10 +2,10 @@ class Device:
 
     device_variable_id = 0
 
-    def __init__(self, device_id, device_type, bound_devices=None):
+    def __init__(self, device_id, device_type, is_variable=False):
         self._device_id = device_id
         self._device_type = device_type
-        self._bound_devices = bound_devices
+        self._is_variable = is_variable
 
     def __str__(self):
         return f"{self._device_id} ({self._device_type})"
@@ -28,17 +28,11 @@ class Device:
         return self._device_type
 
     @property
-    def bound_devices(self):
-        if self._bound_devices is None:
-            return [self]
-        else:
-            return self._bound_devices
-
     def is_variable(self):
-        return self._bound_devices is not None
+        return self._is_variable
 
     @classmethod
-    def get_new_device_variable(cls, device_type, bound_devices):
+    def get_new_device_variable(cls, device_type):
         device_id = f"d{cls.device_variable_id}"
         cls.device_variable_id += 1
-        return Device(device_id, device_type, bound_devices=bound_devices)
+        return Device(device_id, device_type, is_variable=True)

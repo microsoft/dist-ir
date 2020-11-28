@@ -10,19 +10,18 @@ T = TypeVar("T")
 
 
 class Type:
-    def __init__(self, device: Optional[Device] = None):
-        self._device = device
+    def __init__(self, has_device=False):
+        self._has_device = has_device
+        self._device = None
 
-    @property
-    def device(self):
-        return self._device
-
-    @device.setter
-    def device(self, device):
-        self._device = device
+    def set_device(self, device):
+        if self._has_device:
+            self._device = device
 
     def get_all_devices(self):
-        return set(self._device.bound_devices)
+        if self._has_device and self._device is not None:
+            return set([self._device])
+        return set()
 
 
 # TODO might want to have f32, i32 etc instead?
@@ -69,7 +68,8 @@ class Tensor(Type):
         shape: Optional[Tuple[int]] = None,
         device: Device = None,
     ):
-        Type.__init__(self, device)
+        Type.__init__(self, has_device=True)
+        self._device = device
         self._shape = shape
         self._dtype = dtype
 
@@ -101,13 +101,17 @@ class Tensor(Type):
     def dtype(self, dtype):
         self._dtype = dtype
 
+    @property
+    def device(self):
+        return self._device
+
     def size(self):
         return reduce(mul, self._shape) * self._dtype.size
 
 
 class TupleType(Type, Generic[T]):
     def __init__(self, types: Tuple[T]):
-        Type.__init__(self, None)
+        Type.__init__(self)
         self._types = types
 
     def __str__(self):

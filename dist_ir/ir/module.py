@@ -69,7 +69,6 @@ class Module:
         self,
         op_type,
         name=None,
-        device=None,
         inputs: List[Value] = None,
         attributes: Dict[str, Any] = None,
         submodules: List["Module"] = None,

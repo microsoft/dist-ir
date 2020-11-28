@@ -405,8 +405,14 @@ two layer FF or attention layers?
 - Why do we even need types at op creation time?
 - Think about best way to create pmap device variable: before/after submodule creation?
 
+- Move this list and Python representation to `design.md` or something
 - Add syntax of textual representation and examples of supported ops
 - Make sure parallel examples are consistent with above syntax
+
+- Create `HardwareConfiguration` that has all device speeds as well as topology and bandwidth information
+
+- Have a validation pass that checks module is valid (e.g. that inputs are on the same device for matmul)
+- Add test that `DistributedSimulator` doesn't modify module
 
 - Maybe one problem with the return value of a pmap or scatter is that we are expecting things to have types but not shapes at module creation time, and then run a shape inference pass later to fill in the shapes. Would it be cleaner to just infer shapes and fill in a "full" type at op-creation time? Will we ever need to run shape inference later?
 

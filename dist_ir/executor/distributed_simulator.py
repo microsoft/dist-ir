@@ -67,6 +67,8 @@ class DistributedSimulator:
                 state.consumers[out_edge] = module.get_consumers_for_out_edge(
                     out_edge.name
                 )
+                # Output value could live on multiple devices (e.g. scatter) so
+                # update memory on all devices:
                 output_devices = out_edge.type.get_all_devices()
                 for output_device in output_devices:
                     state.live_memory[output_device] += out_edge.type.size()

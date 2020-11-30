@@ -8,6 +8,13 @@ Module = {
     outputs: List[Value]
 }
 
+Device = {
+    device_id: Int
+        # Unique device ID
+    device_type: String
+        # Device type (e.g. "gpu")
+}
+
 Op = {
     name: String
         # Do we need this to be unique in a module? Across all modules?
@@ -38,8 +45,17 @@ Value = {
 }
 
 Type =
-    | Tensor{shape: Optional[Shape], dtype: Type}
+    | Tensor{shape: Optional[Shape], dtype: Type, device: Device}
     | Float | Int | ...
+    | TupleType{elems: List[Type]}
+
+Topology = {
+    devices: List[Device]
+        # The list of all devices in the topology.
+    bandwidths: Dict[Device, Dict[Device, Float]]
+        # The bandwidth between each device.
+}
+
 ```
 
 Notes:
@@ -370,3 +386,37 @@ Essentially, pmap is syntactic sugar. It can be unrolled: TODO
 
 TODO is there a more general horizontal transform, beyond pattern matching on
 two layer FF or attention layers?
+
+## TODO
+- ~~Add `Tuple` type and make sure `Scatter`, `Broadcast`, `Allreduce`, etc. use this~~
+- ~~Add variable device~~
+- ~~Move device from `Value` to `Type`~~
+- ~~Make `Pmap` operate over `Tuple` types and variable devices~~
+- ~~Remove deep copies of submodule from `Pmap` code in `ShapeInference` and `DistributedSimulator`~~
+- Explicitly move all input tensors for a given op to the same device when applicable
+- ~~Remove device from op~~
+- ~~Fix tests to account for fixed `Pmap` implementation~~
+- ~~Add lookup table as input to simulator to compute costs using black box functions for each op (parameterized by device characteristics)~~
+- Add functionality to `SequentialExecutor` to handle `Pmap`
+- ~~Take union of input and output devices when synchronizing in `DistributedSimulator`~~
+- ~~Create fresh context for `Pmap` in `DistributedSimulator` instead of recursively passing same state~~
+
+- Can we do without a special BroadcastScatterOpRegisterEntry?
+- Why do we even need types at op creation time?
+- Think about best way to create pmap device variable: before/after submodule creation?
+
+- Move this list and Python representation to `design.md` or something
+- Add syntax of textual representation and examples of supported ops
+- Make sure parallel examples are consistent with above syntax
+
+- Create `HardwareConfiguration` that has all device speeds as well as topology and bandwidth information
+
+- Have a validation pass that checks module is valid (e.g. that inputs are on the same device for matmul)
+- Add test that `DistributedSimulator` doesn't modify module
+
+- Maybe one problem with the return value of a pmap or scatter is that we are expecting things to have types but not shapes at module creation time, and then run a shape inference pass later to fill in the shapes. Would it be cleaner to just infer shapes and fill in a "full" type at op-creation time? Will we ever need to run shape inference later?
+
+
+## Problems
+
+- Should a tensor never have a device? What if a pmap's submodule expects a tensor? Then how do we enforce that it is on device d? Is it better to go back to all values have an `Option[Device]`?

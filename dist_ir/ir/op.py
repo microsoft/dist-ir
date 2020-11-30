@@ -55,6 +55,9 @@ class Op:
                 )
         return output
 
+    def __repr__(self):
+        return str(self)
+
     def add_in_edge(self, in_edge: Value):
         """Adds an input edge."""
         self._in_edges.append(in_edge)

@@ -16,9 +16,9 @@ class SequentialExecutor:
                 f"No {self._backend} implementation found for op {op_type}"
             )
         impl = BackendRegister[self._backend][op_type]
-        out_edges = op.get_out_edges()
-        # TODO: Support multiple output values
         output_data = impl(*inputs)
+        if not isinstance(output_data, tuple):
+            output_data = (output_data,)
         return output_data
 
     def compute(self, module, input_data):
@@ -56,11 +56,13 @@ class SequentialExecutor:
                     raise ValueError(f"Invalid input {input_name} for op {op_name}")
                 inputs.append(input_value)
 
-            # TODO: Support more than 1 out edge per op
-            out_edges = op.get_out_edges()
             res = self._compute_op(op, inputs)
-            output_data[out_edges[0].name] = res
-            consumers[out_edges[0].name] = 1
+            out_edges = op.get_out_edges()
+            for i, out_edge in enumerate(out_edges):
+                output_data[out_edge.name] = res[i]
+                consumers[out_edge.name] = module.get_consumers_for_out_edge(
+                    out_edge.name
+                )
 
             # Garbage collect the fully consumed output tensors.
             to_free = []

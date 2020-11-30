@@ -11,6 +11,7 @@ class Module:
         self._inputs = OrderedDict()
         self._outputs = OrderedDict()
         self._op_counter = defaultdict(int)
+        self._consumers = defaultdict(int)
 
     def __str__(self):
         output = ""
@@ -112,8 +113,10 @@ class Module:
                     f"Module already has output value with name {out_edge.name}"
                 )
             self._outputs[out_edge.name] = out_edge
+            self._consumers[out_edge.name] = 0
         for in_edge in inputs:
             if in_edge.name in self._outputs:
+                self._consumers[in_edge.name] += 1
                 del self._outputs[in_edge.name]
 
         # Return the op outputs.
@@ -132,6 +135,9 @@ class Module:
             raise ValueError(f"Module already has input value with name {value.name}")
         self._inputs[value.name] = value
         return value
+
+    def get_consumers_for_out_edge(self, name):
+        return self._consumers[name]
 
     def find_output_values(self):
         """Marks all sink nodes in the graph as output values."""

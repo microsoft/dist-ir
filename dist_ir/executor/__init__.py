@@ -1,1 +1,2 @@
+from .distributed_simulator import DistributedSimulator
 from .sequential_executor import SequentialExecutor

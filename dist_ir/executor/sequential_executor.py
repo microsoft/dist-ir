@@ -1,5 +1,7 @@
+from typing import Any, Dict
+
 from .backend_register import BackendRegister
-from ..ir.type import Tensor
+from ..ir import Module, Op
 
 
 class SequentialExecutor:
@@ -8,9 +10,24 @@ class SequentialExecutor:
             raise ValueError(f"Unknown backend {backend}")
         self._backend = backend
 
-    def _compute_op(self, op, inputs):
+    def _compute_op(self, op: Op, inputs):
         """Executes the given op and returns its outputs."""
         op_type = op.op_type
+        if op_type == "Pmap":
+            # Zip the inputs so that we map over each corresponding value
+            inputs = zip(*inputs)
+            # Iterate over the inputs
+            results = []
+            for inps in inputs:
+                # Execute submodule with appropriate inputs
+                inp_names = (e.name for e in op.get_submodule(0).get_inputs())
+                inp_data = {n: v for n, v in zip(inp_names, inps)}
+                outs = self.compute(op.get_submodule(0), inp_data)
+                # TODO match output names to output data
+                results.append(outs.values())
+            # Unzip the results
+            results = tuple(zip(*results))
+            return results
         if op_type not in BackendRegister[self._backend]:
             raise NotImplementedError(
                 f"No {self._backend} implementation found for op {op_type}"
@@ -21,7 +38,7 @@ class SequentialExecutor:
             output_data = (output_data,)
         return output_data
 
-    def compute(self, module, input_data):
+    def compute(self, module: Module, input_data: Dict[str, Any]) -> Dict[str, Any]:
         """Executes the module given the specified inputs and returns the final result.
 
         Args:

@@ -16,11 +16,21 @@ class CostModel:
         self._op_register = {
             "Allreduce": self._infer_costs_for_allreduce,
             "Broadcast": self._infer_costs_for_broadcast_scatter,
+            "Gather": self._infer_costs_for_gather,
             "MatMul": self._infer_costs_for_matmul,
             "Scatter": self._infer_costs_for_broadcast_scatter,
         }
 
     def _infer_costs_for_allreduce(self, op, inputs, outputs):
+        costs = {}
+        output_devices = utils.get_all_devices(outputs)
+        for device in output_devices:
+            # TODO: Compute cost properly
+            costs[device] = 0
+
+        return costs
+
+    def _infer_costs_for_gather(self, op, inputs, outputs):
         costs = {}
         output_devices = utils.get_all_devices(outputs)
         for device in output_devices:

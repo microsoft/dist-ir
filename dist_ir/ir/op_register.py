@@ -41,7 +41,7 @@ class OpRegisterEntry:
             op.add_out_edge(Value(output_name, value_type=output_type()))
 
 
-class AllreduceOpRegisterEntry(OpRegisterEntry):
+class AllreduceGatherOpRegisterEntry(OpRegisterEntry):
     # TODO: Remove this and handle generic types in OpRegisterEntry
     def infer_types(self, op, output_names=None):
         inputs = op.get_in_edges()
@@ -146,7 +146,7 @@ class SplitOpRegisterEntry(OpRegisterEntry):
 
 OpRegister = {
     "Add": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
-    "Allreduce": AllreduceOpRegisterEntry(
+    "Allreduce": AllreduceGatherOpRegisterEntry(
         input_types=[TupleType[Tensor]], output_types=[TupleType[Tensor]]
     ),
     "Broadcast": BroadcastScatterOpRegisterEntry(
@@ -154,6 +154,9 @@ OpRegister = {
     ),
     "BroadcastGradientArgs": OpRegisterEntry(
         input_types=[Tensor, Tensor], output_types=[Tensor, Tensor]
+    ),
+    "Gather": AllreduceGatherOpRegisterEntry(
+        input_types=[TupleType[Tensor]], output_types=[TupleType[Tensor]]
     ),
     "Gemm": OpRegisterEntry(
         input_types=[Tensor, Tensor, Tensor], output_types=[Tensor]

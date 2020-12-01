@@ -49,6 +49,10 @@ def _infer_shapes_for_broadcast(op, inputs, outputs):
         output_type.set_device(device)
 
 
+def _infer_shapes_for_gather(op, inputs, outputs):
+    outputs[0].type = copy.deepcopy(inputs[0].type)
+
+
 def _infer_shapes_for_matmul(op, inputs, outputs):
     # TODO: Handle input tensors with > 2 dimensions
     input_shapes = _get_shapes(inputs)
@@ -135,6 +139,7 @@ ShapeInferenceRegister = {
     "Add": _infer_shapes_for_add,
     "Allreduce": _infer_shapes_for_allreduce,
     "Broadcast": _infer_shapes_for_broadcast,
+    "Gather": _infer_shapes_for_gather,
     "Loss": _infer_shapes_for_loss,
     "LossGrad": _infer_shapes_for_loss_grad,
     "MatMul": _infer_shapes_for_matmul,

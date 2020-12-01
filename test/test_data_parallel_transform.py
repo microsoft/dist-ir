@@ -16,7 +16,11 @@ def test_single_variable_partition():
     b = module.add_input_value("b", Tensor(Float(), (4, 4)))
     x = module.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
     module.finalize()
-    transform = DataParallelTransform(partition_map={"a": 0}, devices=[d0, d1])
+    transform = DataParallelTransform(
+        batch_dims={"a": 0},
+        reduction_params={"x": {"op_type": "Gather"}},
+        devices=[d0, d1],
+    )
     transformed_module = transform.apply(module)
 
     print("-" * 88)
@@ -32,7 +36,7 @@ def test_single_variable_partition():
     assert transformed_module.is_op("Scatter/a")
     assert transformed_module.is_op("Broadcast/b")
     assert transformed_module.is_op("Pmap_#0")
-    assert transformed_module.is_op("Allreduce/x")
+    assert transformed_module.is_op("Gather/x")
 
 
 def test_double_variable_partition():
@@ -47,7 +51,11 @@ def test_double_variable_partition():
     x = module.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
     y = module.add_op("MatMul", "MatMul1", inputs=[x, c], output_names=["y"])
     module.finalize()
-    transform = DataParallelTransform(partition_map={"a": 0, "c": 0}, devices=[d0, d1])
+    transform = DataParallelTransform(
+        batch_dims={"a": 0, "c": 0},
+        reduction_params={"y": {"op_type": "Gather"}},
+        devices=[d0, d1],
+    )
     transformed_module = transform.apply(module)
 
     print("-" * 88)
@@ -64,7 +72,7 @@ def test_double_variable_partition():
     assert transformed_module.is_op("Broadcast/b")
     assert transformed_module.is_op("Scatter/c")
     assert transformed_module.is_op("Pmap_#0")
-    assert transformed_module.is_op("Allreduce/y")
+    assert transformed_module.is_op("Gather/y")
 
 
 def test_mnist():
@@ -88,7 +96,16 @@ def test_mnist():
         "MatMulGrad", "MatMul0Grad", inputs=[x, wA, da], output_names=["dx", "dwA"]
     )
     module.finalize()
-    transform = DataParallelTransform(partition_map={"x": 0, "z": 0}, devices=[d0, d1])
+    transform = DataParallelTransform(
+        batch_dims={"x": 0, "z": 0},
+        reduction_params={
+            "l": {"op_type": "Gather"},
+            "dx": {"op_type": "Gather"},
+            "dwA": {"op_type": "Allreduce"},
+            "dwB": {"op_type": "Allreduce"},
+        },
+        devices=[d0, d1],
+    )
     transformed_module = transform.apply(module)
 
     print("-" * 88)
@@ -106,8 +123,8 @@ def test_mnist():
     assert transformed_module.is_op("Broadcast/wA")
     assert transformed_module.is_op("Broadcast/wB")
     assert transformed_module.is_op("Pmap_#0")
-    assert transformed_module.is_op("Allreduce/l")
-    assert transformed_module.is_op("Allreduce/dx")
+    assert transformed_module.is_op("Gather/l")
+    assert transformed_module.is_op("Gather/dx")
     assert transformed_module.is_op("Allreduce/dwA")
     assert transformed_module.is_op("Allreduce/dwB")
 

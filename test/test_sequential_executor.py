@@ -223,12 +223,13 @@ def test_pmap_on_executor():
     y = submodule.add_input_value("y", y_type(None))
     _ = submodule.add_op("Add", "Add0", inputs=[x, x], output_names=["w"])
     _ = submodule.add_op("MatMul", "MatMul0", inputs=[x, y], output_names=["z"])
+    submodule.finalize()
     _ = module.add_op(
         "Pmap",
         inputs=[xs, ys],
         attributes={"devices": [d0, d1]},
         submodules=[submodule],
-        output_names=["zis", "wis"],
+        output_names=["wis", "zis"],
     )
     module.finalize()
     infer_shapes(module)
@@ -239,7 +240,29 @@ def test_pmap_on_executor():
     assert np.array_equal(res["zis"][0], np.matmul(_x_0, _y_0))
     assert np.array_equal(res["zis"][1], np.matmul(_x_1, _y_1))
 
-    # TODO Test pmap with only one device
+    # A pmap with a single device
+    module = Module()
+    xs = module.add_input_value("xs", TupleType((x_type(None),)))
+    ys = module.add_input_value("ys", TupleType((y_type(None),)))
+    submodule = Module()
+    x = submodule.add_input_value("x", x_type(None))
+    y = submodule.add_input_value("y", y_type(None))
+    _ = submodule.add_op("Add", "Add0", inputs=[x, x], output_names=["w"])
+    _ = submodule.add_op("MatMul", "MatMul0", inputs=[x, y], output_names=["z"])
+    submodule.finalize()
+    _ = module.add_op(
+        "Pmap",
+        inputs=[xs, ys],
+        attributes={"devices": [d0]},
+        submodules=[submodule],
+        output_names=["wis", "zis"],
+    )
+    module.finalize()
+    infer_shapes(module)
+
+    res = ex.compute(module, {"xs": (_x_0,), "ys": (_y_0,)})
+    assert np.array_equal(res["wis"][0], _x_0 + _x_0)
+    assert np.array_equal(res["zis"][0], np.matmul(_x_0, _y_0))
 
 
 def test_pmap_dp():

@@ -1,5 +1,5 @@
 from collections import OrderedDict, defaultdict
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, Iterable, List, Tuple, Union
 
 from .op import Op
 from .value import Value
@@ -105,19 +105,12 @@ class Module:
         self._ops[name] = op
         self._op_counter[op_type] += 1
 
-        # Update the module outputs.
+        # Update _consumers.
         out_edges = op.get_out_edges()
         for out_edge in out_edges:
-            if out_edge.name in self._outputs:
-                raise ValueError(
-                    f"Module already has output value with name {out_edge.name}"
-                )
-            self._outputs[out_edge.name] = out_edge
             self._consumers[out_edge.name] = 0
         for in_edge in inputs:
-            if in_edge.name in self._outputs:
-                self._consumers[in_edge.name] += 1
-                del self._outputs[in_edge.name]
+            self._consumers[in_edge.name] += 1
 
         # Return the op outputs.
         num_out_edges = len(out_edges)
@@ -139,7 +132,24 @@ class Module:
     def get_consumers_for_out_edge(self, name):
         return self._consumers[name]
 
-    def find_output_values(self):
+    def set_outputs(self, outputs: Iterable[Value]):
+        """Sets the output of this module to be the given values. They must be
+        valid values, i.e. outputs of some existing op in the module. This clears
+        any previous outputs registered with this module.
+        """
+        for output in outputs:
+            # NOTE: Using consumers as a proxy for valid values
+            if output not in self._consumers:
+                raise ValueError(f"Module has no value {output}")
+        self._outputs.clear()
+        for output in outputs:
+            if output.name in self._outputs:
+                raise ValueError(
+                    f"Module already has output value with name {output.name}"
+                )
+            self._outputs[output.name] = output
+
+    def set_outputs_auto(self):
         """Marks all sink nodes in the graph as output values."""
         all_values = {}
         consumed_values = {}
@@ -195,3 +205,12 @@ class Module:
                     )
             for out_edge in op.get_out_edges():
                 seen.add(out_edge.name)
+
+    def finalize(self):
+        """Performs some standard verification and inference passes. Use at the
+        end whenever creating a module.
+        """
+        self.verify_ops_in_topological_order()
+        if len(self._outputs) == 0:
+            self.set_outputs_auto()
+        # TODO should we also do shape inference here?

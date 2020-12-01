@@ -43,6 +43,7 @@ def backend(request):
 def test_single_add(backend):
     h = Helper(backend)
     h.module.add_op("Add", "Add_0", inputs=[h.t1, h.t2])
+    h.module.finalize()
     output_data = h.executor.compute(h.module, h.input_data)
     result = output_data["Add_0/0"]
     if h.backend == "numpy":
@@ -55,6 +56,7 @@ def test_double_add(backend):
     h = Helper(backend)
     x = h.module.add_op("Add", "Add_0", inputs=[h.t1, h.t2])
     h.module.add_op("Add", "Add_1", inputs=[h.t3, x])
+    h.module.finalize()
     output_data = h.executor.compute(h.module, h.input_data)
     result = output_data["Add_1/0"]
     if h.backend == "numpy":
@@ -75,6 +77,7 @@ def test_double_add_inverted(backend):
     h = Helper(backend)
     x = h.module.add_op("Add", "Add_0", inputs=[h.t1, h.t2])
     h.module.add_op("Add", "Add_1", inputs=[x, h.t3])
+    h.module.finalize()
     output_data = h.executor.compute(h.module, h.input_data)
     result = output_data["Add_1/0"]
     if h.backend == "numpy":
@@ -94,6 +97,7 @@ def test_double_add_inverted(backend):
 def test_single_matmul(backend):
     h = Helper(backend)
     h.module.add_op("MatMul", "MatMul_0", inputs=[h.t1, h.t2])
+    h.module.finalize()
     output_data = h.executor.compute(h.module, h.input_data)
     result = output_data["MatMul_0/0"]
     if h.backend == "numpy":
@@ -106,6 +110,7 @@ def test_double_matmul(backend):
     h = Helper(backend)
     x = h.module.add_op("MatMul", "MatMul_0", inputs=[h.t1, h.t2])
     h.module.add_op("MatMul", "MatMul_1", inputs=[h.t3, x])
+    h.module.finalize()
     output_data = h.executor.compute(h.module, h.input_data)
     result = output_data["MatMul_1/0"]
     if h.backend == "numpy":
@@ -128,6 +133,7 @@ def test_double_matmul_inverted(backend):
     h = Helper(backend)
     x = h.module.add_op("MatMul", "MatMul_0", inputs=[h.t1, h.t2])
     h.module.add_op("MatMul", "MatMul_1", inputs=[x, h.t3])
+    h.module.finalize()
     output_data = h.executor.compute(h.module, h.input_data)
     result = output_data["MatMul_1/0"]
     if h.backend == "numpy":
@@ -169,6 +175,8 @@ def test_pmap_on_executor():
     submodule = Module()
     x = submodule.add_input_value("x", x_type(None))
     _ = submodule.add_op("Add", "Add0", inputs=[x, x], output_names=["z"])
+    # submodule.set_outputs()
+    submodule.finalize()
     _ = module.add_op(
         "Pmap",
         inputs=[xs],
@@ -176,6 +184,7 @@ def test_pmap_on_executor():
         submodules=[submodule],
         output_names=["zis"],
     )
+    module.finalize()
     infer_shapes(module)
 
     res = ex.compute(module, {"xs": (_x_0, _x_1)})
@@ -190,6 +199,7 @@ def test_pmap_on_executor():
     x = submodule.add_input_value("x", x_type(None))
     y = submodule.add_input_value("y", y_type(None))
     _ = submodule.add_op("MatMul", "MatMul0", inputs=[x, y], output_names=["z"])
+    submodule.finalize()
     _ = module.add_op(
         "Pmap",
         inputs=[xs, ys],
@@ -197,6 +207,7 @@ def test_pmap_on_executor():
         submodules=[submodule],
         output_names=["zis"],
     )
+    module.finalize()
     infer_shapes(module)
 
     res = ex.compute(module, {"xs": (_x_0, _x_1), "ys": (_y_0, _y_1)})
@@ -219,6 +230,7 @@ def test_pmap_on_executor():
         submodules=[submodule],
         output_names=["zis", "wis"],
     )
+    module.finalize()
     infer_shapes(module)
 
     res = ex.compute(module, {"xs": (_x_0, _x_1), "ys": (_y_0, _y_1)})
@@ -261,6 +273,7 @@ def test_pmap_dp():
     wB = submodule.add_input_value("wB", Tensor(Float(), (2, 1)))
     y = submodule.add_op("MatMul", "MatMul0", inputs=[x, wA], output_names=["y"])
     _ = submodule.add_op("MatMul", "MatMul1", inputs=[y, wB], output_names=["z"])
+    submodule.finalize()
     _ = module.add_op(
         "Pmap",
         inputs=[xs, wAs, wBs],
@@ -269,6 +282,7 @@ def test_pmap_dp():
         output_names=["zis"],
     )
 
+    module.finalize()
     # TODO does this have to be run every time a module is constructed?
     infer_shapes(module)
 
@@ -283,3 +297,7 @@ def test_pmap_dp():
     )
     assert np.array_equal(res["zis"][0], np.matmul(np.matmul(x_0, _wA), _wB))
     assert np.array_equal(res["zis"][1], np.matmul(np.matmul(x_1, _wA), _wB))
+
+
+if __name__ == "__main__":
+    test_pmap_on_executor()

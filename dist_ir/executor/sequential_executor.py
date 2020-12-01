@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from .backend_register import BackendRegister
 from ..ir import Module, Op
@@ -10,7 +10,7 @@ class SequentialExecutor:
             raise ValueError(f"Unknown backend {backend}")
         self._backend = backend
 
-    def _compute_op(self, op: Op, inputs):
+    def _compute_op(self, op: Op, inputs: List[Any]):
         """Executes the given op and returns its outputs."""
         op_type = op.op_type
         if op_type == "Pmap":
@@ -23,7 +23,8 @@ class SequentialExecutor:
                 inp_names = (e.name for e in op.get_submodule(0).get_inputs())
                 inp_data = {n: v for n, v in zip(inp_names, inps)}
                 outs = self.compute(op.get_submodule(0), inp_data)
-                # TODO match output names to output data
+                # TODO match output names to output data (currently, we assume
+                # submodule outputs and pmap outputs are in the same order)
                 results.append(outs.values())
             # Unzip the results
             results = tuple(zip(*results))

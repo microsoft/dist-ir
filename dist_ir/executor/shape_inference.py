@@ -105,6 +105,24 @@ def _infer_shapes_for_scatter(op, inputs, outputs):
         output_type.set_device(device)
 
 
+def _infer_shapes_for_select(op, inputs, outputs):
+    dim = op.get_attribute("dim")
+    outputs[0].type.shape = inputs[0].type.types[dim].shape
+
+
+def _infer_shapes_for_send(op, inputs, outputs):
+    outputs[0].type.shape = inputs[0].type.shape
+
+
+def _infer_shapes_for_split(op, inputs, outputs):
+    num_splits = op.get_attribute("num_splits")
+    split_dim = op.get_attribute("split_dim")
+    output_shape = list(inputs[0].type.shape)
+    output_shape[split_dim] //= num_splits
+    for typ in outputs[0].type.types:
+        typ.shape = tuple(output_shape)
+
+
 ShapeInferenceRegister = {
     "Add": _infer_shapes_for_add,
     "Allreduce": _infer_shapes_for_allreduce,
@@ -115,6 +133,9 @@ ShapeInferenceRegister = {
     "MatMulGrad": _infer_shapes_for_matmul_grad,
     "Pmap": _infer_shapes_for_pmap,
     "Scatter": _infer_shapes_for_scatter,
+    "Select": _infer_shapes_for_select,
+    "Send": _infer_shapes_for_send,
+    "Split": _infer_shapes_for_split,
 }
 
 
@@ -125,7 +146,7 @@ def _infer_shapes(module):
       module: The module to infer shapes for.
     """
 
-    for _, op in module.get_ops().items():
+    for op_name, op in module.get_ops().items():
         inputs = op.get_in_edges()
         outputs = op.get_out_edges()
 
@@ -133,7 +154,8 @@ def _infer_shapes(module):
         for input in inputs:
             assert input.type is not None
             if isinstance(input.type, Tensor):
-                assert input.type.shape is not None
+                if input.type.shape is None:
+                    raise ValueError(f"Input {input.name} of op {op_name} has no shape")
 
         ShapeInferenceRegister[op.op_type](op, inputs, outputs)
         # TODO maybe the register gives back the output types and we can check

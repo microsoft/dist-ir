@@ -210,7 +210,10 @@ class Module:
         """Performs some standard verification and inference passes. Use at the
         end whenever creating a module.
         """
+        # Putting this import at the top level causes an import loop
+        from ..executor.shape_inference import infer_shapes
+
         self.verify_ops_in_topological_order()
         if len(self._outputs) == 0:
             self.set_outputs_auto()
-        # TODO should we also do shape inference here?
+        infer_shapes(self)

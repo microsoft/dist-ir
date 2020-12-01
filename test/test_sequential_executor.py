@@ -185,7 +185,6 @@ def test_pmap_on_executor():
         output_names=["zis"],
     )
     module.finalize()
-    infer_shapes(module)
 
     res = ex.compute(module, {"xs": (_x_0, _x_1)})
     assert np.array_equal(res["zis"][0], _x_0 + _x_0)
@@ -208,7 +207,6 @@ def test_pmap_on_executor():
         output_names=["zis"],
     )
     module.finalize()
-    infer_shapes(module)
 
     res = ex.compute(module, {"xs": (_x_0, _x_1), "ys": (_y_0, _y_1)})
     assert np.array_equal(res["zis"][0], np.matmul(_x_0, _y_0))
@@ -232,7 +230,6 @@ def test_pmap_on_executor():
         output_names=["wis", "zis"],
     )
     module.finalize()
-    infer_shapes(module)
 
     res = ex.compute(module, {"xs": (_x_0, _x_1), "ys": (_y_0, _y_1)})
     assert np.array_equal(res["wis"][0], _x_0 + _x_0)
@@ -258,7 +255,6 @@ def test_pmap_on_executor():
         output_names=["wis", "zis"],
     )
     module.finalize()
-    infer_shapes(module)
 
     res = ex.compute(module, {"xs": (_x_0,), "ys": (_y_0,)})
     assert np.array_equal(res["wis"][0], _x_0 + _x_0)
@@ -304,10 +300,7 @@ def test_pmap_dp():
         submodules=[submodule],
         output_names=["zis"],
     )
-
     module.finalize()
-    # TODO does this have to be run every time a module is constructed?
-    infer_shapes(module)
 
     ex = SequentialExecutor("numpy")
     _x = np.arange(16 * 4).reshape((16, 4))

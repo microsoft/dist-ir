@@ -1,10 +1,9 @@
-import pytest
-
 from dist_ir.ir import Module
 from dist_ir.ir.type import Float, Tensor
 from dist_ir.ir.device import Device
 from dist_ir.transforms import DataParallelTransform
-from dist_ir.executor.shape_inference import infer_shapes
+
+# TODO test on actual inputs using sequential executor
 
 
 def test_single_variable_partition():

@@ -88,10 +88,13 @@ class DataParallelTransform:
                     output_names=[f"{output_value.name}s"],
                 )
             elif reduction_op_type == "Gather":
+                dim = self._reduction_params[output_value.name]["dim"]
+                device = self._reduction_params[output_value.name]["device"]
                 transformed_module.add_op(
                     "Gather",
                     name=f"Gather/{output_value.name}",
                     inputs=[pmap_output_values[i]],
+                    attributes={"dim": dim, "device": device},
                     output_names=[f"{output_value.name}s"],
                 )
             else:

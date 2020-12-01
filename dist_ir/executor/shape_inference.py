@@ -50,7 +50,14 @@ def _infer_shapes_for_broadcast(op, inputs, outputs):
 
 
 def _infer_shapes_for_gather(op, inputs, outputs):
-    outputs[0].type = copy.deepcopy(inputs[0].type)
+    dim = op.get_attribute("dim")
+    device = op.get_attribute("device")
+    output_shape = list(inputs[0].type.types[0].shape)
+    for typ in inputs[0].type.types[1:]:
+        output_shape[dim] += typ.shape[dim]
+    outputs[0].type.dtype = inputs[0].type.types[0].dtype
+    outputs[0].type.shape = output_shape
+    outputs[0].type.set_device(device)
 
 
 def _infer_shapes_for_matmul(op, inputs, outputs):

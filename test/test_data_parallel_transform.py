@@ -18,7 +18,7 @@ def test_single_variable_partition():
     module.finalize()
     transform = DataParallelTransform(
         batch_dims={"a": 0},
-        reduction_params={"x": {"op_type": "Gather"}},
+        reduction_params={"x": {"op_type": "Gather", "dim": 0, "device": d0}},
         devices=[d0, d1],
     )
     transformed_module = transform.apply(module)
@@ -53,7 +53,7 @@ def test_double_variable_partition():
     module.finalize()
     transform = DataParallelTransform(
         batch_dims={"a": 0, "c": 0},
-        reduction_params={"y": {"op_type": "Gather"}},
+        reduction_params={"y": {"op_type": "Gather", "dim": 0, "device": d0}},
         devices=[d0, d1],
     )
     transformed_module = transform.apply(module)
@@ -99,8 +99,8 @@ def test_mnist():
     transform = DataParallelTransform(
         batch_dims={"x": 0, "z": 0},
         reduction_params={
-            "l": {"op_type": "Gather"},
-            "dx": {"op_type": "Gather"},
+            "l": {"op_type": "Gather", "dim": 0, "device": d0},
+            "dx": {"op_type": "Gather", "dim": 0, "device": d0},
             "dwA": {"op_type": "Allreduce"},
             "dwB": {"op_type": "Allreduce"},
         },

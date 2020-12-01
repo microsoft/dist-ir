@@ -42,7 +42,7 @@ def test_data_parallel():
     module.finalize()
     transform = DataParallelTransform(
         batch_dims={"a": 0},
-        reduction_params={"y": {"op_type": "Gather"}},
+        reduction_params={"y": {"op_type": "Gather", "dim": 0, "device": d0}},
         devices=[d0, d1],
     )
     transformed_module = transform.apply(module)

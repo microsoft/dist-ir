@@ -67,9 +67,16 @@ class PipelineParallelTransform:
             merged_outputs[orig_output.name] = pipelined_output
         else:
             merged_output = merged_outputs[orig_output.name]
-            if reduction_op_type == "Add":
-                op_name = f"Add/{merged_output.name}-{pipelined_output.name}"
+
+            op_name = (
+                f"{reduction_op_type}/{merged_output.name}-{pipelined_output.name}"
+            )
+            if num_completed_microbatches == self._num_microbatches:
+                output_name = orig_output.name
+            else:
                 output_name = f"{orig_output.name}/merged_{num_completed_microbatches}"
+
+            if reduction_op_type == "Add":
                 merged_outputs[orig_output.name] = transformed_module.add_op(
                     "Add",
                     name=op_name,
@@ -78,8 +85,6 @@ class PipelineParallelTransform:
                 )
             elif reduction_op_type == "Concat":
                 dim = self._reduction_params[orig_output.name]["dim"]
-                op_name = f"Concat/{merged_output.name}-{pipelined_output.name}"
-                output_name = f"{orig_output.name}/merged_{num_completed_microbatches}"
                 merged_outputs[orig_output.name] = transformed_module.add_op(
                     "Concat",
                     attributes={"dim": dim},
@@ -178,28 +183,3 @@ class PipelineParallelTransform:
                         )
 
         return transformed_module
-
-    # TODO: Move this to a separate scheduler
-    """
-    # Enumerate the ops to schedule on each device across all microbatches.
-    ops_to_schedule = defaultdict(lambda: defaultdict(set))
-    for i in range(self._num_microbatches):
-        for op_name in module.get_ops():
-            device = partition_map[op_name]
-            ops_to_schedule[device].add((op_name, i))
-
-    # Schedule the ops.
-    # TODO: Move this to a modular scheduler?
-    schedule = defaultdict(lambda: defaultdict(list))
-    consumers = 
-    timestep = 0
-    done = False
-    while not done:
-        for device in ops_to_schedule: 
-            ready_ops = []  # TODO: Get ready ops
-            if len(ready_ops) > 0:
-                schedule[timestep][device] = ready_ops[0]
-                ops_to_schedule[device].remove(ready_ops[0])
-        timestemp += 1
-        done = any([len(ops_to_schedule[device]) > 0 for device in ops_to_schedule])
-    """

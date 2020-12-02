@@ -43,7 +43,15 @@ def test_mnist():
 
     infer_shapes(module)
     transform = PipelineParallelTransform(
-        num_microbatches=2, inputs_to_partition={"x": 0, "z": 0}, schedule=schedule
+        num_microbatches=2,
+        batch_dims={"x": 0, "z": 0},
+        reduction_params={
+            "dwB": {"op_type": "Add"},
+            "dwA": {"op_type": "Add"},
+            "l": {"op_type": "Add"},
+            "dx": None,
+        },
+        schedule=schedule,
     )
     transformed_module = transform.apply(module)
     infer_shapes(transformed_module)

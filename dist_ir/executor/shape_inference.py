@@ -28,7 +28,7 @@ def _infer_shapes_for_add(op, inputs, outputs):
     if input_shapes[0] != input_shapes[1]:
         _error_invalid_shapes(op, input_shapes)
 
-    output_shape = (input_shapes[0][0], input_shapes[0][1])
+    output_shape = input_shapes[0]
     output_type = Tensor(
         dtype=inputs[0].type.dtype, shape=output_shape, device=inputs[0].type.device
     )

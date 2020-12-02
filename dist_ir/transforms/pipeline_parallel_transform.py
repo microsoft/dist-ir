@@ -10,37 +10,31 @@ class PipelineParallelTransform:
 
     Attributes:
       num_microbatches: The number of microbatches per pipeline iteration.
-      inputs_to_partition: A map from input value name to partition dimension.
+      batch_dims: A map from input value name to partition dimension.
+      reduction_ops: A map from output value name to a map of reduction op params.
       schedule: A list of maps from device to a tuple of (op_name, microbatch).
     """
 
-    def __init__(self, num_microbatches, inputs_to_partition, schedule):
+    def __init__(self, num_microbatches, batch_dims, reduction_params, schedule):
         self._num_microbatches = num_microbatches
-        self._inputs_to_partition = inputs_to_partition
+        self._batch_dims = batch_dims
+        self._reduction_params = reduction_params
         self._schedule = schedule
 
-    def apply(self, module):
-
-        transformed_module = Module()
-
-        # A map from original value name to another map from microbatch number to
-        # pipelined value.
-        pipelined_value_map = defaultdict(lambda: defaultdict(Value))
-
-        # Partition the input values according to the number of microbatches.
+    def _partition_inputs(self, module, transformed_module, pipelined_value_map):
         input_values = module.get_inputs()
         for input_value in input_values:
             v = transformed_module.add_input_value(
                 input_value.name, copy.deepcopy(input_value.type)
             )
-            if input_value.name in self._inputs_to_partition:
+            if input_value.name in self._batch_dims:
                 vs = transformed_module.add_op(
                     "Split",
                     name=f"Split/{v.name}",
                     inputs=[v],
                     attributes={
                         "num_splits": self._num_microbatches,
-                        "split_dim": self._inputs_to_partition[input_value.name],
+                        "split_dim": self._batch_dims[input_value.name],
                     },
                     output_names=[f"{v.name}s"],
                 )
@@ -58,6 +52,61 @@ class PipelineParallelTransform:
                 for i in range(self._num_microbatches):
                     pipelined_value_map[input_value.name][i] = v
 
+    def _aggregate_outputs(
+        self,
+        transformed_module,
+        orig_output,
+        pipelined_output,
+        merged_outputs,
+        num_completed_microbatches,
+    ):
+        if self._reduction_params[orig_output.name] is None:
+            return
+        reduction_op_type = self._reduction_params[orig_output.name]["op_type"]
+        if num_completed_microbatches == 1:
+            merged_outputs[orig_output.name] = pipelined_output
+        else:
+            merged_output = merged_outputs[orig_output.name]
+            if reduction_op_type == "Add":
+                op_name = f"Add/{merged_output.name}-{pipelined_output.name}"
+                output_name = f"{orig_output.name}/merged_{num_completed_microbatches}"
+                merged_outputs[orig_output.name] = transformed_module.add_op(
+                    "Add",
+                    name=op_name,
+                    inputs=[merged_output, pipelined_output],
+                    output_names=[output_name],
+                )
+            elif reduction_op_type == "Concat":
+                dim = self._reduction_params[orig_output.name]["dim"]
+                op_name = f"Concat/{merged_output.name}-{pipelined_output.name}"
+                output_name = f"{orig_output.name}/merged_{num_completed_microbatches}"
+                merged_outputs[orig_output.name] = transformed_module.add_op(
+                    "Concat",
+                    attributes={"dim": dim},
+                    name=op_name,
+                    inputs=[merged_output, pipelined_output],
+                    output_names=[output_name],
+                )
+            else:
+                raise ValueError(
+                    f"Unknown reduction op type {reduction_op_type} "
+                    f"for output {orig_output}"
+                )
+
+    def apply(self, module):
+
+        transformed_module = Module()
+
+        # A map from original value name to another map from microbatch number to
+        # pipelined value.
+        pipelined_value_map = defaultdict(lambda: defaultdict(Value))
+
+        # A map from original output value name to merged output value.
+        merged_outputs = defaultdict(Value)
+
+        # Partition the input values according to the number of microbatches.
+        self._partition_inputs(module, transformed_module, pipelined_value_map)
+
         # Schedule ops on each device in order of increasing timestep.
         for timestep in range(len(self._schedule)):
             for device in self._schedule[timestep]:
@@ -65,8 +114,9 @@ class PipelineParallelTransform:
                 orig_op = module.get_op(op_name)
                 orig_inputs = orig_op.get_in_edges()
                 orig_outputs = orig_op.get_out_edges()
-                pipelined_inputs = []
+
                 # Collect the pipelined input values for this op.
+                pipelined_inputs = []
                 for orig_input in orig_inputs:
                     pipelined_input_map = pipelined_value_map[orig_input.name]
                     pipelined_input = pipelined_input_map[microbatch]
@@ -84,7 +134,7 @@ class PipelineParallelTransform:
                         # for all other microbatches.
                         if (
                             module.is_input(orig_input.name)
-                            and not orig_input.name in self._inputs_to_partition
+                            and not orig_input.name in self._batch_dims
                         ):
                             for mb in pipelined_input_map:
                                 if mb != microbatch:
@@ -92,11 +142,12 @@ class PipelineParallelTransform:
                                         microbatch
                                     ]
                     pipelined_inputs.append(pipelined_input_map[microbatch])
+
+                # Add the pipelined version of the op for the given microbatch to
+                # the transformed module.
                 pipelined_output_names = [
                     f"{orig_output.name}_{microbatch}" for orig_output in orig_outputs
                 ]
-                # Add the pipelined version of the op for the given microbatch to
-                # the transformed module.
                 pipelined_outputs = transformed_module.add_op(
                     orig_op.op_type,
                     name=f"{orig_op.name}_{microbatch}",
@@ -104,6 +155,7 @@ class PipelineParallelTransform:
                     inputs=pipelined_inputs,
                     output_names=pipelined_output_names,
                 )
+
                 # Update the pipelined value map with the newly generated output values.
                 if not isinstance(pipelined_outputs, tuple):
                     pipelined_outputs = (pipelined_outputs,)
@@ -112,7 +164,18 @@ class PipelineParallelTransform:
                 ):
                     pipelined_value_map[orig_output.name][microbatch] = pipelined_output
 
-        # TODO: Aggregate outputs
+                    # Aggregate outputs.
+                    if module.is_output(orig_output.name):
+                        num_completed_microbatches = len(
+                            pipelined_value_map[orig_output.name]
+                        )
+                        self._aggregate_outputs(
+                            transformed_module,
+                            orig_output,
+                            pipelined_output,
+                            merged_outputs,
+                            num_completed_microbatches,
+                        )
 
         return transformed_module
 

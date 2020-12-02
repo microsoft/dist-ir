@@ -1,10 +1,9 @@
-import pytest
-
 from dist_ir.ir import Module
 from dist_ir.ir.type import Float, Tensor
 from dist_ir.ir.device import Device
 from dist_ir.transforms import DataParallelTransform
-from dist_ir.executor.shape_inference import infer_shapes
+
+# TODO test on actual inputs using sequential executor
 
 
 def test_single_variable_partition():
@@ -16,6 +15,7 @@ def test_single_variable_partition():
     a = module.add_input_value("a", Tensor(Float(), (4, 4)))
     b = module.add_input_value("b", Tensor(Float(), (4, 4)))
     x = module.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
+    module.finalize()
     transform = DataParallelTransform(partition_map={"a": 0}, devices=[d0, d1])
     transformed_module = transform.apply(module)
 
@@ -46,6 +46,7 @@ def test_double_variable_partition():
     c = module.add_input_value("c", Tensor(Float(), (4, 4)))
     x = module.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
     y = module.add_op("MatMul", "MatMul1", inputs=[x, c], output_names=["y"])
+    module.finalize()
     transform = DataParallelTransform(partition_map={"a": 0, "c": 0}, devices=[d0, d1])
     transformed_module = transform.apply(module)
 
@@ -86,6 +87,7 @@ def test_mnist():
     dx, dwA = module.add_op(
         "MatMulGrad", "MatMul0Grad", inputs=[x, wA, da], output_names=["dx", "dwA"]
     )
+    module.finalize()
     transform = DataParallelTransform(partition_map={"x": 0, "z": 0}, devices=[d0, d1])
     transformed_module = transform.apply(module)
 

@@ -18,7 +18,7 @@ def _get_shapes(values):
 
 def _error_invalid_shapes(op, input_shapes):
     raise ValueError(
-        f"Op {op.name} (op.type): Incompatible input shapes {input_shapes}"
+        f"Op {op.name} ({op.op_type}): Incompatible input shapes {input_shapes}"
     )
 
 

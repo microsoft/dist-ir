@@ -4,7 +4,6 @@ from dist_ir.ir.type import Float
 from dist_ir.ir.type import Tensor
 from dist_ir.executor.cost_inference import CostModel
 from dist_ir.executor import DistributedSimulator
-from dist_ir.executor.shape_inference import infer_shapes
 from dist_ir.transforms import DataParallelTransform
 
 
@@ -17,7 +16,7 @@ def test_single_device():
     a = module.add_input_value("a", Tensor(dtype=Float(), shape=(4, 4), device=d))
     b = module.add_input_value("b", Tensor(dtype=Float(), shape=(4, 4), device=d))
     x = module.add_op("MatMul", "MatMul0", inputs=[a, b])
-    infer_shapes(module)
+    module.finalize()
     device_speeds = {"gpu": 1.0e13}
     cost_model = CostModel(topology, device_speeds)
     simulator = DistributedSimulator(cost_model)
@@ -40,10 +39,11 @@ def test_data_parallel():
     c = module.add_input_value("c", Tensor(Float(), (4, 4), device=d0))
     x = module.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
     y = module.add_op("MatMul", "MatMul1", inputs=[x, c], output_names=["y"])
+    module.finalize()
     transform = DataParallelTransform(partition_map={"a": 0}, devices=[d0, d1])
     transformed_module = transform.apply(module)
 
-    infer_shapes(transformed_module)
+    transformed_module.finalize()
     print(transformed_module)
     device_speeds = {"gpu": 1.0e13}
     cost_model = CostModel(topology, device_speeds)

@@ -142,6 +142,7 @@ def test_pmap():
     wB = submodule.add_input_value("wB", Tensor(Float(), (2, 1)))
     y = submodule.add_op("MatMul", "MatMul0", inputs=[x, wA], output_names=["y"])
     z = submodule.add_op("MatMul", "MatMul1", inputs=[y, wB], output_names=["z"])
+    submodule.finalize()
 
     zis = module.add_op(
         "Pmap",

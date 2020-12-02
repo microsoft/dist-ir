@@ -66,6 +66,8 @@ def test_mnist():
     print("-" * 88)
     print(transformed_module)
 
+    # TODO: Assert output matches between original module and transformed module
+
 
 if __name__ == "__main__":
     test_mnist()

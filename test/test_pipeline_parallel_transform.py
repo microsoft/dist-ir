@@ -27,6 +27,7 @@ def test_mnist():
     dx, dwA = module.add_op(
         "MatMulGrad", "MatMul0Grad", inputs=[x, wA, da], output_names=["dx", "dwA"]
     )
+    module.finalize()
 
     schedule = [
         {d0: ("MatMul0", 0)},
@@ -41,7 +42,6 @@ def test_mnist():
         {d0: ("MatMul0Grad", 1)},
     ]
 
-    infer_shapes(module)
     transform = PipelineParallelTransform(
         num_microbatches=2,
         batch_dims={"x": 0, "z": 0},
@@ -54,7 +54,7 @@ def test_mnist():
         schedule=schedule,
     )
     transformed_module = transform.apply(module)
-    infer_shapes(transformed_module)
+    transformed_module.finalize()
 
     print("-" * 88)
     print("Original module")

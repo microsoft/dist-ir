@@ -16,12 +16,14 @@ class DataParallelTransform:
     from each replica through Allreduce operators.
 
     Attributes:
-      partition_map: A map from Value name to partition dimension.
+      batch_dims: A map from input value name to partition dimension.
+      reduction_params: A map from output value name to a map of reduction op params.
       devices: The devices over which to partition the model.
     """
 
-    def __init__(self, partition_map, devices):
-        self._partition_map = partition_map
+    def __init__(self, batch_dims, reduction_params, devices):
+        self._batch_dims = batch_dims
+        self._reduction_params = reduction_params
         self._devices = devices
 
     def apply(self, module):
@@ -30,20 +32,22 @@ class DataParallelTransform:
 
         # Either scatter or broadcast each input value depending on what the user
         # has requested.
+        # TODO: Add explicit Send ops if the source device is not one of the
+        #       destination devices.
         input_values = module.get_inputs()
         pmap_input_values = []
         for input_value in input_values:
             v = transformed_module.add_input_value(
                 input_value.name, copy.deepcopy(input_value.type)
             )
-            if input_value.name in self._partition_map:
+            if input_value.name in self._batch_dims:
                 vs = transformed_module.add_op(
                     "Scatter",
                     name=f"Scatter/{v.name}",
                     inputs=[v],
                     attributes={
                         "devices": self._devices,
-                        "split_dim": self._partition_map[input_value.name],
+                        "split_dim": self._batch_dims[input_value.name],
                     },
                     output_names=[f"{v.name}s"],
                 )
@@ -75,13 +79,32 @@ class DataParallelTransform:
         if not isinstance(pmap_output_values, tuple):
             pmap_output_values = (pmap_output_values,)
 
-        # Add Allreduce operators to collect output values from each device.
+        # Add reduction operators to collect output values from each device.
+        # TODO: Add explicit Send ops if the destination device is not one of the
+        #       source devices.
         for i, output_value in enumerate(output_values):
-            transformed_module.add_op(
-                "Allreduce",
-                name=f"Allreduce/{output_value.name}",
-                inputs=[pmap_output_values[i]],
-                output_names=[f"{output_value.name}s"],
-            )
+            reduction_op_type = self._reduction_params[output_value.name]["op_type"]
+            if reduction_op_type == "Allreduce":
+                transformed_module.add_op(
+                    "Allreduce",
+                    name=f"Allreduce/{output_value.name}",
+                    inputs=[pmap_output_values[i]],
+                    output_names=[f"{output_value.name}s"],
+                )
+            elif reduction_op_type == "Gather":
+                dim = self._reduction_params[output_value.name]["dim"]
+                device = self._reduction_params[output_value.name]["device"]
+                transformed_module.add_op(
+                    "Gather",
+                    name=f"Gather/{output_value.name}",
+                    inputs=[pmap_output_values[i]],
+                    attributes={"dim": dim, "device": device},
+                    output_names=[f"{output_value.name}s"],
+                )
+            else:
+                raise ValueError(
+                    f"Unknown reduction op type {reduction_op_type} for "
+                    f"output value {output_value}"
+                )
 
         return transformed_module

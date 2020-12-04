@@ -147,14 +147,15 @@ class SplitOpRegisterEntry(OpRegisterEntry):
 OpRegister = {
     "Add": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
     "Allreduce": AllreduceOpRegisterEntry(
-        input_types=[TupleType[Tensor]], output_types=[TupleType[Tensor]]
+        input_types=[TupleType], output_types=[TupleType]
     ),
     "Broadcast": BroadcastScatterOpRegisterEntry(
-        input_types=[Tensor], output_types=[TupleType[Tensor]]
+        input_types=[Tensor], output_types=[TupleType]
     ),
     "BroadcastGradientArgs": OpRegisterEntry(
         input_types=[Tensor, Tensor], output_types=[Tensor, Tensor]
     ),
+    "Gather": OpRegisterEntry(input_types=[TupleType], output_types=[Tensor]),
     "Gemm": OpRegisterEntry(
         input_types=[Tensor, Tensor, Tensor], output_types=[Tensor]
     ),
@@ -173,11 +174,9 @@ OpRegister = {
     "Opt": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
     "Pmap": PmapOpRegisterEntry(input_types=None, output_types=None),
     "Scatter": BroadcastScatterOpRegisterEntry(
-        input_types=[Tensor], output_types=[TupleType[Tensor]]
+        input_types=[Tensor], output_types=[TupleType]
     ),
-    "Select": SelectOpRegisterEntry(
-        input_types=[TupleType[Tensor]], output_types=[Tensor]
-    ),
+    "Select": SelectOpRegisterEntry(input_types=[TupleType], output_types=[Tensor]),
     "Send": SendOpRegisterEntry(input_types=[Tensor], output_types=[Tensor]),
     "SGDOptimizer": OpRegisterEntry(
         input_types=[Tensor, Tensor, Tensor], output_types=[Tensor, Tensor]
@@ -189,7 +188,5 @@ OpRegister = {
     "SoftmaxCrossEntropyGrad": OpRegisterEntry(
         input_types=[Tensor, Tensor, Tensor], output_types=[Tensor]
     ),
-    "Split": SplitOpRegisterEntry(
-        input_types=[Tensor], output_types=[TupleType[Tensor]]
-    ),
+    "Split": SplitOpRegisterEntry(input_types=[Tensor], output_types=[TupleType]),
 }

@@ -40,7 +40,11 @@ def test_data_parallel():
     x = module.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
     y = module.add_op("MatMul", "MatMul1", inputs=[x, c], output_names=["y"])
     module.finalize()
-    transform = DataParallelTransform(partition_map={"a": 0}, devices=[d0, d1])
+    transform = DataParallelTransform(
+        batch_dims={"a": 0},
+        reduction_params={"y": {"op_type": "Gather", "dim": 0, "device": d0}},
+        devices=[d0, d1],
+    )
     transformed_module = transform.apply(module)
 
     transformed_module.finalize()

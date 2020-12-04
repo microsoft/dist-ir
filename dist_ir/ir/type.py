@@ -1,12 +1,10 @@
 from abc import ABC
 from functools import reduce
 from operator import add, mul
-from typing import Generic, Optional, Tuple, TypeVar
+from typing import Optional, Tuple, TypeVar
 
 from .device import Device
 from .utils import singleton
-
-T = TypeVar("T")
 
 
 class Type:
@@ -109,8 +107,8 @@ class Tensor(Type):
         return reduce(mul, self._shape) * self._dtype.size
 
 
-class TupleType(Type, Generic[T]):
-    def __init__(self, types: Tuple[T]):
+class TupleType(Type):
+    def __init__(self, types):
         Type.__init__(self)
         self._types = types
 

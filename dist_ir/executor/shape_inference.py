@@ -66,11 +66,19 @@ def _infer_shapes_for_matmul_grad(op, inputs, outputs):
 
 
 def _infer_shapes_for_loss(op, inputs, outputs):
-    outputs[0].type = Tensor(dtype=Float(), shape=(1,), device=inputs[0].type.device)
+    input_shapes = _get_shapes(inputs)
+    if input_shapes[0] != input_shapes[1]:
+        _error_invalid_shapes(op, input_shapes)
+
+    outputs[0].type = copy.deepcopy(inputs[0].type)
 
 
 def _infer_shapes_for_loss_grad(op, inputs, outputs):
-    outputs[0].type = Tensor(dtype=Float(), shape=(1,), device=inputs[0].type.device)
+    input_shapes = _get_shapes(inputs)
+    if input_shapes[0] != input_shapes[1]:
+        _error_invalid_shapes(op, input_shapes)
+
+    outputs[0].type = copy.deepcopy(inputs[0].type)
 
 
 def _infer_shapes_for_pmap(op, inputs, outputs):

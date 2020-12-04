@@ -34,7 +34,7 @@ class SequentialExecutor:
                 f"No {self._backend} implementation found for op {op_type}"
             )
         impl = BackendRegister[self._backend][op_type]
-        output_data = impl(*inputs)
+        output_data = impl(op, inputs)
         if not isinstance(output_data, tuple):
             output_data = (output_data,)
         return output_data

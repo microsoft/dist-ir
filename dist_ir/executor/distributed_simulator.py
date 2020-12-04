@@ -5,6 +5,8 @@ import json
 from ..ir import Module
 from . import utils
 
+SECONDS_TO_MICROSECONDS = 1e6
+
 
 class DistributedSimulatorState:
     def __init__(self):
@@ -28,13 +30,10 @@ class DistributedSimulatorState:
 
     def dump_chrome_trace(self, fname):
         # Chrome trace expects times in microseconds
-        # TODO multiplying by a larger num here to make debugging easier
         _trace = deepcopy(self.trace)
         for event in _trace:
-            event["ts"] = int(event["ts"] * 1e11)
-            event["dur"] = int(event["dur"] * 1e11)
-            # event["ts"] = event["ts"] * 1e6
-            # event["dur"] = event["dur"] * 1e6
+            event["ts"] = event["ts"] * SECONDS_TO_MICROSECONDS
+            event["dur"] = event["dur"] * SECONDS_TO_MICROSECONDS
 
         with open(fname, "w") as fout:
             json.dump(_trace, fout, indent=0)

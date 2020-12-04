@@ -78,7 +78,6 @@ def test_chrome_trace():
     device_speeds = {"gpu": 1.0e13}
     cost_model = CostModel(topology, device_speeds)
     simulator = DistributedSimulator(cost_model)
-    # simulation = simulator.simulate(module)
 
     transform = DataParallelTransform(
         batch_dims={"a": 0},
@@ -87,11 +86,6 @@ def test_chrome_trace():
     )
     transformed_module = transform.apply(module)
     transformed_module.finalize()
-    # print(transformed_module)
 
     simulation = simulator.simulate(transformed_module)
     simulation.dump_chrome_trace("test/trace.json")
-
-
-if __name__ == "__main__":
-    test_chrome_trace()

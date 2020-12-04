@@ -74,9 +74,9 @@ def test_mnist():
     d1 = Device(1, "gpu")
 
     x = module.add_input_value("x", Tensor(Float(), (16, 4)))
-    z = module.add_input_value("z", Tensor(Float(), (16,)))
-    wA = module.add_input_value("wA", Tensor(Float(), (4, 4)))
-    wB = module.add_input_value("wB", Tensor(Float(), (4, 4)))
+    z = module.add_input_value("z", Tensor(Float(), (16, 1)))
+    wA = module.add_input_value("wA", Tensor(Float(), (4, 2)))
+    wB = module.add_input_value("wB", Tensor(Float(), (2, 1)))
     a = module.add_op("MatMul", "MatMul0", inputs=[x, wA], output_names=["a"])
     y = module.add_op("MatMul", "MatMul1", inputs=[a, wB], output_names=["y"])
     l = module.add_op("Loss", "Loss", inputs=[y, z], output_names=["l"])

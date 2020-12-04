@@ -28,7 +28,7 @@ def _infer_shapes_for_add(op, inputs, outputs):
     if input_shapes[0] != input_shapes[1]:
         _error_invalid_shapes(op, input_shapes)
 
-    output_shape = (input_shapes[0][0], input_shapes[0][1])
+    output_shape = input_shapes[0]
     output_type = Tensor(
         dtype=inputs[0].type.dtype, shape=output_shape, device=inputs[0].type.device
     )
@@ -66,11 +66,19 @@ def _infer_shapes_for_matmul_grad(op, inputs, outputs):
 
 
 def _infer_shapes_for_loss(op, inputs, outputs):
-    outputs[0].type = Tensor(dtype=Float(), shape=(1,), device=inputs[0].type.device)
+    input_shapes = _get_shapes(inputs)
+    if input_shapes[0] != input_shapes[1]:
+        _error_invalid_shapes(op, input_shapes)
+
+    outputs[0].type = copy.deepcopy(inputs[0].type)
 
 
 def _infer_shapes_for_loss_grad(op, inputs, outputs):
-    outputs[0].type = Tensor(dtype=Float(), shape=(1,), device=inputs[0].type.device)
+    input_shapes = _get_shapes(inputs)
+    if input_shapes[0] != input_shapes[1]:
+        _error_invalid_shapes(op, input_shapes)
+
+    outputs[0].type = copy.deepcopy(inputs[0].type)
 
 
 def _infer_shapes_for_pmap(op, inputs, outputs):
@@ -105,6 +113,24 @@ def _infer_shapes_for_scatter(op, inputs, outputs):
         output_type.set_device(device)
 
 
+def _infer_shapes_for_select(op, inputs, outputs):
+    dim = op.get_attribute("dim")
+    outputs[0].type.shape = inputs[0].type.types[dim].shape
+
+
+def _infer_shapes_for_send(op, inputs, outputs):
+    outputs[0].type.shape = inputs[0].type.shape
+
+
+def _infer_shapes_for_split(op, inputs, outputs):
+    num_splits = op.get_attribute("num_splits")
+    split_dim = op.get_attribute("split_dim")
+    output_shape = list(inputs[0].type.shape)
+    output_shape[split_dim] //= num_splits
+    for typ in outputs[0].type.types:
+        typ.shape = tuple(output_shape)
+
+
 ShapeInferenceRegister = {
     "Add": _infer_shapes_for_add,
     "Allreduce": _infer_shapes_for_allreduce,
@@ -115,6 +141,9 @@ ShapeInferenceRegister = {
     "MatMulGrad": _infer_shapes_for_matmul_grad,
     "Pmap": _infer_shapes_for_pmap,
     "Scatter": _infer_shapes_for_scatter,
+    "Select": _infer_shapes_for_select,
+    "Send": _infer_shapes_for_send,
+    "Split": _infer_shapes_for_split,
 }
 
 
@@ -125,7 +154,7 @@ def _infer_shapes(module):
       module: The module to infer shapes for.
     """
 
-    for _, op in module.get_ops().items():
+    for op_name, op in module.get_ops().items():
         inputs = op.get_in_edges()
         outputs = op.get_out_edges()
 
@@ -133,7 +162,8 @@ def _infer_shapes(module):
         for input in inputs:
             assert input.type is not None
             if isinstance(input.type, Tensor):
-                assert input.type.shape is not None
+                if input.type.shape is None:
+                    raise ValueError(f"Input {input.name} of op {op_name} has no shape")
 
         ShapeInferenceRegister[op.op_type](op, inputs, outputs)
         # TODO maybe the register gives back the output types and we can check

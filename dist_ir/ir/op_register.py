@@ -74,7 +74,6 @@ class BroadcastScatterOpRegisterEntry(OpRegisterEntry):
             output_type = copy.deepcopy(inputs[0].type)
             output_type.set_device(device)
             if op.op_type == "Scatter":
-                split_dim = op.get_attribute("split_dim")
                 if isinstance(output_type, Tensor):
                     output_type.shape = None
             output_types.append(output_type)
@@ -112,6 +111,39 @@ class PmapOpRegisterEntry(OpRegisterEntry):
             op.add_out_edge(output_value)
 
 
+class SelectOpRegisterEntry(OpRegisterEntry):
+    def infer_types(self, op, output_names=None):
+        inputs = op.get_in_edges()
+        dim = op.get_attribute("dim")
+        output_value = Value(
+            output_names[0], value_type=copy.deepcopy(inputs[0].type.types[dim])
+        )
+        op.add_out_edge(output_value)
+
+
+class SendOpRegisterEntry(OpRegisterEntry):
+    def infer_types(self, op, output_names=None):
+        inputs = op.get_in_edges()
+        device = op.get_attribute("device")
+        output_value_type = copy.deepcopy(inputs[0].type)
+        output_value_type.set_device(device)
+        output_value = Value(output_names[0], value_type=output_value_type)
+        op.add_out_edge(output_value)
+
+
+class SplitOpRegisterEntry(OpRegisterEntry):
+    def infer_types(self, op, output_names=None):
+        inputs = op.get_in_edges()
+        num_splits = op.get_attribute("num_splits")
+        output_types = []
+        for i in range(num_splits):
+            output_type = copy.deepcopy(inputs[0].type)
+            output_type.shape = None
+            output_types.append(output_type)
+        output_value = Value(output_names[0], value_type=TupleType(output_types))
+        op.add_out_edge(output_value)
+
+
 OpRegister = {
     "Add": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
     "Allreduce": AllreduceOpRegisterEntry(
@@ -143,6 +175,10 @@ OpRegister = {
     "Scatter": BroadcastScatterOpRegisterEntry(
         input_types=[Tensor], output_types=[TupleType[Tensor]]
     ),
+    "Select": SelectOpRegisterEntry(
+        input_types=[TupleType[Tensor]], output_types=[Tensor]
+    ),
+    "Send": SendOpRegisterEntry(input_types=[Tensor], output_types=[Tensor]),
     "SGDOptimizer": OpRegisterEntry(
         input_types=[Tensor, Tensor, Tensor], output_types=[Tensor, Tensor]
     ),
@@ -152,5 +188,8 @@ OpRegister = {
     ),
     "SoftmaxCrossEntropyGrad": OpRegisterEntry(
         input_types=[Tensor, Tensor, Tensor], output_types=[Tensor]
+    ),
+    "Split": SplitOpRegisterEntry(
+        input_types=[Tensor], output_types=[TupleType[Tensor]]
     ),
 }

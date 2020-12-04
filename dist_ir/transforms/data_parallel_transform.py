@@ -32,6 +32,8 @@ class DataParallelTransform:
 
         # Either scatter or broadcast each input value depending on what the user
         # has requested.
+        # TODO: Add explicit Send ops if the source device is not one of the
+        #       destination devices.
         input_values = module.get_inputs()
         pmap_input_values = []
         for input_value in input_values:
@@ -78,6 +80,8 @@ class DataParallelTransform:
             pmap_output_values = (pmap_output_values,)
 
         # Add reduction operators to collect output values from each device.
+        # TODO: Add explicit Send ops if the destination device is not one of the
+        #       source devices.
         for i, output_value in enumerate(output_values):
             reduction_op_type = self._reduction_params[output_value.name]["op_type"]
             if reduction_op_type == "Allreduce":

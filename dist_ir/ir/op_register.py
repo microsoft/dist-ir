@@ -155,6 +155,7 @@ OpRegister = {
     "BroadcastGradientArgs": OpRegisterEntry(
         input_types=[Tensor, Tensor], output_types=[Tensor, Tensor]
     ),
+    "Concat": OpRegisterEntry(input_types=[Tensor, Tensor], output_types=[Tensor]),
     "Gather": OpRegisterEntry(input_types=[TupleType], output_types=[Tensor]),
     "Gemm": OpRegisterEntry(
         input_types=[Tensor, Tensor, Tensor], output_types=[Tensor]

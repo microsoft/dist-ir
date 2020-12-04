@@ -139,7 +139,7 @@ class Module:
         """
         for output in outputs:
             # NOTE: Using consumers as a proxy for valid values
-            if output not in self._consumers:
+            if output.name not in self._consumers:
                 raise ValueError(f"Module has no value {output}")
         self._outputs.clear()
         for output in outputs:

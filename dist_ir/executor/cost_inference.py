@@ -63,7 +63,8 @@ class CostModel:
             # NOTE: This assumes all tensors can be sent concurrently
             # TODO: Do we need to model the link capacity?
             costs[input_device] = max(costs[input_device], transfer_time)
-            costs[output_device] = transfer_time
+            if output_device != input_device:
+                costs[output_device] = transfer_time
 
         return costs
 

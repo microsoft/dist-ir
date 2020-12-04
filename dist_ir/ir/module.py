@@ -151,23 +151,24 @@ class Module:
 
     def set_outputs_auto(self):
         """Marks all sink nodes in the graph as output values."""
-        all_values = {}
-        consumed_values = {}
+        all_values = OrderedDict()
+        is_output = OrderedDict()
 
+        self._outputs.clear()
         for input_value_name, input_value in self._inputs.items():
             all_values[input_value_name] = input_value
+            is_output[input_value_name] = True
 
         for op in self._ops.values():
             for in_edge in op.get_in_edges():
-                consumed_values[in_edge.name] = in_edge
+                is_output[in_edge.name] = False
             for out_edge in op.get_out_edges():
                 all_values[out_edge.name] = out_edge
+                is_output[out_edge.name] = True
 
-        output_value_names = set(all_values.keys()).difference(
-            set(consumed_values.keys())
-        )
-        for output_value_name in output_value_names:
-            self._outputs[output_value_name] = all_values[output_value_name]
+        for output_value_name in is_output:
+            if is_output[output_value_name]:
+                self._outputs[output_value_name] = all_values[output_value_name]
 
     def _get_ops_in_topological_order_helper(self, name, visited, order):
         visited.add(name)

@@ -60,5 +60,32 @@ def test_data_parallel():
     # TODO: Check specific values
 
 
-if __name__ == "__main__":
-    test_data_parallel()
+def test_chrome_trace():
+    module = Module()
+
+    topology = Topology()
+    d0 = topology.add_device("gpu")
+    d1 = topology.add_device("gpu")
+    topology.set_bandwidth(d0, d1, 2)
+
+    a = module.add_input_value("a", Tensor(Float(), (4, 4), device=d0))
+    b = module.add_input_value("b", Tensor(Float(), (4, 4), device=d0))
+    c = module.add_input_value("c", Tensor(Float(), (4, 4), device=d0))
+    x = module.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
+    y = module.add_op("MatMul", "MatMul1", inputs=[x, c], output_names=["y"])
+    module.finalize()
+
+    device_speeds = {"gpu": 1.0e13}
+    cost_model = CostModel(topology, device_speeds)
+    simulator = DistributedSimulator(cost_model)
+
+    transform = DataParallelTransform(
+        batch_dims={"a": 0},
+        reduction_params={"y": {"op_type": "Gather", "dim": 0, "device": d0}},
+        devices=[d0, d1],
+    )
+    transformed_module = transform.apply(module)
+    transformed_module.finalize()
+
+    simulation = simulator.simulate(transformed_module)
+    simulation.dump_chrome_trace("test/trace.json")

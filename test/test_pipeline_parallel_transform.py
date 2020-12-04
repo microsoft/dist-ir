@@ -169,7 +169,6 @@ def test_mnist_fw_bw():
         {"x": _x, "z": _z, "wA": _wA, "wB": _wB},
     )
 
-    # TODO: Assert output matches between original module and transformed module
     transformed_res = ex.compute(
         transformed_module,
         {"x": _x, "z": _z, "wA": _wA, "wB": _wB},
@@ -178,12 +177,18 @@ def test_mnist_fw_bw():
     print("-" * 88)
     print("Original module results")
     print("-" * 88)
-    print(orig_res)
+    for k, v in orig_res.items():
+        print(k)
+        print(v)
+        print()
     print()
     print("-" * 88)
     print("Transformed module results")
     print("-" * 88)
-    print(transformed_res)
+    for k, v in transformed_res.items():
+        print(k)
+        print(v)
+        print()
 
     assert np.array_equal(orig_res["l"], transformed_res["l"])
     assert np.array_equal(orig_res["dwA"], transformed_res["dwA"])

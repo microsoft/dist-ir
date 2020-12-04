@@ -25,7 +25,8 @@ class SequentialExecutor:
                 outs = self.compute(op.get_submodule(0), inp_data)
                 # TODO match output names to output data (currently, we assume
                 # submodule outputs and pmap outputs are in the same order)
-                results.append(outs.values())
+                ordered_outs = [outs[e.name] for e in op.get_submodule(0).get_outputs()]
+                results.append(ordered_outs)
             # Unzip the results
             results = tuple(zip(*results))
             return results

@@ -1,7 +1,10 @@
+import numpy as np
+
 from dist_ir.ir import Module
 from dist_ir.ir.type import Float, Tensor
 from dist_ir.ir.device import Device
 from dist_ir.transforms import DataParallelTransform
+from dist_ir.executor import SequentialExecutor
 
 # TODO test on actual inputs using sequential executor
 
@@ -104,6 +107,7 @@ def test_mnist():
     dx, dwA = module.add_op(
         "MatMulGrad", "MatMul0Grad", inputs=[x, wA, da], output_names=["dx", "dwA"]
     )
+    module.set_outputs([l, dwA, dwB])
     module.finalize()
     transform = DataParallelTransform(
         batch_dims={"x": 0, "z": 0},
@@ -116,6 +120,7 @@ def test_mnist():
         devices=[d0, d1],
     )
     transformed_module = transform.apply(module)
+    transformed_module.finalize()
 
     print("-" * 88)
     print("Original module")
@@ -127,6 +132,42 @@ def test_mnist():
     print("-" * 88)
     print(transformed_module)
 
+    ex = SequentialExecutor("numpy")
+    _x = np.arange(batch_size * 4).reshape((batch_size, 4))
+    _z = np.ones((batch_size, 1))
+    _wA = np.ones((4, 2))
+    _wB = np.ones((2, 1))
+    orig_res = ex.compute(
+        module,
+        {"x": _x, "z": _z, "wA": _wA, "wB": _wB},
+    )
+
+    transformed_res = ex.compute(
+        transformed_module,
+        {"x": _x, "z": _z, "wA": _wA, "wB": _wB},
+    )
+
+    print("-" * 88)
+    print("Original module results")
+    print("-" * 88)
+    for k, v in orig_res.items():
+        print(k)
+        print(v)
+        print()
+    print()
+    print("-" * 88)
+    print("Transformed module results")
+    print("-" * 88)
+    for k, v in transformed_res.items():
+        print(k)
+        print(v)
+        print()
+
+    assert np.array_equal(orig_res["l"], np.concatenate(transformed_res["ls"], axis=0))
+    assert np.array_equal(orig_res["dwA"], transformed_res["dwAs"][0])
+    assert np.array_equal(orig_res["dwB"], transformed_res["dwBs"][0])
+
+    """
     assert transformed_module.is_op("Scatter/x")
     assert transformed_module.is_op("Scatter/z")
     assert transformed_module.is_op("Broadcast/wA")
@@ -136,6 +177,7 @@ def test_mnist():
     assert transformed_module.is_op("Gather/dx")
     assert transformed_module.is_op("Allreduce/dwA")
     assert transformed_module.is_op("Allreduce/dwB")
+    """
 
 
 if __name__ == "__main__":

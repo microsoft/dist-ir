@@ -81,14 +81,23 @@ def test_mnist():
     d0 = Device(0, "gpu")
     d1 = Device(1, "gpu")
 
-    x = module.add_input_value("x", Tensor(Float(), (16, 4)))
-    z = module.add_input_value("z", Tensor(Float(), (16, 1)))
+    batch_size = 16
+    x = module.add_input_value("x", Tensor(Float(), (batch_size, 4)))
+    z = module.add_input_value("z", Tensor(Float(), (batch_size, 1)))
     wA = module.add_input_value("wA", Tensor(Float(), (4, 2)))
     wB = module.add_input_value("wB", Tensor(Float(), (2, 1)))
     a = module.add_op("MatMul", "MatMul0", inputs=[x, wA], output_names=["a"])
     y = module.add_op("MatMul", "MatMul1", inputs=[a, wB], output_names=["y"])
-    l = module.add_op("Loss", "Loss", inputs=[y, z], output_names=["l"])
-    dl = module.add_op("LossGrad", "LossGrad", inputs=[y, z], output_names=["dl"])
+    l = module.add_op(
+        "Loss", "Loss", inputs=[y, z], attributes={"N": batch_size}, output_names=["l"]
+    )
+    dl = module.add_op(
+        "LossGrad",
+        "LossGrad",
+        inputs=[y, z],
+        attributes={"N": batch_size},
+        output_names=["dl"],
+    )
     da, dwB = module.add_op(
         "MatMulGrad", "MatMul1Grad", inputs=[a, wB, dl], output_names=["da", "dwB"]
     )

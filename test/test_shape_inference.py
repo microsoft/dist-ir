@@ -175,7 +175,7 @@ def test_scatter():
         "Scatter",
         "Scatter/x",
         inputs=[x],
-        attributes={"split_dim": 0, "devices": [d0, d1]},
+        attributes={"dim": 0, "devices": [d0, d1]},
         output_names=["xs"],
     )
     infer_shapes(module)

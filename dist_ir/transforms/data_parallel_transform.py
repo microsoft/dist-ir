@@ -47,7 +47,7 @@ class DataParallelTransform:
                     inputs=[v],
                     attributes={
                         "devices": self._devices,
-                        "split_dim": self._batch_dims[input_value.name],
+                        "dim": self._batch_dims[input_value.name],
                     },
                     output_names=[f"{v.name}s"],
                 )

@@ -49,6 +49,17 @@ def _infer_shapes_for_broadcast(op, inputs, outputs):
         output_type.set_device(device)
 
 
+def _infer_shapes_for_concat(op, inputs, outputs):
+    input_shapes = _get_shapes(inputs)
+    dim = op.get_attribute("dim")
+    for i, (dim0, dim1) in enumerate(zip(input_shapes[0], input_shapes[1])):
+        if i != dim and dim0 != dim1:
+            _error_invalid_shapes(op, input_shapes)
+    output_shape = list(input_shapes[0])
+    output_shape[dim] += input_shapes[1][dim]
+    outputs[0].type.shape = output_shape
+
+
 def _infer_shapes_for_gather(op, inputs, outputs):
     dim = op.get_attribute("dim")
     device = op.get_attribute("device")
@@ -114,7 +125,7 @@ def _infer_shapes_for_pmap(op, inputs, outputs):
 
 def _infer_shapes_for_scatter(op, inputs, outputs):
     input_type = inputs[0].type
-    split_dim = op.get_attribute("split_dim")
+    split_dim = op.get_attribute("dim")
     devices = op.get_attribute("devices")
     for (output_type, device) in zip(outputs[0].type.types, devices):
         if isinstance(output_type, Tensor) and isinstance(input_type, Tensor):
@@ -135,7 +146,7 @@ def _infer_shapes_for_send(op, inputs, outputs):
 
 def _infer_shapes_for_split(op, inputs, outputs):
     num_splits = op.get_attribute("num_splits")
-    split_dim = op.get_attribute("split_dim")
+    split_dim = op.get_attribute("dim")
     output_shape = list(inputs[0].type.shape)
     output_shape[split_dim] //= num_splits
     for typ in outputs[0].type.types:
@@ -146,6 +157,7 @@ ShapeInferenceRegister = {
     "Add": _infer_shapes_for_add,
     "Allreduce": _infer_shapes_for_allreduce,
     "Broadcast": _infer_shapes_for_broadcast,
+    "Concat": _infer_shapes_for_concat,
     "Gather": _infer_shapes_for_gather,
     "Loss": _infer_shapes_for_loss,
     "LossGrad": _infer_shapes_for_loss_grad,

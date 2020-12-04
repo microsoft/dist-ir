@@ -34,7 +34,7 @@ class PipelineParallelTransform:
                     inputs=[v],
                     attributes={
                         "num_splits": self._num_microbatches,
-                        "split_dim": self._batch_dims[input_value.name],
+                        "dim": self._batch_dims[input_value.name],
                     },
                     output_names=[f"{v.name}s"],
                 )
@@ -62,11 +62,23 @@ class PipelineParallelTransform:
     ):
         if self._reduction_params[orig_output.name] is None:
             return
+
         reduction_op_type = self._reduction_params[orig_output.name]["op_type"]
         if num_completed_microbatches == 1:
             merged_outputs[orig_output.name] = pipelined_output
         else:
             merged_output = merged_outputs[orig_output.name]
+
+            if merged_output.type.device != pipelined_output.type.device:
+                pipelined_output = transformed_module.add_op(
+                    "Send",
+                    name=f"Send/{pipelined_output.name}",
+                    inputs=[pipelined_output],
+                    attributes={"device": merged_output.type.device},
+                    output_names=[
+                        f"{pipelined_output.name}@{merged_output.type.device}"
+                    ],
+                )
 
             op_name = (
                 f"{reduction_op_type}/{merged_output.name}-{pipelined_output.name}"

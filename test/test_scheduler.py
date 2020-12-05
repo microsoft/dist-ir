@@ -1,6 +1,6 @@
 from dist_ir.ir import Device, Module
 from dist_ir.ir.type import Float, Tensor
-from dist_ir.scheduler import RandomScheduler
+from dist_ir.scheduler import PipeDreamScheduler, RandomScheduler
 
 
 def _construct_module_and_partition_map():
@@ -52,11 +52,41 @@ def _construct_module_and_partition_map():
 
 def test_random_scheduler():
     (module, partition_map) = _construct_module_and_partition_map()
+    (d0, d1) = sorted(set(partition_map.values()))
     scheduler = RandomScheduler(num_microbatches=2)
     schedule = scheduler.schedule(module, partition_map)
-    for i in range(len(schedule)):
-        print(schedule[i])
+
+    ref_schedule = [
+        {d0: ("MatMul0", 1)},
+        {d0: ("MatMul0", 0), d1: ("MatMul1", 0)},
+        {d1: ("LossGrad", 0)},
+        {d1: ("MatMul1Grad", 0)},
+        {d0: ("MatMul0Grad", 1), d1: ("MatMul1", 1)},
+        {d0: ("MatMul0Grad", 0), d1: ("MatMul1Grad", 1)},
+        {d1: ("Loss", 1)},
+        {d1: ("Loss", 0)},
+        {d1: ("LossGrad", 1)},
+    ]
+
+    assert schedule == ref_schedule
 
 
-if __name__ == "__main__":
-    test_random_scheduler()
+def test_pipedream_scheduler():
+    (module, partition_map) = _construct_module_and_partition_map()
+    (d0, d1) = sorted(set(partition_map.values()))
+    scheduler = PipeDreamScheduler(num_microbatches=2)
+    schedule = scheduler.schedule(module, partition_map)
+
+    ref_schedule = [
+        {d0: ("MatMul0", 1)},
+        {d0: ("MatMul0", 0), d1: ("MatMul1", 0)},
+        {d1: ("LossGrad", 1)},
+        {d1: ("MatMul1", 1)},
+        {d1: ("MatMul1Grad", 0)},
+        {d0: ("MatMul0Grad", 1), d1: ("Loss", 1)},
+        {d0: ("MatMul0Grad", 0), d1: ("MatMul1Grad", 1)},
+        {d1: ("Loss", 0)},
+        {d1: ("LossGrad", 0)},
+    ]
+
+    assert schedule == ref_schedule

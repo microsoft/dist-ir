@@ -1,13 +1,15 @@
 from abc import ABC, abstractmethod
 from collections import defaultdict
+import random
 from typing import Dict, Set, Tuple
 
 from dist_ir.ir import Module, Device, Op
 
 
 class Scheduler(ABC):
-    def __init__(self, num_microbatches):
+    def __init__(self, num_microbatches, seed=0):
         self._num_microbatches = num_microbatches
+        self._rng = random.Random(seed)
 
     def _prepare_ops_to_schedule(self, module, partition_map):
         """Enumerates the ops to schedule on each device across all microbatches."""
@@ -41,7 +43,7 @@ class Scheduler(ABC):
 
     @abstractmethod
     def _get_next_op_to_schedule(
-        self, ready_ops_on_device: Dict[Device, Set[Tuple[str, int]]]
+        self, ready_ops: Dict[Device, Set[Tuple[str, int]]], device: Device
     ) -> Tuple[str, int]:
         raise NotImplementedError()
 
@@ -59,7 +61,7 @@ class Scheduler(ABC):
                 if len(ready_ops[device]) > 0:
                     # NOTE: op_to_schedule is a tuple of (op_name, microbatch)
                     # TODO: Rename this?
-                    op_to_schedule = self._get_next_op_to_schedule(ready_ops[device])
+                    op_to_schedule = self._get_next_op_to_schedule(ready_ops, device)
                     per_timestep_schedule[device] = op_to_schedule
                     self._ops_to_schedule[device].remove(op_to_schedule)
                     num_scheduled_ops += 1

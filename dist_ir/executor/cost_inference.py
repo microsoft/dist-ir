@@ -1,5 +1,6 @@
 from . import utils
 
+import numpy as np
 
 BYTES_IN_GB = 8.0e9
 
@@ -27,10 +28,21 @@ class CostModel:
 
     def _infer_costs_for_allreduce(self, op, inputs, outputs):
         costs = {}
-        output_devices = utils.get_all_devices(outputs)
-        for device in output_devices:
-            # TODO: Compute cost properly
-            costs[device] = 0
+        input_size = inputs[0].type.types[0].size()
+        devices = list(utils.get_all_devices(outputs))
+        num_devices = len(devices)
+        per_device_data = 2 * input_size * (num_devices - 1) / num_devices
+        per_device_data_gb = per_device_data / BYTES_IN_GB
+        all_bandwidths = []
+        for i in range(len(devices)):
+            for j in range(i, len(devices)):
+                all_bandwidths.append(
+                    self._topology.get_bandwidth(devices[i], devices[j])
+                )
+        average_bandwidth = np.mean(all_bandwidths)
+        cost = per_device_data_gb / average_bandwidth
+        for device in devices:
+            costs[device] = cost
 
         return costs
 

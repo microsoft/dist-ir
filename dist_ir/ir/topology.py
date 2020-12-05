@@ -7,7 +7,8 @@ class Topology:
         self._devices = []
         self._bandwidths = {}
 
-    def get_devices(self):
+    @property
+    def devices(self):
         return self._devices
 
     def add_device(self, device_type):

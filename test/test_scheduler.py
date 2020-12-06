@@ -61,11 +61,11 @@ def test_random_scheduler():
         {d0: ("MatMul0", 0), d1: ("MatMul1", 0)},
         {d1: ("LossGrad", 0)},
         {d1: ("MatMul1Grad", 0)},
-        {d0: ("MatMul0Grad", 1), d1: ("MatMul1", 1)},
-        {d0: ("MatMul0Grad", 0), d1: ("MatMul1Grad", 1)},
+        {d0: ("MatMul0Grad", 0), d1: ("MatMul1", 1)},
         {d1: ("Loss", 1)},
-        {d1: ("Loss", 0)},
         {d1: ("LossGrad", 1)},
+        {d1: ("MatMul1Grad", 1)},
+        {d0: ("MatMul0Grad", 1), d1: ("Loss", 0)},
     ]
 
     assert schedule == ref_schedule
@@ -78,15 +78,20 @@ def test_pipedream_scheduler():
     schedule = scheduler.schedule(module, partition_map)
 
     ref_schedule = [
-        {d0: ("MatMul0", 1)},
-        {d0: ("MatMul0", 0), d1: ("MatMul1", 0)},
-        {d1: ("LossGrad", 1)},
+        {d0: ("MatMul0", 0)},
+        {d0: ("MatMul0", 1), d1: ("MatMul1", 0)},
+        {d1: ("LossGrad", 0)},
         {d1: ("MatMul1", 1)},
         {d1: ("MatMul1Grad", 0)},
-        {d0: ("MatMul0Grad", 1), d1: ("Loss", 1)},
-        {d0: ("MatMul0Grad", 0), d1: ("MatMul1Grad", 1)},
-        {d1: ("Loss", 0)},
-        {d1: ("LossGrad", 0)},
+        {d0: ("MatMul0Grad", 0), d1: ("Loss", 0)},
+        {d1: ("LossGrad", 1)},
+        {d1: ("Loss", 1)},
+        {d1: ("MatMul1Grad", 1)},
+        {d0: ("MatMul0Grad", 1)},
     ]
 
     assert schedule == ref_schedule
+
+
+if __name__ == "__main__":
+    test_pipedream_scheduler()

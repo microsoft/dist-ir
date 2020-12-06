@@ -10,11 +10,9 @@ class PipeDreamScheduler(Scheduler):
         Scheduler.__init__(self, num_microbatches)
         self._prev_op_types = defaultdict(lambda: "bw")
 
-    def _get_next_op_to_schedule(
-        self, ready_ops: Dict[Device, Set[Tuple[str, int]]], device: Device
-    ) -> Tuple[str, int]:
+    def _get_next_op_to_schedule(self, device: Device) -> Tuple[str, int]:
         ready_ops_by_type = defaultdict(list)
-        for ready_op in sorted(ready_ops[device]):
+        for ready_op in self._ready_ops[device]:
             # TODO: Use a more robust method to identify backwards pass ops.
             if "Grad" in ready_op[0]:
                 ready_ops_by_type["bw"].append(ready_op)
@@ -33,4 +31,4 @@ class PipeDreamScheduler(Scheduler):
                 next_op_type = "bw"
         self._prev_op_types[device] = next_op_type
         # TODO: Use a more robust method for selecting the next op to run.
-        return self._rng.choice(ready_ops_by_type[next_op_type])
+        return ready_ops_by_type[next_op_type][0]

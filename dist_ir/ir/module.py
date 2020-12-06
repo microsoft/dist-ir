@@ -11,7 +11,7 @@ class Module:
         self._inputs = OrderedDict()
         self._outputs = OrderedDict()
         self._op_counter = defaultdict(int)
-        self._consumers = defaultdict(int)
+        self._consumers = defaultdict(list)
 
     def __str__(self):
         output = ""
@@ -107,10 +107,10 @@ class Module:
 
         # Update _consumers.
         out_edges = op.get_out_edges()
-        for out_edge in out_edges:
-            self._consumers[out_edge.name] = 0
         for in_edge in inputs:
-            self._consumers[in_edge.name] += 1
+            self._consumers[in_edge.name].append(op.name)
+        for out_edge in out_edges:
+            self._consumers[out_edge.name] = []
 
         # Return the op outputs.
         num_out_edges = len(out_edges)
@@ -129,7 +129,7 @@ class Module:
         self._inputs[value.name] = value
         return value
 
-    def get_consumers_for_out_edge(self, name):
+    def get_consumers_for_value(self, name):
         return self._consumers[name]
 
     def set_outputs(self, outputs: Iterable[Value]):

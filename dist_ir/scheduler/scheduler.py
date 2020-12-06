@@ -1,15 +1,13 @@
 from abc import ABC, abstractmethod
 from collections import defaultdict
-import random
 from typing import Dict, Set, Tuple
 
 from dist_ir.ir import Module, Device, Op
 
 
 class Scheduler(ABC):
-    def __init__(self, num_microbatches, seed=0):
+    def __init__(self, num_microbatches):
         self._num_microbatches = num_microbatches
-        self._rng = random.Random(seed)
 
     def _prepare_ops_to_schedule(self, module, partition_map):
         """Enumerates the ops to schedule on each device across all microbatches."""

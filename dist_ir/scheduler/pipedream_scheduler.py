@@ -31,4 +31,7 @@ class PipeDreamScheduler(Scheduler):
                 next_op_type = "bw"
         self._prev_op_types[device] = next_op_type
         # TODO: Use a more robust method for selecting the next op to run.
-        return ready_ops_by_type[next_op_type][0]
+        sorted_ready_ops_by_type = sorted(
+            ready_ops_by_type[next_op_type], key=lambda x: x[1]
+        )
+        return sorted_ready_ops_by_type[0]

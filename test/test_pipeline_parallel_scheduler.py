@@ -1,6 +1,6 @@
 from dist_ir.ir import Device, Module
 from dist_ir.ir.type import Float, Tensor
-from dist_ir.scheduler import FIFOScheduler, PipeDreamScheduler
+from dist_ir.transforms import FIFOScheduler, PipeDreamScheduler
 
 
 def _construct_module_and_partition_map():
@@ -59,15 +59,18 @@ def test_fifo_scheduler():
     ref_schedule = [
         {d0: ("MatMul0", 0)},
         {d0: ("MatMul0", 1), d1: ("MatMul1", 0)},
+        {d1: ("MatMul1", 1)},
         {d1: ("Loss", 0)},
         {d1: ("LossGrad", 0)},
-        {d1: ("MatMul1Grad", 0)},
-        {d0: ("MatMul0Grad", 0), d1: ("MatMul1", 1)},
         {d1: ("Loss", 1)},
         {d1: ("LossGrad", 1)},
-        {d1: ("MatMul1Grad", 1)},
+        {d1: ("MatMul1Grad", 0)},
+        {d0: ("MatMul0Grad", 0), d1: ("MatMul1Grad", 1)},
         {d0: ("MatMul0Grad", 1)},
     ]
+
+    for i in range(len(schedule)):
+        print(schedule[i])
 
     assert schedule == ref_schedule
 
@@ -92,3 +95,7 @@ def test_pipedream_scheduler():
     ]
 
     assert schedule == ref_schedule
+
+
+if __name__ == "__main__":
+    test_fifo_scheduler()

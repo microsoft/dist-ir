@@ -2,12 +2,12 @@ from collections import defaultdict
 from typing import Dict, Set, Tuple
 
 from ..ir import Device
-from .scheduler import Scheduler
+from .pipeline_parallel_scheduler import PipelineParallelScheduler
 
 
-class PipeDreamScheduler(Scheduler):
+class PipeDreamScheduler(PipelineParallelScheduler):
     def __init__(self, num_microbatches):
-        Scheduler.__init__(self, num_microbatches)
+        PipelineParallelScheduler.__init__(self, num_microbatches)
         self._prev_op_types = defaultdict(lambda: "bw")
 
     def _get_next_op_to_schedule(self, device: Device) -> Tuple[str, int]:

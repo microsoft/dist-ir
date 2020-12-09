@@ -2,10 +2,10 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from typing import Dict, Set, Tuple
 
-from dist_ir.ir import Module, Device, Op
+from ..ir import Module, Device, Op
 
 
-class Scheduler(ABC):
+class PipelineParallelScheduler(ABC):
     def __init__(self, num_microbatches):
         self._num_microbatches = num_microbatches
 

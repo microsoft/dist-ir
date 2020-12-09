@@ -29,6 +29,12 @@ def test_mnist_fw():
     module.set_outputs([l])
     module.finalize()
 
+    partition_map = {
+        "MatMul0": d0,
+        "MatMul1": d1,
+        "Loss": d1,
+    }
+
     schedule = [
         {d0: ("MatMul0", 0)},
         {d0: ("MatMul0", 1), d1: ("MatMul1", 0)},
@@ -42,6 +48,7 @@ def test_mnist_fw():
         reduction_params={
             "l": {"op_type": "Concat", "dim": 0},
         },
+        partition_map=partition_map,
         schedule=schedule,
     )
     transformed_module = transform.apply(module)
@@ -122,6 +129,15 @@ def test_mnist_fw_bw():
     module.set_outputs([l, dwA, dwB])
     module.finalize()
 
+    partition_map = {
+        "MatMul0": d0,
+        "MatMul1": d1,
+        "Loss": d1,
+        "LossGrad": d1,
+        "MatMul1Grad": d1,
+        "MatMul0Grad": d0,
+    }
+
     schedule = [
         {d0: ("MatMul0", 0)},
         {d0: ("MatMul0", 1), d1: ("MatMul1", 0)},
@@ -143,6 +159,7 @@ def test_mnist_fw_bw():
             "dwA": {"op_type": "Add"},
             "l": {"op_type": "Concat", "dim": 0},
         },
+        partition_map=partition_map,
         schedule=schedule,
     )
     transformed_module = transform.apply(module)
@@ -192,3 +209,7 @@ def test_mnist_fw_bw():
     assert np.array_equal(orig_res["l"], transformed_res["l"])
     assert np.array_equal(orig_res["dwA"], transformed_res["dwA"])
     assert np.array_equal(orig_res["dwB"], transformed_res["dwB"])
+
+
+if __name__ == "__main__":
+    test_mnist_fw_bw()

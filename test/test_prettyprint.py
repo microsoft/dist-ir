@@ -25,11 +25,3 @@ def test_import_from_onnx():
     onnx_model_path = Path(__file__).parent / "mnist_gemm_bw_running.onnx"
     module = import_from_onnx(onnx_model_path)
     cpprint(module)
-
-
-if __name__ == "__main__":
-    test_cpprint()
-    test_import_from_onnx()
-    import prettyprinter
-
-    print(prettyprinter.get_default_config())

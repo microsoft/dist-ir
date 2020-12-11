@@ -24,6 +24,25 @@ class PipelineParallelTransform:
         self._reduction_params = reduction_params
         self._partition_map = partition_map
         self._schedule = schedule
+        self._op_to_stage = self._get_op_to_stage_map(list(self._partition_map.keys()))
+
+    # TODO: De-dup this with pipeline_parallel_scheduler.py
+    def _get_op_to_stage_map(self, stages):
+        op_to_stage = {}
+        for stage in stages:
+            for op_name in stage.get_ops():
+                op_to_stage[op_name] = stage
+        return op_to_stage
+
+    # TODO: De-dup this with pipeline_parallel_scheduler.py
+    def _get_stages_from_op_names(self, op_names):
+        seen = set()
+        stages = []
+        for op_name in op_names:
+            stage = self._op_to_stage[op_name]
+            if stage not in seen:
+                stages.append(stage)
+        return stages
 
     def _forward_value(self, transformed_module, value, device):
         forwarded_value = transformed_module.add_op(
@@ -68,8 +87,9 @@ class PipelineParallelTransform:
 
             # Forward the input value(s) if necessary.
             input_device = input_value.type.device
-            consumers = module.get_consumers_for_value(input_value.name)
-            consumer_devices = set([self._partition_map[c] for c in consumers])
+            consumer_ops = module.get_consumers_for_value(input_value.name)
+            consumer_stages = self._get_stages_from_op_names(consumer_ops)
+            consumer_devices = set([self._partition_map[c] for c in consumer_stages])
             for consumer_device in consumer_devices:
                 if consumer_device != input_device:
                     for i in range(self._num_microbatches):
@@ -155,65 +175,79 @@ class PipelineParallelTransform:
         # Partition the input values for each microbatch.
         self._partition_inputs(module, transformed_module, pipelined_value_map)
 
-        # Schedule ops on each device in order of increasing timestep.
+        # Schedule stages on each device in order of increasing timestep.
         for timestep in range(len(self._schedule)):
             for device in self._schedule[timestep]:
-                (op_name, microbatch) = self._schedule[timestep][device]
-                orig_op = module.get_op(op_name)
-                orig_inputs = orig_op.get_in_edges()
-                orig_outputs = orig_op.get_out_edges()
+                (stage, microbatch) = self._schedule[timestep][device]
+                stage_outputs = set([v.name for v in stage.get_outputs()])
+                for op_name, orig_op in stage.get_ops().items():
+                    orig_inputs = orig_op.get_in_edges()
+                    orig_outputs = orig_op.get_out_edges()
 
-                # Collect the pipelined input values for this op.
-                pipelined_inputs = []
-                for orig_input in orig_inputs:
-                    pipelined_input_map = pipelined_value_map[orig_input.name]
-                    pipelined_input = pipelined_input_map[microbatch]
-                    pipelined_inputs.append(pipelined_input_map[microbatch])
+                    # Collect the pipelined input values for this op.
+                    pipelined_inputs = []
+                    for orig_input in orig_inputs:
+                        pipelined_input_map = pipelined_value_map[orig_input.name]
+                        pipelined_input = pipelined_input_map[microbatch]
+                        pipelined_inputs.append(pipelined_input_map[microbatch])
 
-                # Add the pipelined version of the op for the given microbatch to
-                # the transformed module.
-                pipelined_output_names = [
-                    f"{orig_output.name}_{microbatch}" for orig_output in orig_outputs
-                ]
-                pipelined_outputs = transformed_module.add_op(
-                    orig_op.op_type,
-                    name=f"{orig_op.name}_{microbatch}",
-                    attributes=orig_op._attributes,
-                    inputs=pipelined_inputs,
-                    output_names=pipelined_output_names,
-                )
+                    # Add the pipelined version of the op for the given microbatch to
+                    # the transformed module.
+                    pipelined_output_names = [
+                        f"{orig_output.name}_{microbatch}"
+                        for orig_output in orig_outputs
+                    ]
+                    pipelined_outputs = transformed_module.add_op(
+                        orig_op.op_type,
+                        name=f"{orig_op.name}_{microbatch}",
+                        attributes=orig_op._attributes,
+                        inputs=pipelined_inputs,
+                        output_names=pipelined_output_names,
+                    )
 
-                # Update the pipelined value map with the newly generated output values.
-                if not isinstance(pipelined_outputs, tuple):
-                    pipelined_outputs = (pipelined_outputs,)
-                for (orig_output, pipelined_output) in zip(
-                    orig_outputs, pipelined_outputs
-                ):
-                    pipelined_output_map = pipelined_value_map[orig_output.name]
-                    pipelined_output_map[microbatch] = pipelined_output
+                    # Update the pipelined value map with the newly generated
+                    # output values.
+                    if not isinstance(pipelined_outputs, tuple):
+                        pipelined_outputs = (pipelined_outputs,)
+                    for (orig_output, pipelined_output) in zip(
+                        orig_outputs, pipelined_outputs
+                    ):
+                        pipelined_output_map = pipelined_value_map[orig_output.name]
+                        pipelined_output_map[microbatch] = pipelined_output
 
-                    # Aggregate outputs.
-                    if module.is_output(orig_output.name):
-                        num_completed_microbatches = len(pipelined_output_map)
-                        self._aggregate_outputs(
-                            transformed_module,
-                            orig_output,
-                            pipelined_output,
-                            merged_outputs,
-                            num_completed_microbatches,
-                        )
-                    else:
-                        # Forward the output value, if necessary.
-                        consumers = module.get_consumers_for_value(orig_output.name)
-                        consumer_devices = set(
-                            [self._partition_map[c] for c in consumers]
-                        )
-                        for consumer_device in consumer_devices:
-                            if device != consumer_device:
-                                pipelined_output_map[microbatch] = self._forward_value(
-                                    transformed_module,
-                                    pipelined_output,
-                                    consumer_device,
-                                )
+                        if orig_output.name not in stage_outputs:
+                            # Intermediate stage outputs do not require any additional
+                            # processing.
+                            continue
+                        elif module.is_output(orig_output.name):
+                            # Aggregate outputs.
+                            num_completed_microbatches = len(pipelined_output_map)
+                            self._aggregate_outputs(
+                                transformed_module,
+                                orig_output,
+                                pipelined_output,
+                                merged_outputs,
+                                num_completed_microbatches,
+                            )
+                        else:
+                            # Forward the output value, if necessary.
+                            consumer_ops = module.get_consumers_for_value(
+                                orig_output.name
+                            )
+                            consumer_stages = self._get_stages_from_op_names(
+                                consumer_ops
+                            )
+                            consumer_devices = set(
+                                [self._partition_map[c] for c in consumer_stages]
+                            )
+                            for consumer_device in consumer_devices:
+                                if device != consumer_device:
+                                    pipelined_output_map[
+                                        microbatch
+                                    ] = self._forward_value(
+                                        transformed_module,
+                                        pipelined_output,
+                                        consumer_device,
+                                    )
 
         return transformed_module

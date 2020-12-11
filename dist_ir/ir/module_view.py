@@ -5,7 +5,7 @@ class ModuleView:
     def __init__(self, module, ops, name=None):
         self._ops = OrderedDict()
         for op in ops:
-            self._ops[op.name] = ops
+            self._ops[op.name] = op
         self._inputs = OrderedDict()
         self._outputs = OrderedDict()
 

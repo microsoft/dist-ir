@@ -32,8 +32,4 @@ class PipeDreamScheduler(PipelineParallelScheduler):
             else:
                 next_stage_type = "bw"
         self._prev_stage_types[device] = next_stage_type
-        # TODO: Use a more robust method for selecting the next op to run.
-        sorted_ready_stages_by_type = sorted(
-            ready_stages_by_type[next_stage_type], key=lambda x: x[1]
-        )
-        return sorted_ready_stages_by_type[0]
+        return ready_stages_by_type[next_stage_type][0]

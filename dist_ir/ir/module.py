@@ -1,6 +1,7 @@
 from collections import OrderedDict, defaultdict
 from typing import Any, Dict, Iterable, List, Tuple, Union
 
+from .module_view import ModuleView
 from .op import Op
 from .value import Value
 
@@ -218,3 +219,7 @@ class Module:
         if len(self._outputs) == 0:
             self.set_outputs_auto()
         infer_shapes(self)
+
+    def get_view(self, op_names, view_name=None):
+        ops = [self._ops[op_name] for op_name in op_names]
+        return ModuleView(self, ops, view_name)

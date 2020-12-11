@@ -1,3 +1,5 @@
+from collections import OrderedDict
+
 from dist_ir.ir import Device, Module
 from dist_ir.ir.type import Float, Tensor
 from dist_ir.transforms import FIFOScheduler, PipeDreamScheduler
@@ -38,14 +40,16 @@ def _construct_module_and_partition_map():
     module.set_outputs([l, dwA, dwB])
     module.finalize()
 
-    partition_map = {
-        "MatMul0": d0,
-        "MatMul1": d1,
-        "Loss": d1,
-        "LossGrad": d1,
-        "MatMul1Grad": d1,
-        "MatMul0Grad": d0,
-    }
+    stages = [
+        module.get_view(("MatMul0",), view_name="f0"),
+        module.get_view(("MatMul1", "Loss"), view_name="f1"),
+        module.get_view(("LossGrad", "MatMul1Grad"), view_name="b1"),
+        module.get_view(("MatMul0Grad",), view_name="b0"),
+    ]
+
+    partition_map = OrderedDict(
+        [(stages[0], d0), (stages[1], d1), (stages[2], d1), (stages[3], d0)]
+    )
 
     return (module, partition_map)
 
@@ -56,21 +60,15 @@ def test_fifo_scheduler():
     scheduler = FIFOScheduler(num_microbatches=2)
     schedule = scheduler.schedule(module, partition_map)
 
+    stages = list(partition_map.keys())
     ref_schedule = [
-        {d0: ("MatMul0", 0)},
-        {d0: ("MatMul0", 1), d1: ("MatMul1", 0)},
-        {d1: ("MatMul1", 1)},
-        {d1: ("Loss", 0)},
-        {d1: ("LossGrad", 0)},
-        {d1: ("Loss", 1)},
-        {d1: ("LossGrad", 1)},
-        {d1: ("MatMul1Grad", 0)},
-        {d0: ("MatMul0Grad", 0), d1: ("MatMul1Grad", 1)},
-        {d0: ("MatMul0Grad", 1)},
+        {d0: (stages[0], 0)},
+        {d0: (stages[0], 1), d1: (stages[1], 0)},
+        {d1: (stages[1], 1)},
+        {d1: (stages[2], 0)},
+        {d0: (stages[3], 0), d1: (stages[2], 1)},
+        {d0: (stages[3], 1)},
     ]
-
-    for i in range(len(schedule)):
-        print(schedule[i])
 
     assert schedule == ref_schedule
 
@@ -81,21 +79,14 @@ def test_pipedream_scheduler():
     scheduler = PipeDreamScheduler(num_microbatches=2)
     schedule = scheduler.schedule(module, partition_map)
 
+    stages = list(partition_map.keys())
     ref_schedule = [
-        {d0: ("MatMul0", 0)},
-        {d0: ("MatMul0", 1), d1: ("MatMul1", 0)},
-        {d1: ("LossGrad", 0)},
-        {d1: ("Loss", 0)},
-        {d1: ("MatMul1Grad", 0)},
-        {d0: ("MatMul0Grad", 0), d1: ("MatMul1", 1)},
-        {d1: ("LossGrad", 1)},
-        {d1: ("Loss", 1)},
-        {d1: ("MatMul1Grad", 1)},
-        {d0: ("MatMul0Grad", 1)},
+        {d0: (stages[0], 0)},
+        {d0: (stages[0], 1), d1: (stages[1], 0)},
+        {d1: (stages[2], 0)},
+        {d0: (stages[3], 0), d1: (stages[1], 1)},
+        {d1: (stages[2], 1)},
+        {d0: (stages[3], 1)},
     ]
 
     assert schedule == ref_schedule
-
-
-if __name__ == "__main__":
-    test_fifo_scheduler()

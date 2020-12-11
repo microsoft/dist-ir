@@ -73,7 +73,7 @@ class Tensor(Type):
 
     def __repr__(self):
         return (
-            f"(Tensor(shape={self._shape}, dtype={self._dtype}, device={self._device})"
+            f"Tensor[shape={self._shape}, dtype={self._dtype}, device={self._device}]"
         )
 
     def __eq__(self, other):
@@ -113,11 +113,8 @@ class TupleType(Type):
         self._types = types
 
     def __str__(self):
-        output = "("
-        for i in range(len(self._types) - 1):
-            output += str(self._types[i]) + ", "
-        output += str(self._types[-1]) + ")"
-        return output
+        elems_str = ", ".join(str(t) for t in self._types)
+        return f"Tuple[{elems_str}]"
 
     def __repr__(self):
         return str(self)

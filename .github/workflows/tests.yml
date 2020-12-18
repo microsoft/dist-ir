@@ -11,9 +11,10 @@ on:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
-
+    env:
+      LLVM_COMMIT: 23d183f190508e519fa044aa22985fe298278ae7
+      PYTHONPATH: llvm-build/python/
     steps:
     - uses: actions/checkout@v2
  
@@ -30,6 +31,31 @@ jobs:
 
     - name: Check formatting (black)
       run: black --diff --check .
+
+    - name: Cache MLIR Python bindings
+      id: cache
+      uses: actions/cache@v2
+      with:
+        path: llvm-build
+        key: llvm-${{ env.LLVM_COMMIT }}
+
+    - name: Build MLIR Python bindings
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: |
+        pip install pybind11 cmake
+        git clone https://github.com/llvm/llvm-project.git
+        cd llvm-project
+        git checkout $LLVM_COMMIT
+        cd ..
+        mkdir llvm-build
+        cd llvm-build
+        cmake -G Ninja ../llvm-project/llvm \
+          -DLLVM_ENABLE_PROJECTS=mlir \
+          -DLLVM_TARGETS_TO_BUILD="X86" \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DLLVM_ENABLE_ASSERTIONS=ON \
+          -DMLIR_BINDINGS_PYTHON_ENABLED=ON
+        ninja check-mlir
 
     - name: 'Install dist_ir'
       run: python setup.py install

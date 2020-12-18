@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       LLVM_COMMIT: 23d183f190508e519fa044aa22985fe298278ae7
-      PYTHONPATH: llvm-build/python/
+      PYTHONPATH: ../llvm-build/python/
     steps:
     - uses: actions/checkout@v2
  

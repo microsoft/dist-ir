@@ -49,19 +49,20 @@ jobs:
       id: cache
       uses: actions/cache@v2
       with:
-        path: llvm-build
+        path: ../llvm-build
         key: llvm-${{ env.LLVM_COMMIT }}
 
     - name: Build MLIR Python bindings
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
+        pushd ..
         pip install pybind11 cmake ninja
         git clone https://github.com/llvm/llvm-project.git
-        cd llvm-project
+        pushd llvm-project
         git checkout $LLVM_COMMIT
-        cd ..
-        mkdir llvm-build
-        cd llvm-build
+        popd
+        mkdir -p llvm-build
+        pushd llvm-build
         cmake -G Ninja ../llvm-project/llvm \
           -DLLVM_ENABLE_PROJECTS=mlir \
           -DLLVM_TARGETS_TO_BUILD="X86" \
@@ -69,6 +70,8 @@ jobs:
           -DLLVM_ENABLE_ASSERTIONS=ON \
           -DMLIR_BINDINGS_PYTHON_ENABLED=ON
         ninja check-mlir
+        popd
+        popd
 
     - name: 'Install dist_ir'
       run: python setup.py install

@@ -388,26 +388,17 @@ TODO is there a more general horizontal transform, beyond pattern matching on
 two layer FF or attention layers?
 
 ## TODO
-- ~~Add `Tuple` type and make sure `Scatter`, `Broadcast`, `Allreduce`, etc. use this~~
-- ~~Add variable device~~
-- ~~Move device from `Value` to `Type`~~
-- ~~Make `Pmap` operate over `Tuple` types and variable devices~~
-- ~~Remove deep copies of submodule from `Pmap` code in `ShapeInference` and `DistributedSimulator`~~
-- Explicitly move all input tensors for a given op to the same device when applicable
-- ~~Remove device from op~~
-- ~~Fix tests to account for fixed `Pmap` implementation~~
-- ~~Add lookup table as input to simulator to compute costs using black box functions for each op (parameterized by device characteristics)~~
-- Add functionality to `SequentialExecutor` to handle `Pmap`
-- ~~Take union of input and output devices when synchronizing in `DistributedSimulator`~~
-- ~~Create fresh context for `Pmap` in `DistributedSimulator` instead of recursively passing same state~~
+- (??) Explicitly move all input tensors for a given op to the same device when applicable
 
-- Can we do without a special BroadcastScatterOpRegisterEntry?
-- Why do we even need types at op creation time?
-- Think about best way to create pmap device variable: before/after submodule creation?
+- Chrome trace: ability to compare two runs on same trace.json
 
 - Move this list and Python representation to `design.md` or something
 - Add syntax of textual representation and examples of supported ops
 - Make sure parallel examples are consistent with above syntax
+
+- Can we do without a special BroadcastScatterOpRegisterEntry?
+- Why do we even need types at op creation time?
+- Think about best way to create pmap device variable: before/after submodule creation?
 
 - Create `HardwareConfiguration` that has all device speeds as well as topology and bandwidth information
 

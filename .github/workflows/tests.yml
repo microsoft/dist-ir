@@ -42,7 +42,7 @@ jobs:
     - name: Build MLIR Python bindings
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
-        pip install pybind11 cmake
+        pip install pybind11 cmake ninja
         git clone https://github.com/llvm/llvm-project.git
         cd llvm-project
         git checkout $LLVM_COMMIT

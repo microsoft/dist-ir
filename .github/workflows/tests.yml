@@ -15,7 +15,7 @@ jobs:
     env:
       LLVM_COMMIT: 23d183f190508e519fa044aa22985fe298278ae7
       PY_VERSION: 3.8
-      PYTHONPATH: ../llvm-build/python/
+      PYTHONPATH: $HOME/llvm-build/python/
     steps:
     - uses: actions/checkout@v2
  
@@ -50,13 +50,13 @@ jobs:
       id: cache_mlir
       uses: actions/cache@v2
       with:
-        path: ../llvm-build
+        path: ${{ env.HOME }}/llvm-build
         key: llvm-${{ env.LLVM_COMMIT }}-${{ env.PY_VERSION }}
 
     - name: Build MLIR Python bindings
       if: steps.cache_mlir.outputs.cache-hit != 'true'
       run: |
-        pushd ..
+        pushd $HOME
         pip install pybind11 cmake ninja
         git clone https://github.com/llvm/llvm-project.git
         pushd llvm-project
@@ -64,7 +64,7 @@ jobs:
         popd
         mkdir -p llvm-build
         pushd llvm-build
-        cmake -G Ninja ../llvm-project/llvm \
+        cmake -G Ninja $HOME/llvm-project/llvm \
           -DLLVM_ENABLE_PROJECTS=mlir \
           -DLLVM_TARGETS_TO_BUILD="X86" \
           -DCMAKE_BUILD_TYPE=Release \

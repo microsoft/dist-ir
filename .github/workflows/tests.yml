@@ -77,5 +77,12 @@ jobs:
     - name: Install dist_ir
       run: python setup.py install
 
-    - name: Test with pytest
-      run: pytest
+    - name: Test PYTHONPATH
+      run: |
+        echo $PYTHONPATH
+        echo $PATH
+        pwd
+        PYTHONPATH=~/llvm-build/python/ python -c "import mlir" || echo "failed"
+
+    # - name: Test with pytest
+    #   run: pytest

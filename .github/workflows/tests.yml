@@ -14,25 +14,26 @@ jobs:
     runs-on: ubuntu-latest
     env:
       LLVM_COMMIT: 23d183f190508e519fa044aa22985fe298278ae7
+      PY_VERSION: 3.8
       PYTHONPATH: ../llvm-build/python/
     steps:
     - uses: actions/checkout@v2
  
-    - name: Set up Python 3.6
+    - name: Set up Python
       uses: actions/setup-python@v2
       with:
-        python-version: 3.6
+        python-version: ${{ env.PY_VERSION }}
 
     - name: Install pip (and get cache dir)
-      id: pip-cache
+      id: cache_pip
       run: |
         python -m pip install --upgrade pip
         echo "::set-output name=dir::$(pip cache dir)"
 
-    - name: pip cache
+    - name: Cache pip
       uses: actions/cache@v2
       with:
-        path: ${{ steps.pip-cache.outputs.dir }}
+        path: ${{ steps.cache_pip.outputs.dir }}
         key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
         restore-keys: |
           ${{ runner.os }}-pip-
@@ -46,14 +47,14 @@ jobs:
       run: black --diff --check .
 
     - name: Cache MLIR Python bindings
-      id: cache
+      id: cache_mlir
       uses: actions/cache@v2
       with:
         path: ../llvm-build
-        key: llvm-${{ env.LLVM_COMMIT }}
+        key: llvm-${{ env.LLVM_COMMIT }}-${{ env.PY_VERSION }}
 
     - name: Build MLIR Python bindings
-      if: steps.cache.outputs.cache-hit != 'true'
+      if: steps.cache_mlir.outputs.cache-hit != 'true'
       run: |
         pushd ..
         pip install pybind11 cmake ninja
@@ -73,7 +74,7 @@ jobs:
         popd
         popd
 
-    - name: 'Install dist_ir'
+    - name: Install dist_ir
       run: python setup.py install
 
     - name: Test with pytest

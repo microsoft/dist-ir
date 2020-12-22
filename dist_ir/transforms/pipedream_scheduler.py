@@ -6,6 +6,8 @@ from .pipeline_parallel_scheduler import PipelineParallelScheduler
 
 
 class PipeDreamScheduler(PipelineParallelScheduler):
+    """Implements the 1F1B scheduler from PipeDream."""
+
     def __init__(self, num_microbatches):
         PipelineParallelScheduler.__init__(self, num_microbatches)
         self._prev_stage_types = defaultdict(lambda: "bw")

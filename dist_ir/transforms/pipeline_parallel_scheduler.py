@@ -6,6 +6,18 @@ from ..ir import Module, ModuleView, Device, Op
 
 
 class PipelineParallelScheduler(ABC):
+    """Interface for a pipeline parallel scheduler.
+
+    Pipeline parallel schedulers take as input a DistIR module, the number of
+    microbatches to partition each minibatch into, and a partition map which
+    captures the explicit placement of each stage onto corresponding devices.
+    The scheduler will return a time-ordered list of stages to execute on each
+    device.
+
+    Each subclass must implement the _get_next_stage_to_schedule function which
+    decides the next stage to schedule for each device using any necessary state.
+    """
+
     def __init__(self, num_microbatches):
         self._num_microbatches = num_microbatches
         self._remaining_inputs = defaultdict(lambda: 0)

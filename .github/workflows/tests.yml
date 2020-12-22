@@ -15,7 +15,7 @@ jobs:
     env:
       LLVM_COMMIT: 23d183f190508e519fa044aa22985fe298278ae7
       PY_VERSION: 3.8
-      PYTHONPATH: $HOME/llvm-build/python/
+      PYTHONPATH: ~/llvm-build/python/
     steps:
     - uses: actions/checkout@v2
  
@@ -79,10 +79,8 @@ jobs:
 
     - name: Test PYTHONPATH
       run: |
-        echo $PYTHONPATH
-        echo $PATH
-        pwd
         PYTHONPATH=~/llvm-build/python/ python -c "import mlir" || echo "failed"
+        PYTHONPATH=$HOME/llvm-build/python/ python -c "import mlir" || echo "failed"
 
-    # - name: Test with pytest
-    #   run: pytest
+    - name: Test with pytest
+      run: pytest

@@ -54,7 +54,7 @@ jobs:
         key: llvm-${{ env.LLVM_COMMIT }}-${{ env.PY_VERSION }}
 
     - name: Build MLIR Python bindings
-      # if: steps.cache_mlir.outputs.cache-hit != 'true'  # TODO
+      if: steps.cache_mlir.outputs.cache-hit != 'true'
       run: |
         pushd /tmp
         pip install pybind11 cmake ninja
@@ -77,9 +77,5 @@ jobs:
     - name: Install dist_ir
       run: python setup.py install
 
-    - name: Test PYTHONPATH
-      run: |
-        PYTHONPATH=/tmp/llvm-build/python/ python -c "import mlir" || echo "failed"
-
-    # - name: Test with pytest
-    #   run: pytest
+    - name: Test with pytest
+      run: pytest

@@ -39,6 +39,8 @@ from prettyprinter.prettyprinter import (
     COLON,
     LPAREN,
     RPAREN,
+    LBRACE,
+    RBRACE,
     LBRACKET,
     RBRACKET,
     pretty_dispatch,
@@ -95,8 +97,7 @@ def interline(*docs):
 # ----------------------------------------
 
 
-@register_pretty(Module)
-def _(module: Module, ctx):
+def _pprint_module_body(module: Module, ctx):
     ops = [pretty_dispatch(op, ctx) for op in module.get_ops().values()]
     # Include the outputs as a final "return" op
     outputs = concat(_join(*(r.name for r in module.get_outputs())))
@@ -104,6 +105,12 @@ def _(module: Module, ctx):
         nest(ctx.indent, concat([pp_reserved("return"), LINE, outputs]))
     )
     ops.append(return_line)
+    return ops
+
+
+@register_pretty(Module)
+def _(module: Module, ctx):
+    ops = _pprint_module_body(module, ctx)
     return concat(
         [
             pretty_call(ctx, pp_fnname("Module"), *module.get_inputs()),
@@ -118,13 +125,70 @@ def _(op: Op, ctx):
     args = concat(_join(*(v.name for v in op.get_in_edges())))
 
     if op.op_type == "Pmap":
-        # TODO implement this
-        return pp_reserved("Pmap")
+        lambda_args = _join(
+            *(pretty_dispatch(i, ctx) for i in op.get_submodule(0).get_inputs())
+        )
+        lambda_args = concat([LPAREN, nest(ctx.indent, concat(lambda_args)), RPAREN])
+        lambda_body = _pprint_module_body(op.get_submodule(0), ctx)
+        actual_args = group(
+            concat(
+                [
+                    LPAREN,
+                    nest(ctx.indent, concat([SOFTLINE, args])),
+                    RPAREN,
+                ]
+            )
+        )
+        d = str(op.get_attribute("device_var").device_id)
+        pmap_args = nest(
+            ctx.indent,
+            concat(
+                [
+                    HARDLINE,
+                    pp_reserved("lambda"),
+                    " ",
+                    d,
+                    COLON,
+                    HARDLINE,
+                    pp_reserved("lambda"),
+                    " ",
+                    lambda_args,
+                    COLON,
+                    " ",
+                    LBRACE,
+                    nest(ctx.indent, concat([HARDLINE] + lambda_body)),
+                    HARDLINE,
+                    RBRACE,
+                    COMMA,
+                    HARDLINE,
+                    actual_args,
+                    HARDLINE,
+                ]
+            ),
+        )
+        opcall = group(
+            concat(
+                [
+                    pp_reserved("pmap"),
+                    LPAREN,
+                    pmap_args,
+                    HARDLINE,
+                    RPAREN,
+                ]
+            )
+        )
+
+        return group(
+            nest(
+                ctx.indent,
+                concat([results, LINE, ASSIGN_OP, " ", opcall]),
+            )
+        )
 
     opcall = group(
         concat(
             [
-                pp_fnname(op.name),
+                pp_fnname(op.op_type),
                 LPAREN,
                 nest(ctx.indent, concat([SOFTLINE, args])),
                 SOFTLINE,
@@ -159,7 +223,8 @@ def _(typ, ctx):
 
 @register_pretty(TupleType)
 def _(typ, ctx):
-    return group(concat([pp_type("Tuple"), LBRACKET] + _join(*typ.types) + [RBRACKET]))
+    elem_types = _join(*(pretty_dispatch(t, ctx) for t in typ.types))
+    return group(concat([pp_type("Tuple"), LBRACKET] + elem_types + [RBRACKET]))
 
 
 @register_pretty(Device)

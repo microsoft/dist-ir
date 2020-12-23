@@ -34,8 +34,9 @@ jobs:
       uses: actions/cache@v2
       with:
         path: ${{ steps.cache_pip.outputs.dir }}
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        key: ${{ runner.os }}-pip-${{ env.PY_VERSION }}-${{ hashFiles('**/requirements.txt') }}
         restore-keys: |
+          ${{ runner.os }}-pip-${{ env.PY_VERSION }}
           ${{ runner.os }}-pip-
 
     - name: Install dependencies

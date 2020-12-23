@@ -1,7 +1,7 @@
 from collections import defaultdict
 from typing import Dict, Set, Tuple
 
-from ..ir import Device, ModuleView
+from ..ir import Device, Module
 from .pipeline_parallel_scheduler import PipelineParallelScheduler
 
 
@@ -12,7 +12,7 @@ class PipeDreamScheduler(PipelineParallelScheduler):
         PipelineParallelScheduler.__init__(self, num_microbatches)
         self._prev_stage_types = defaultdict(lambda: "bw")
 
-    def _get_next_stage_to_schedule(self, device: Device) -> Tuple[ModuleView, int]:
+    def _get_next_stage_to_schedule(self, device: Device) -> Tuple[Module, int]:
         ready_stages_by_type = defaultdict(list)
         for ready_stage in self._ready_stages[device]:
             # TODO: Use a more robust method to identify backwards pass stages.

@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from typing import Dict, Set, Tuple
 
-from ..ir import Module, ModuleView, Device, Op
+from ..ir import Module, Device, Op
 
 
 class PipelineParallelScheduler(ABC):
@@ -37,7 +37,7 @@ class PipelineParallelScheduler(ABC):
                     self._ready_stages[device].append((stage, i))
 
     @abstractmethod
-    def _get_next_stage_to_schedule(self, device: Device) -> Tuple[ModuleView, int]:
+    def _get_next_stage_to_schedule(self, device: Device) -> Tuple[Module, int]:
         raise NotImplementedError()
 
     def _get_op_to_stage_map(self, stages):

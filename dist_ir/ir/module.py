@@ -1,20 +1,57 @@
 from collections import OrderedDict, defaultdict
+import copy
 from typing import Any, Dict, Iterable, List, Tuple, Union
 
-from .module_view import ModuleView
 from .op import Op
 from .value import Value
 
 
 class Module:
-    def __init__(self):
+    def __init__(self, name=None):
         self._ops = OrderedDict()
         self._inputs = OrderedDict()
         self._outputs = OrderedDict()
         self._op_counter = defaultdict(int)
         self._consumers = defaultdict(list)
+        self._name = name
+        self._hash = None
 
     def __str__(self):
+        if self._name is not None:
+            return self._name
+        else:
+            return self.get_summary()
+
+    def __repr__(self):
+        if self._name is not None:
+            return self._name
+        else:
+            return object.__repr__(self)
+
+    def __hash__(self):
+        if self._hash is None:
+            raise RuntimeError("Cannot hash unfinalized module!")
+        return self._hash
+
+    def __eq__(self, other):
+        for op_name in self._ops:
+            if op_name not in other._ops or self._ops[op_name] != other._ops[op_name]:
+                return False
+        for input_name in self._inputs:
+            if (
+                input_name not in other._inputs
+                or self._inputs[input_name] != other._inputs[input_name]
+            ):
+                return False
+        for output_name in self._outputs:
+            if (
+                output_name not in other._outputs
+                or self._outputs[output_name] != other._outputs[output_name]
+            ):
+                return False
+        return True
+
+    def get_summary(self):
         output = ""
         output += "Module inputs:\n"
         for input_value in self._inputs.values():
@@ -210,7 +247,8 @@ class Module:
 
     def finalize(self):
         """Performs some standard verification and inference passes. Use at the
-        end whenever creating a module.
+        end whenever creating a module. Assumes that the module will no longer be
+        modified after this function is called.
         """
         # Putting this import at the top level causes an import loop
         from ..executor.shape_inference import infer_shapes
@@ -219,7 +257,30 @@ class Module:
         if len(self._outputs) == 0:
             self.set_outputs_auto()
         infer_shapes(self)
+        self._hash = hash(tuple(self._ops.keys()))
 
-    def get_view(self, op_names, view_name=None):
-        ops = [self._ops[op_name] for op_name in op_names]
-        return ModuleView(self, ops, view_name)
+    def get_submodule(self, op_names, name=None):
+        """Returns a submodule comprised of the specified subset of ops."""
+        submodule = Module(name)
+        seen_values = set()
+        outputs = []
+        op_names_set = set(op_names)
+        for op_name in op_names:
+            op = self._ops[op_name]
+            submodule_op = copy.deepcopy(op)
+            submodule._ops[op_name] = submodule_op
+            for in_edge in submodule_op.get_in_edges():
+                if in_edge.name not in seen_values:
+                    submodule._inputs[in_edge.name] = copy.deepcopy(in_edge)
+                submodule._consumers[in_edge.name].append(op.name)
+            for out_edge in submodule_op.get_out_edges():
+                submodule._consumers[out_edge.name] = []
+                seen_values.add(out_edge.name)
+                external_output = out_edge.name in self._outputs or any(
+                    [c not in op_names for c in self._consumers[out_edge.name]]
+                )
+                if external_output:
+                    outputs.append(out_edge)
+        submodule.set_outputs(outputs)
+        submodule.finalize()
+        return submodule

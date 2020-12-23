@@ -40,10 +40,10 @@ def construct_module_and_partition_map():
     module.finalize()
 
     stages = [
-        module.get_view(("MatMul0",), view_name="f0"),
-        module.get_view(("MatMul1", "Loss"), view_name="f1"),
-        module.get_view(("LossGrad", "MatMul1Grad"), view_name="b1"),
-        module.get_view(("MatMul0Grad",), view_name="b0"),
+        module.get_submodule(("MatMul0",), name="f0"),
+        module.get_submodule(("MatMul1", "Loss"), name="f1"),
+        module.get_submodule(("LossGrad", "MatMul1Grad"), name="b1"),
+        module.get_submodule(("MatMul0Grad",), name="b0"),
     ]
 
     partition_map = OrderedDict(

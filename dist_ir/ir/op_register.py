@@ -84,20 +84,20 @@ class BroadcastScatterOpRegisterEntry(OpRegisterEntry):
 class PmapOpRegisterEntry(OpRegisterEntry):
     def infer_types(self, op, output_names=None):
         devices = op.get_attribute("devices")
-        submodule = op.get_submodule(0)
-        submodule_inputs = submodule.get_inputs()
-        submodule_outputs = submodule.get_outputs()
+        subfunction = op.get_subfunction(0)
+        subfunction_inputs = subfunction.get_inputs()
+        subfunction_outputs = subfunction.get_outputs()
         # TODO: If we want a more robust solution for nested pmaps, move the
-        # parameterization over device variable to the module code
+        # parameterization over device variable to the function code
         # TODO: Handle multiple device types?
         d = Device.get_new_device_variable(devices[0].device_type)
-        for in_edge in submodule_inputs:
+        for in_edge in subfunction_inputs:
             in_edge.type.set_device(d)
 
-        # TODO: Change the submodule input names to indicate they are
+        # TODO: Change the subfunction input names to indicate they are
         # parameterized over the devices
 
-        for i, out_edge in enumerate(submodule_outputs):
+        for i, out_edge in enumerate(subfunction_outputs):
             output_types = []
             for device in devices:
                 output_type = copy.deepcopy(out_edge.type)

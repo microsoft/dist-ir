@@ -104,23 +104,23 @@ def _infer_shapes_for_loss_grad(op, inputs, outputs):
 
 
 def _infer_shapes_for_pmap(op, inputs, outputs):
-    submodule = op.get_submodule(0)
+    subfunction = op.get_subfunction(0)
 
-    for (pmap_input, submodule_input) in zip(inputs, submodule.get_inputs()):
+    for (pmap_input, subfunction_input) in zip(inputs, subfunction.get_inputs()):
         assert isinstance(pmap_input.type, TupleType)
         # TODO check that all elements of the tuple have the same type and, if
         # they are tensors, that they have the same shape
-        if isinstance(submodule_input.type, Tensor):
-            submodule_input.type.shape = pmap_input.type.types[0].shape
+        if isinstance(subfunction_input.type, Tensor):
+            subfunction_input.type.shape = pmap_input.type.types[0].shape
 
-    _infer_shapes(submodule)
+    _infer_shapes(subfunction)
 
-    for (pmap_output, submodule_output) in zip(outputs, submodule.get_outputs()):
-        if isinstance(submodule_output.type, Tensor):
+    for (pmap_output, subfunction_output) in zip(outputs, subfunction.get_outputs()):
+        if isinstance(subfunction_output.type, Tensor):
             assert isinstance(pmap_output.type, TupleType)
             for pmap_output_type in pmap_output.type.types:
-                pmap_output_type.shape = submodule_output.type.shape
-                pmap_output_type.dtype = submodule_output.type.dtype
+                pmap_output_type.shape = subfunction_output.type.shape
+                pmap_output_type.dtype = subfunction_output.type.dtype
 
 
 def _infer_shapes_for_scatter(op, inputs, outputs):
@@ -174,14 +174,14 @@ ShapeInferenceRegister = {
 }
 
 
-def _infer_shapes(module):
+def _infer_shapes(function):
     """Helper function for inferring shapes.
 
     Inputs:
-      module: The module to infer shapes for.
+      function: The function to infer shapes for.
     """
 
-    for op_name, op in module.get_ops().items():
+    for op_name, op in function.get_ops().items():
         inputs = op.get_in_edges()
         outputs = op.get_out_edges()
 
@@ -197,6 +197,6 @@ def _infer_shapes(module):
         # here if they match existing types (if any) and if not, replace them
 
 
-def infer_shapes(module):
-    """Infers shapes for the given module."""
-    _infer_shapes(module)
+def infer_shapes(function):
+    """Infers shapes for the given function."""
+    _infer_shapes(function)

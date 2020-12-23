@@ -1,13 +1,13 @@
 import copy
 from collections import defaultdict
 
-from ..ir.module import Module
+from ..ir.function import Function
 from ..ir.value import Value
 from . import utils
 
 
 class PipelineParallelTransform:
-    """Partitions a module using pipeline parallelism.
+    """Partitions a function using pipeline parallelism.
 
     Attributes:
       num_microbatches: The number of microbatches per pipeline iteration.
@@ -29,9 +29,9 @@ class PipelineParallelTransform:
             list(self._partition_map.keys())
         )
 
-    def _forward_value(self, transformed_module, value, device):
+    def _forward_value(self, transformed_function, value, device):
         """Forwards the specified value to the specified device by adding a Send op."""
-        forwarded_value = transformed_module.add_op(
+        forwarded_value = transformed_function.add_op(
             "Send",
             name=f"Send/{value.name}@{device}",
             inputs=[value],
@@ -40,16 +40,16 @@ class PipelineParallelTransform:
         )
         return forwarded_value
 
-    def _partition_inputs(self, module, transformed_module, pipelined_value_map):
+    def _partition_inputs(self, function, transformed_function, pipelined_value_map):
         """Splits the input values according to the number of specified microbatches."""
-        input_values = module.get_inputs()
+        input_values = function.get_inputs()
         for input_value in input_values:
-            v = transformed_module.add_input_value(
+            v = transformed_function.add_input_value(
                 input_value.name, copy.deepcopy(input_value.type)
             )
             pipelined_input_map = pipelined_value_map[input_value.name]
             if input_value.name in self._batch_dims:
-                vs = transformed_module.add_op(
+                vs = transformed_function.add_op(
                     "Split",
                     name=f"Split/{v.name}",
                     inputs=[v],
@@ -60,7 +60,7 @@ class PipelineParallelTransform:
                     output_names=[f"{v.name}s"],
                 )
                 for i in range(self._num_microbatches):
-                    v_i = transformed_module.add_op(
+                    v_i = transformed_function.add_op(
                         "Select",
                         name=f"Select/{v.name}_{i}",
                         attributes={"dim": i},
@@ -75,7 +75,7 @@ class PipelineParallelTransform:
             # Forward the input value(s) if the destination device(s) are not
             # the same as the source device.
             input_device = input_value.type.device
-            consumer_ops = module.get_consumers_for_value(input_value.name)
+            consumer_ops = function.get_consumers_for_value(input_value.name)
             consumer_stages = utils.get_stages_from_op_names(
                 self._op_to_stage_map, consumer_ops
             )
@@ -94,7 +94,7 @@ class PipelineParallelTransform:
                     for i in range(self._num_microbatches):
                         if input_value.name in self._batch_dims or i == 0:
                             forwarded_input = self._forward_value(
-                                transformed_module,
+                                transformed_function,
                                 pipelined_input_map[i],
                                 consumer_device,
                             )
@@ -106,7 +106,7 @@ class PipelineParallelTransform:
 
     def _aggregate_outputs(
         self,
-        transformed_module,
+        transformed_function,
         orig_output,
         pipelined_output,
         merged_output_map,
@@ -115,7 +115,7 @@ class PipelineParallelTransform:
         """Aggregates the specified output according to the user-provided reduction parameters.
 
         Args:
-          transformed_module: The transformed module.
+          transformed_function: The transformed function.
           orig_output: The original version of the output value.
           pipelined_output: The transformed (i.e. partitioned) version of the output value.
           merged_output_map: A map from original output value name to aggregated output value.
@@ -134,7 +134,7 @@ class PipelineParallelTransform:
             # Forward the output value if necessary.
             if merged_output.type.device != pipelined_output.type.device:
                 pipelined_output = self._forward_value(
-                    transformed_module, pipelined_output, merged_output.type.device
+                    transformed_function, pipelined_output, merged_output.type.device
                 )
 
             # Prepare the reduction op name and output value name.
@@ -146,9 +146,9 @@ class PipelineParallelTransform:
             else:
                 output_name = f"{orig_output.name}/merged_{num_completed_microbatches}"
 
-            # Add the requested reduction op to the transformed module.
+            # Add the requested reduction op to the transformed function.
             if reduction_op_type == "Add":
-                merged_output_map[orig_output.name] = transformed_module.add_op(
+                merged_output_map[orig_output.name] = transformed_function.add_op(
                     "Add",
                     name=op_name,
                     inputs=[merged_output, pipelined_output],
@@ -156,7 +156,7 @@ class PipelineParallelTransform:
                 )
             elif reduction_op_type == "Concat":
                 dim = self._reduction_params[orig_output.name]["dim"]
-                merged_output_map[orig_output.name] = transformed_module.add_op(
+                merged_output_map[orig_output.name] = transformed_function.add_op(
                     "Concat",
                     attributes={"dim": dim},
                     name=op_name,
@@ -169,10 +169,10 @@ class PipelineParallelTransform:
                     f"for output {orig_output}"
                 )
 
-    def apply(self, module):
-        """Applies the transformation to the module and returns a transformed module."""
+    def apply(self, function):
+        """Applies the transformation to the function and returns a transformed function."""
 
-        transformed_module = Module()
+        transformed_function = Function()
 
         # A map from original value name to another map from microbatch number to
         # pipelined value.
@@ -181,14 +181,14 @@ class PipelineParallelTransform:
         # A map from original output value name to merged output value.
         merged_output_map = defaultdict(Value)
 
-        # Partition the input values for each microbatch.
-        self._partition_inputs(module, transformed_module, pipelined_value_map)
+        # Partition the input values according to the number of microbatches.
+        self._partition_inputs(function, transformed_function, pipelined_value_map)
 
         # Schedule stages on each device in order of increasing timestep.
         for timestep in range(len(self._schedule)):
             for device in self._schedule[timestep]:
                 # Look up the next stage to execute according to the schedule
-                # and add each op in the stage to the transformed module.
+                # and add each op in the stage to the transformed function.
                 (stage, microbatch) = self._schedule[timestep][device]
                 stage_outputs = set([v.name for v in stage.get_outputs()])
                 for op_name, orig_op in stage.get_ops().items():
@@ -203,12 +203,12 @@ class PipelineParallelTransform:
                         pipelined_inputs.append(pipelined_input_map[microbatch])
 
                     # Add the pipelined version of the op for the given microbatch to
-                    # the transformed module.
+                    # the transformed function.
                     pipelined_output_names = [
                         f"{orig_output.name}_{microbatch}"
                         for orig_output in orig_outputs
                     ]
-                    pipelined_outputs = transformed_module.add_op(
+                    pipelined_outputs = transformed_function.add_op(
                         orig_op.op_type,
                         name=f"{orig_op.name}_{microbatch}",
                         attributes=orig_op._attributes,
@@ -230,12 +230,12 @@ class PipelineParallelTransform:
                             # This output is an intermediate output *within* a stage which does not
                             # require any additional processing.
                             continue
-                        elif module.is_output(orig_output.name):
-                            # This output is a module output, which means we need to aggregate it
+                        elif function.is_output(orig_output.name):
+                            # This output is a function output, which means we need to aggregate it
                             # with all other corresponding partitioned outputs for each microbatch.
                             num_completed_microbatches = len(pipelined_output_map)
                             self._aggregate_outputs(
-                                transformed_module,
+                                transformed_function,
                                 orig_output,
                                 pipelined_output,
                                 merged_output_map,
@@ -245,7 +245,7 @@ class PipelineParallelTransform:
                             # This output is an intermediate stage output, which means we need to
                             # forward the output to the next stage if the next stage is located on
                             # a different device.
-                            consumer_ops = module.get_consumers_for_value(
+                            consumer_ops = function.get_consumers_for_value(
                                 orig_output.name
                             )
                             consumer_stages = utils.get_stages_from_op_names(
@@ -259,9 +259,9 @@ class PipelineParallelTransform:
                                     pipelined_output_map[
                                         microbatch
                                     ] = self._forward_value(
-                                        transformed_module,
+                                        transformed_function,
                                         pipelined_output,
                                         consumer_device,
                                     )
 
-        return transformed_module
+        return transformed_function

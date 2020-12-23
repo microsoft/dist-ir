@@ -6,7 +6,7 @@ from .op import Op
 from .value import Value
 
 
-class Module:
+class Function:
     def __init__(self, name=None):
         self._ops = OrderedDict()
         self._inputs = OrderedDict()
@@ -27,7 +27,7 @@ class Module:
 
     def __hash__(self):
         if self._hash is None:
-            raise RuntimeError("Cannot hash unfinalized module!")
+            raise RuntimeError("Cannot hash unfinalized function!")
         return self._hash
 
     def __eq__(self, other):
@@ -50,11 +50,11 @@ class Module:
 
     def get_summary(self):
         output = ""
-        output += "Module inputs:\n"
+        output += "Function inputs:\n"
         for input_value in self._inputs.values():
             output += "  " + str(input_value) + "\n"
         output += "\n"
-        output += "Module outputs:\n"
+        output += "Function outputs:\n"
         for input_value in self._outputs.values():
             output += "  " + str(input_value) + "\n"
         output += "\n"
@@ -65,7 +65,7 @@ class Module:
 
     # TODO: Convert to property
     def get_ops(self):
-        """Returns all ops in the module."""
+        """Returns all ops in the function."""
         return self._ops
 
     def is_op(self, name):
@@ -93,11 +93,11 @@ class Module:
         return self._inputs[name]
 
     def get_inputs(self):
-        """Returns the module inputs."""
+        """Returns the function inputs."""
         return self._inputs.values()
 
     def get_outputs(self):
-        """Returns the module outputs."""
+        """Returns the function outputs."""
         return self._outputs.values()
 
     def add_op(
@@ -106,7 +106,7 @@ class Module:
         name=None,
         inputs: List[Value] = None,
         attributes: Dict[str, Any] = None,
-        submodules: List["Module"] = None,
+        subfunctions: List["Function"] = None,
         output_names: List[str] = None,
     ) -> Union[None, Value, Tuple[Value, ...]]:
         """Adds an op to the graph.
@@ -116,7 +116,7 @@ class Module:
           name: The op's name.
           inputs: The input values for this op.
           attributes: Any op-specific attributes.
-          submodules: Any submodules this op is wrapping.
+          subfunctions: Any subfunctions this op is wrapping.
           output_names: An optinal list of output value names.
 
         Returns:
@@ -131,7 +131,7 @@ class Module:
             op_type,
             in_edges=inputs,
             attributes=attributes,
-            submodules=submodules,
+            subfunctions=subfunctions,
             output_names=output_names,
         )
         self._ops[name] = op
@@ -157,7 +157,7 @@ class Module:
         """Adds an input value to the graph and returns the value."""
         value = Value(name=name, value_type=value_type)
         if value.name in self._inputs:
-            raise ValueError(f"Module already has input value with name {value.name}")
+            raise ValueError(f"Function already has input value with name {value.name}")
         self._inputs[value.name] = value
         return value
 
@@ -165,19 +165,19 @@ class Module:
         return self._consumers[name]
 
     def set_outputs(self, outputs: Iterable[Value]):
-        """Sets the output of this module to be the given values. They must be
-        valid values, i.e. outputs of some existing op in the module. This clears
-        any previous outputs registered with this module.
+        """Sets the output of this function to be the given values. They must be
+        valid values, i.e. outputs of some existing op in the function. This clears
+        any previous outputs registered with this function.
         """
         for output in outputs:
             # NOTE: Using consumers as a proxy for valid values
             if output.name not in self._consumers:
-                raise ValueError(f"Module has no value {output}")
+                raise ValueError(f"Function has no value {output}")
         self._outputs.clear()
         for output in outputs:
             if output.name in self._outputs:
                 raise ValueError(
-                    f"Module already has output value with name {output.name}"
+                    f"Function already has output value with name {output.name}"
                 )
             self._outputs[output.name] = output
 
@@ -241,7 +241,7 @@ class Module:
 
     def finalize(self):
         """Performs some standard verification and inference passes. Use at the
-        end whenever creating a module. Assumes that the module will no longer be
+        end whenever creating a function. Assumes that the function will no longer be
         modified after this function is called.
         """
         # Putting this import at the top level causes an import loop
@@ -253,35 +253,35 @@ class Module:
         infer_shapes(self)
         self._hash = hash(tuple(self._ops.keys()))
 
-    def get_submodule(self, op_names, name=None):
-        """Returns a submodule comprised of the specified subset of ops."""
-        submodule = Module(name)
+    def get_subfunction(self, op_names, name=None):
+        """Returns a subfunction comprised of the specified subset of ops."""
+        subfunction = Function(name)
         value_map = {}
         outputs = []
         op_names_set = set(op_names)
         for op_name in op_names:
             op = self._ops[op_name]
-            submodule_op_inputs = []
+            subfunction_op_inputs = []
             for input in op.get_in_edges():
                 if input.name not in value_map:
-                    value_map[input.name] = submodule.add_input_value(
+                    value_map[input.name] = subfunction.add_input_value(
                         input.name, input.type
                     )
-                submodule_op_inputs.append(value_map[input.name])
+                subfunction_op_inputs.append(value_map[input.name])
             output_names = [output.name for output in op.get_out_edges()]
-            submodule_op_outputs = submodule.add_op(
+            subfunction_op_outputs = subfunction.add_op(
                 op.op_type,
                 name=op.name,
-                inputs=submodule_op_inputs,
+                inputs=subfunction_op_inputs,
                 attributes=op._attributes,
-                submodules=copy.deepcopy(op._submodules),
+                subfunctions=copy.deepcopy(op._subfunctions),
                 output_names=output_names,
             )
-            if not isinstance(submodule_op_outputs, tuple):
-                submodule_op_outputs = (submodule_op_outputs,)
-            for output in submodule_op_outputs:
-                # We need to explicitly set the submodule outputs because some output
-                # values might have consumers outside the submodule (external).
+            if not isinstance(subfunction_op_outputs, tuple):
+                subfunction_op_outputs = (subfunction_op_outputs,)
+            for output in subfunction_op_outputs:
+                # We need to explicitly set the subfunction outputs because some output
+                # values might have consumers outside the subfunction (external).
                 consumers = self._consumers[output.name]
                 has_external_output = any([c not in op_names_set for c in consumers])
                 if (
@@ -289,6 +289,6 @@ class Module:
                 ) and output.name not in op_names:
                     outputs.append(output)
                 value_map[output.name] = output
-        submodule.set_outputs(outputs)
-        submodule.finalize()
-        return submodule
+        subfunction.set_outputs(outputs)
+        subfunction.finalize()
+        return subfunction

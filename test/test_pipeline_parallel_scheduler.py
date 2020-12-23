@@ -3,10 +3,10 @@ import pipeline_parallel_utils as utils
 
 
 def test_fifo_scheduler():
-    (module, partition_map) = utils.construct_module_and_partition_map()
+    (function, partition_map) = utils.construct_function_and_partition_map()
     (d0, d1) = sorted(set(partition_map.values()))
     scheduler = FIFOScheduler(num_microbatches=2)
-    schedule = scheduler.schedule(module, partition_map)
+    schedule = scheduler.schedule(function, partition_map)
 
     stages = list(partition_map.keys())
     ref_schedule = [
@@ -22,10 +22,10 @@ def test_fifo_scheduler():
 
 
 def test_pipedream_scheduler():
-    (module, partition_map) = utils.construct_module_and_partition_map()
+    (function, partition_map) = utils.construct_function_and_partition_map()
     (d0, d1) = sorted(set(partition_map.values()))
     scheduler = PipeDreamScheduler(num_microbatches=2)
-    schedule = scheduler.schedule(module, partition_map)
+    schedule = scheduler.schedule(function, partition_map)
 
     stages = list(partition_map.keys())
     ref_schedule = [

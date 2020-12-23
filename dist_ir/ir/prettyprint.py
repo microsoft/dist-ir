@@ -47,7 +47,7 @@ from prettyprinter.prettyprinter import (
 )
 from prettyprinter.utils import intersperse
 
-from .module import Module
+from .function import Function
 from .value import Value
 from .type import Type, Int, Float, Tensor, TupleType
 from .device import Device
@@ -97,10 +97,10 @@ def interline(*docs):
 # ----------------------------------------
 
 
-def _pprint_module_body(module: Module, ctx):
-    ops = [pretty_dispatch(op, ctx) for op in module.get_ops().values()]
+def _pprint_function_body(function: Function, ctx):
+    ops = [pretty_dispatch(op, ctx) for op in function.get_ops().values()]
     # Include the outputs as a final "return" op
-    outputs = concat(_join(*(r.name for r in module.get_outputs())))
+    outputs = concat(_join(*(r.name for r in function.get_outputs())))
     return_line = group(
         nest(ctx.indent, concat([pp_reserved("return"), LINE, outputs]))
     )
@@ -108,12 +108,12 @@ def _pprint_module_body(module: Module, ctx):
     return ops
 
 
-@register_pretty(Module)
-def _(module: Module, ctx):
-    ops = _pprint_module_body(module, ctx)
+@register_pretty(Function)
+def _(function: Function, ctx):
+    ops = _pprint_function_body(function, ctx)
     return concat(
         [
-            pretty_call(ctx, pp_fnname("Module"), *module.get_inputs()),
+            pretty_call(ctx, pp_fnname("Function"), *function.get_inputs()),
             nest(ctx.indent, concat([COLON, HARDLINE, interline(*ops)])),
         ]
     )
@@ -126,10 +126,10 @@ def _(op: Op, ctx):
 
     if op.op_type == "Pmap":
         lambda_args = _join(
-            *(pretty_dispatch(i, ctx) for i in op.get_submodule(0).get_inputs())
+            *(pretty_dispatch(i, ctx) for i in op.get_subfunction(0).get_inputs())
         )
         lambda_args = concat([LPAREN, nest(ctx.indent, concat(lambda_args)), RPAREN])
-        lambda_body = _pprint_module_body(op.get_submodule(0), ctx)
+        lambda_body = _pprint_function_body(op.get_subfunction(0), ctx)
         actual_args = group(
             concat(
                 [
@@ -139,7 +139,8 @@ def _(op: Op, ctx):
                 ]
             )
         )
-        d = str(op.get_attribute("device_var").device_id)
+        # TODO: Handle list of devices
+        d = str(op.get_attribute("devices").device_id)
         pmap_args = nest(
             ctx.indent,
             concat(

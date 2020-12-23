@@ -1,5 +1,4 @@
 from .op_register import OpRegister
-from .type import *
 from .value import Value
 
 
@@ -10,7 +9,7 @@ class Op:
         op_type,
         in_edges=None,
         attributes=None,
-        submodules=None,
+        subfunctions=None,
         output_names=None,
     ):
         if op_type not in OpRegister:
@@ -25,10 +24,10 @@ class Op:
             self._attributes = {}
         else:
             self._attributes = attributes
-        if submodules is None:
-            self._submodules = []
+        if subfunctions is None:
+            self._subfunctions = []
         else:
-            self._submodules = submodules
+            self._subfunctions = subfunctions
         self._out_edges = []
         OpRegister[op_type].infer_types(self, output_names)
 
@@ -42,11 +41,11 @@ class Op:
         output += "Outputs:\n"
         for out_edge in self._out_edges:
             output += "  " + str(out_edge) + "\n"
-        if len(self._submodules) > 0:
-            output += "Submodules:\n"
-            for submodule in self._submodules:
+        if len(self._subfunctions) > 0:
+            output += "Subfunctions:\n"
+            for subfunction in self._subfunctions:
                 output += "\n".join(
-                    ["  " + line for line in str(submodule).split("\n")]
+                    ["  " + line for line in str(subfunction).split("\n")]
                 )
         return output
 
@@ -73,9 +72,9 @@ class Op:
         """Returns the specified attributes, or throws error if it does not exist."""
         return self._attributes[attribute_name]
 
-    def get_submodule(self, idx):
-        """Returns the submodule at the specified index."""
-        return self._submodules[idx]
+    def get_subfunction(self, idx):
+        """Returns the subfunction at the specified index."""
+        return self._subfunctions[idx]
 
     @property
     def name(self):

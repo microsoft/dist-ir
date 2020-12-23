@@ -1,9 +1,9 @@
 from typing import Dict, Iterable, List
 
-from ..ir import Module
+from ..ir import Function
 
 
-def get_op_to_stage_map(stages: Iterable[Module]) -> Dict[str, Module]:
+def get_op_to_stage_map(stages: Iterable[Function]) -> Dict[str, Function]:
     """Given a list of stages, returns a map from individual op name to
     encompassing stage."""
     op_to_stage = {}
@@ -14,8 +14,8 @@ def get_op_to_stage_map(stages: Iterable[Module]) -> Dict[str, Module]:
 
 
 def get_stages_from_op_names(
-    op_to_stage: Dict[str, Module], op_names: Iterable[str]
-) -> List[Module]:
+    op_to_stage: Dict[str, Function], op_names: Iterable[str]
+) -> List[Function]:
     """Given a list of op names and a map from op name to encompassing stage,
     returns a list of encompassing stages."""
     seen = set()

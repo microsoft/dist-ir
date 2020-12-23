@@ -1,1 +1,2 @@
-from . import mlir_parser
+from .mlir_parser import *
+from .onnx_parser import *

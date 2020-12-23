@@ -1,8 +1,7 @@
-from .module import Module
-from .type import Tensor, Float
-from .value import Value
-
 import onnx
+
+from ..ir import Module, Value
+from ..ir.type import Tensor, Float
 
 
 def import_from_onnx(onnx_model):

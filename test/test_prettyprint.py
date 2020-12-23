@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from dist_ir import import_from_onnx
+from dist_ir.importer import import_from_onnx
 from dist_ir.ir import Module, Topology
 from dist_ir.ir.type import Float, Tensor
 from dist_ir.ir import cpprint

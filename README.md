@@ -3,7 +3,7 @@
 An IR to represent distributed computations.
 Our main goal is an IR capable of representing the complex distributed strategies
 used in large-scale distributed training, while at the same time enabling fast
-cost models.
+cost models/simulations.
 
 Distributed strategies we want to support:
 - Data parallelism
@@ -11,22 +11,31 @@ Distributed strategies we want to support:
 - Pipeline parallelism
 - Megatron
 - ZeRO partitioning
+- PyTorch lightning's Zero
 - Stashing & recomputation
 - Overlapping computation and communication
+- Local layer parallelism
+
+# Requirements/Installation
+
+See the [build file](.github/workflows/tests.yml) and [PIP packages list](requirements.txt).
 
 # Directory structure
 
 - dist_ir: Python source for DistIR
-    - executor: TODO
-    - graph: TODO
-    - ops: TODO
-    - tests: TODO merge with test
-- test: unit tests, small/toy example models
+    - ir: IR definitions
+    - importer: create DistIR from ONNX/MLIR
+    - executor: ways to "execute" or simulate DistIR
 - docs: documentation and notes
+- notebooks: small experiments and worked examples
+- test: unit tests, small/toy example models
 
 # Running tests
 
-TODO
+Run the following from the root of this repository:
+```bash
+python -m pytest
+```
 
 # Components
 

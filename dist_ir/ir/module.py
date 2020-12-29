@@ -110,7 +110,6 @@ class Module:
         inputs: List[Value] = None,
         attributes: Dict[str, Any] = None,
         submodules: List["Module"] = None,
-        metadata: Dict[str, Any] = None,
         output_names: List[str] = None,
     ) -> Union[None, Value, Tuple[Value, ...]]:
         """Adds an op to the graph.
@@ -121,7 +120,6 @@ class Module:
           inputs: The input values for this op.
           attributes: Any op-specific attributes.
           submodules: Any submodules this op is wrapping.
-          metadata: Any op-specific metadata.
           output_names: An optinal list of output value names.
 
         Returns:
@@ -137,7 +135,6 @@ class Module:
             in_edges=inputs,
             attributes=attributes,
             submodules=submodules,
-            metadata=metadata,
             output_names=output_names,
         )
         self._ops[name] = op
@@ -262,25 +259,39 @@ class Module:
     def get_submodule(self, op_names, name=None):
         """Returns a submodule comprised of the specified subset of ops."""
         submodule = Module(name)
-        seen_values = set()
+        value_map = {}
         outputs = []
         op_names_set = set(op_names)
         for op_name in op_names:
             op = self._ops[op_name]
-            submodule_op = copy.deepcopy(op)
-            submodule._ops[op_name] = submodule_op
-            for in_edge in submodule_op.get_in_edges():
-                if in_edge.name not in seen_values:
-                    submodule._inputs[in_edge.name] = copy.deepcopy(in_edge)
-                submodule._consumers[in_edge.name].append(op.name)
-            for out_edge in submodule_op.get_out_edges():
-                submodule._consumers[out_edge.name] = []
-                seen_values.add(out_edge.name)
-                external_output = out_edge.name in self._outputs or any(
-                    [c not in op_names for c in self._consumers[out_edge.name]]
-                )
-                if external_output:
-                    outputs.append(out_edge)
+            submodule_op_inputs = []
+            for input in op.get_in_edges():
+                if input.name not in value_map:
+                    value_map[input.name] = submodule.add_input_value(
+                        input.name, input.type
+                    )
+                submodule_op_inputs.append(value_map[input.name])
+            output_names = [output.name for output in op.get_out_edges()]
+            submodule_op_outputs = submodule.add_op(
+                op.op_type,
+                name=op.name,
+                inputs=submodule_op_inputs,
+                attributes=op._attributes,
+                submodules=copy.deepcopy(op._submodules),
+                output_names=output_names,
+            )
+            if not isinstance(submodule_op_outputs, tuple):
+                submodule_op_outputs = (submodule_op_outputs,)
+            for output in submodule_op_outputs:
+                # We need to explicitly set the submodule outputs because some output
+                # values might have consumers outside the submodule (external).
+                consumers = self._consumers[output.name]
+                has_external_output = any([c not in op_names_set for c in consumers])
+                if (
+                    output.name in self._outputs or has_external_output
+                ) and output.name not in op_names:
+                    outputs.append(output)
+                value_map[output.name] = output
         submodule.set_outputs(outputs)
         submodule.finalize()
         return submodule

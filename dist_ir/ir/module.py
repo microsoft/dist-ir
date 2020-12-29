@@ -23,10 +23,7 @@ class Module:
             return self.get_summary()
 
     def __repr__(self):
-        if self._name is not None:
-            return self._name
-        else:
-            return object.__repr__(self)
+        return self.get_summary()
 
     def __hash__(self):
         if self._hash is None:

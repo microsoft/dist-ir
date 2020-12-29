@@ -1,8 +1,7 @@
 import numpy as np
 
-from dist_ir.ir import Module
+from dist_ir.ir import Device, Module
 from dist_ir.ir.type import Float, Tensor
-from dist_ir.ir.device import Device
 from dist_ir.transforms import DataParallelTransform
 from dist_ir.executor import SequentialExecutor
 

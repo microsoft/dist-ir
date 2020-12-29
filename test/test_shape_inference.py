@@ -1,7 +1,6 @@
 import pytest
 
-from dist_ir.ir import Module
-from dist_ir.ir.device import Device
+from dist_ir.ir import Device, Module
 from dist_ir.executor.shape_inference import infer_shapes
 from dist_ir.ir.type import Float, Tensor, TupleType
 

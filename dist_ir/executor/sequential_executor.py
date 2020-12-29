@@ -78,8 +78,8 @@ class SequentialExecutor:
             out_edges = op.get_out_edges()
             for i, out_edge in enumerate(out_edges):
                 output_data[out_edge.name] = res[i]
-                consumers[out_edge.name] = module.get_consumers_for_out_edge(
-                    out_edge.name
+                consumers[out_edge.name] = len(
+                    module.get_consumers_for_value(out_edge.name)
                 )
 
             # Garbage collect the fully consumed output tensors.

@@ -1,4 +1,5 @@
 from collections import OrderedDict, defaultdict
+import copy
 from typing import Any, Dict, Iterable, List, Tuple, Union
 
 from .op import Op
@@ -6,14 +7,48 @@ from .value import Value
 
 
 class Module:
-    def __init__(self):
+    def __init__(self, name=None):
         self._ops = OrderedDict()
         self._inputs = OrderedDict()
         self._outputs = OrderedDict()
         self._op_counter = defaultdict(int)
-        self._consumers = defaultdict(int)
+        self._consumers = defaultdict(list)
+        self._name = name
+        self._hash = None
 
     def __str__(self):
+        if self._name is not None:
+            return self._name
+        else:
+            return self.get_summary()
+
+    def __repr__(self):
+        return self.get_summary()
+
+    def __hash__(self):
+        if self._hash is None:
+            raise RuntimeError("Cannot hash unfinalized module!")
+        return self._hash
+
+    def __eq__(self, other):
+        for op_name in self._ops:
+            if op_name not in other._ops or self._ops[op_name] != other._ops[op_name]:
+                return False
+        for input_name in self._inputs:
+            if (
+                input_name not in other._inputs
+                or self._inputs[input_name] != other._inputs[input_name]
+            ):
+                return False
+        for output_name in self._outputs:
+            if (
+                output_name not in other._outputs
+                or self._outputs[output_name] != other._outputs[output_name]
+            ):
+                return False
+        return True
+
+    def get_summary(self):
         output = ""
         output += "Module inputs:\n"
         for input_value in self._inputs.values():
@@ -72,7 +107,6 @@ class Module:
         inputs: List[Value] = None,
         attributes: Dict[str, Any] = None,
         submodules: List["Module"] = None,
-        metadata: Dict[str, Any] = None,
         output_names: List[str] = None,
     ) -> Union[None, Value, Tuple[Value, ...]]:
         """Adds an op to the graph.
@@ -83,7 +117,6 @@ class Module:
           inputs: The input values for this op.
           attributes: Any op-specific attributes.
           submodules: Any submodules this op is wrapping.
-          metadata: Any op-specific metadata.
           output_names: An optinal list of output value names.
 
         Returns:
@@ -99,7 +132,6 @@ class Module:
             in_edges=inputs,
             attributes=attributes,
             submodules=submodules,
-            metadata=metadata,
             output_names=output_names,
         )
         self._ops[name] = op
@@ -107,10 +139,10 @@ class Module:
 
         # Update _consumers.
         out_edges = op.get_out_edges()
-        for out_edge in out_edges:
-            self._consumers[out_edge.name] = 0
         for in_edge in inputs:
-            self._consumers[in_edge.name] += 1
+            self._consumers[in_edge.name].append(op.name)
+        for out_edge in out_edges:
+            self._consumers[out_edge.name] = []
 
         # Return the op outputs.
         num_out_edges = len(out_edges)
@@ -129,7 +161,7 @@ class Module:
         self._inputs[value.name] = value
         return value
 
-    def get_consumers_for_out_edge(self, name):
+    def get_consumers_for_value(self, name):
         return self._consumers[name]
 
     def set_outputs(self, outputs: Iterable[Value]):
@@ -209,7 +241,8 @@ class Module:
 
     def finalize(self):
         """Performs some standard verification and inference passes. Use at the
-        end whenever creating a module.
+        end whenever creating a module. Assumes that the module will no longer be
+        modified after this function is called.
         """
         # Putting this import at the top level causes an import loop
         from ..executor.shape_inference import infer_shapes
@@ -218,3 +251,44 @@ class Module:
         if len(self._outputs) == 0:
             self.set_outputs_auto()
         infer_shapes(self)
+        self._hash = hash(tuple(self._ops.keys()))
+
+    def get_submodule(self, op_names, name=None):
+        """Returns a submodule comprised of the specified subset of ops."""
+        submodule = Module(name)
+        value_map = {}
+        outputs = []
+        op_names_set = set(op_names)
+        for op_name in op_names:
+            op = self._ops[op_name]
+            submodule_op_inputs = []
+            for input in op.get_in_edges():
+                if input.name not in value_map:
+                    value_map[input.name] = submodule.add_input_value(
+                        input.name, input.type
+                    )
+                submodule_op_inputs.append(value_map[input.name])
+            output_names = [output.name for output in op.get_out_edges()]
+            submodule_op_outputs = submodule.add_op(
+                op.op_type,
+                name=op.name,
+                inputs=submodule_op_inputs,
+                attributes=op._attributes,
+                submodules=copy.deepcopy(op._submodules),
+                output_names=output_names,
+            )
+            if not isinstance(submodule_op_outputs, tuple):
+                submodule_op_outputs = (submodule_op_outputs,)
+            for output in submodule_op_outputs:
+                # We need to explicitly set the submodule outputs because some output
+                # values might have consumers outside the submodule (external).
+                consumers = self._consumers[output.name]
+                has_external_output = any([c not in op_names_set for c in consumers])
+                if (
+                    output.name in self._outputs or has_external_output
+                ) and output.name not in op_names:
+                    outputs.append(output)
+                value_map[output.name] = output
+        submodule.set_outputs(outputs)
+        submodule.finalize()
+        return submodule

@@ -15,16 +15,30 @@ class CostModel:
         self._topology = topology
         self._device_speeds = device_speeds
         self._op_register = {
+            "Add": self._infer_costs_for_add,
             "Allreduce": self._infer_costs_for_allreduce,
-            "Broadcast": self._infer_costs_for_broadcast_scatter,
+            "Broadcast": self._infer_costs_for_send,
             "Concat": self._infer_costs_for_concat,
             "Gather": self._infer_costs_for_gather,
             "Loss": self._infer_costs_for_loss,
             "LossGrad": self._infer_costs_for_loss_grad,
             "MatMul": self._infer_costs_for_matmul,
             "MatMulGrad": self._infer_costs_for_matmul_grad,
-            "Scatter": self._infer_costs_for_broadcast_scatter,
+            "Scatter": self._infer_costs_for_send,
+            "Select": self._free_cost_op,
+            "Send": self._infer_costs_for_send,
+            "Split": self._free_cost_op,
         }
+
+    def _infer_costs_for_add(self, op, inputs, outputs):
+        device = inputs[0].type.device
+        # TODO: Verify all input and output devices are the same?
+        # TODO: Check this cost computation
+        a_matrix_shape = inputs[0].type.shape
+        flops = a_matrix_shape[0] * a_matrix_shape[1]
+        # TODO: Use a better way of computing runtime from FLOPs
+        runtime = flops / self._device_speeds[device.device_type]
+        return {device: runtime}
 
     def _infer_costs_for_allreduce(self, op, inputs, outputs):
         costs = {}
@@ -97,7 +111,7 @@ class CostModel:
             costs[device] *= 2
         return costs
 
-    def _infer_costs_for_broadcast_scatter(self, op, inputs, outputs):
+    def _infer_costs_for_send(self, op, inputs, outputs):
         costs = {}
         input_device = inputs[0].type.device
         costs[input_device] = 0
@@ -113,6 +127,16 @@ class CostModel:
             if output_device != input_device:
                 costs[output_device] = transfer_time
 
+        return costs
+
+    def _free_cost_op(self, op, inputs, outputs):
+        costs = {}
+        input_devices = utils.get_all_devices(inputs)
+        output_devices = utils.get_all_devices(outputs)
+        if input_devices | output_devices is None:
+            return costs
+        for device in input_devices | output_devices:
+            costs[device] = 0.0
         return costs
 
     def infer_costs(self, op):

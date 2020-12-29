@@ -138,10 +138,12 @@ def _infer_shapes_for_scatter(op, inputs, outputs):
 def _infer_shapes_for_select(op, inputs, outputs):
     dim = op.get_attribute("dim")
     outputs[0].type.shape = inputs[0].type.types[dim].shape
+    outputs[0].type.dtype = inputs[0].type.types[dim].dtype
 
 
 def _infer_shapes_for_send(op, inputs, outputs):
     outputs[0].type.shape = inputs[0].type.shape
+    outputs[0].type.dtype = inputs[0].type.dtype
 
 
 def _infer_shapes_for_split(op, inputs, outputs):
@@ -151,6 +153,7 @@ def _infer_shapes_for_split(op, inputs, outputs):
     output_shape[split_dim] //= num_splits
     for typ in outputs[0].type.types:
         typ.shape = tuple(output_shape)
+        typ.dtype = inputs[0].type.dtype
 
 
 ShapeInferenceRegister = {

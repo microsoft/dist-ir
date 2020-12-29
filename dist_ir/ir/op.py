@@ -11,7 +11,6 @@ class Op:
         in_edges=None,
         attributes=None,
         submodules=None,
-        metadata=None,
         output_names=None,
     ):
         if op_type not in OpRegister:
@@ -30,10 +29,6 @@ class Op:
             self._submodules = []
         else:
             self._submodules = submodules
-        if metadata is None:
-            self._metadata = {}
-        else:
-            self._metadata = metadata
         self._out_edges = []
         OpRegister[op_type].infer_types(self, output_names)
 
@@ -81,10 +76,6 @@ class Op:
     def get_submodule(self, idx):
         """Returns the submodule at the specified index."""
         return self._submodules[idx]
-
-    def get_metadata(self, key):
-        """Returns the metadata with the given key."""
-        return self._metadata[key]
 
     @property
     def name(self):

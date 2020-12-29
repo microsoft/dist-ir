@@ -16,6 +16,9 @@ class Device:
     def __eq__(self, other):
         return other is not None and self._device_id == other._device_id
 
+    def __lt__(self, other):
+        return self._device_id < other._device_id
+
     def __hash__(self):
         return hash(str(self))
 

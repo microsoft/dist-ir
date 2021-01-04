@@ -93,6 +93,7 @@ class PmapOpRegisterEntry(OpRegisterEntry):
         d = Device.get_new_device_variable(devices[0].device_type)
         for in_edge in subfunction_inputs:
             in_edge.type.set_device(d)
+        op._attributes["device_var"] = d
 
         # TODO: Change the subfunction input names to indicate they are
         # parameterized over the devices

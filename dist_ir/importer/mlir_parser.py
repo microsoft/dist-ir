@@ -42,19 +42,6 @@ def _get_device(d: Union[int, str], context: Context) -> Device:
     return context.devices[d]
 
 
-def _get_op_name(op):
-    """Gets the name of an MLIR operation. TODO replace this with op.name when
-    https://reviews.llvm.org/D93474 lands.
-    """
-    op_str = op.get_asm()
-    matches = re.match(r'[^=]*= "?([^("]*)"?\(', op_str)
-    if matches:
-        return matches.group(1)
-    if op_str.strip().startswith(("return", '"dist.return"')):
-        return "std.return"
-    raise ValueError(f"Cannot get op name from op\n  {op_str}")
-
-
 def _parse_type(mlir_type, context: Context):
     # Unfortunately, I can't inspect the MLIR type object, so parsing the string:
     dtype_map = {"f32": Float()}
@@ -117,7 +104,7 @@ def _parse_module(mlir_region, context=None):
             raise ValueError(f"Unexpected op after function return:\n{op}")
 
         # Collect name and arguments
-        op_name = _get_op_name(op.operation)
+        op_name = op.operation.name
         args = [context.values[str(operand)] for operand in op.operands]
 
         # Collect attributes

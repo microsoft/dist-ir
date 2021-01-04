@@ -127,8 +127,8 @@ class Function:
         elif name is None or name == "":
             name = f"{op_type}_#{self._op_counter[op_type]}"
         op = Op(
-            name,
             op_type,
+            name,
             in_edges=inputs,
             attributes=attributes,
             subfunctions=subfunctions,
@@ -138,7 +138,7 @@ class Function:
         self._op_counter[op_type] += 1
 
         # Update _consumers.
-        out_edges = op.get_out_edges()
+        out_edges = op.out_edges
         for in_edge in inputs:
             self._consumers[in_edge.name].append(op.name)
         for out_edge in out_edges:
@@ -192,9 +192,9 @@ class Function:
             is_output[input_value_name] = True
 
         for op in self._ops.values():
-            for in_edge in op.get_in_edges():
+            for in_edge in op.in_edges:
                 is_output[in_edge.name] = False
-            for out_edge in op.get_out_edges():
+            for out_edge in op.out_edges:
                 all_values[out_edge.name] = out_edge
                 is_output[out_edge.name] = True
 
@@ -205,7 +205,7 @@ class Function:
     def _get_ops_in_topological_order_helper(self, name, visited, order):
         visited.add(name)
 
-        out_edges = self._ops[name].get_out_edges()
+        out_edges = self._ops[name].out_edges
         for out_edge in out_edges:
             output_name = out_edge
             if output_name not in visited:
@@ -230,13 +230,13 @@ class Function:
             seen.add(input_name)
 
         for op_name, op in self._ops.items():
-            for in_edge in op.get_in_edges():
+            for in_edge in op.in_edges:
                 if in_edge.name not in seen:
                     raise ValueError(
                         f"Ops are not in topological order: op {op_name} has "
                         f"unseen edge {in_edge}"
                     )
-            for out_edge in op.get_out_edges():
+            for out_edge in op.out_edges:
                 seen.add(out_edge.name)
 
     def finalize(self):
@@ -254,7 +254,7 @@ class Function:
         self._hash = hash(tuple(self._ops.keys()))
 
     def get_subfunction(self, op_names, name=None):
-        """Returns a subfunction comprised of the specified subset of ops."""
+        """Returns a Function comprised of the specified subset of ops."""
         subfunction = Function(name)
         value_map = {}
         outputs = []
@@ -262,19 +262,19 @@ class Function:
         for op_name in op_names:
             op = self._ops[op_name]
             subfunction_op_inputs = []
-            for input in op.get_in_edges():
+            for input in op.in_edges:
                 if input.name not in value_map:
                     value_map[input.name] = subfunction.add_input_value(
                         input.name, input.type
                     )
                 subfunction_op_inputs.append(value_map[input.name])
-            output_names = [output.name for output in op.get_out_edges()]
+            output_names = [output.name for output in op.out_edges]
             subfunction_op_outputs = subfunction.add_op(
                 op.op_type,
                 name=op.name,
                 inputs=subfunction_op_inputs,
-                attributes=op._attributes,
-                subfunctions=copy.deepcopy(op._subfunctions),
+                attributes=copy.deepcopy(op.attributes),
+                subfunctions=copy.deepcopy(op.subfunctions),
                 output_names=output_names,
             )
             if not isinstance(subfunction_op_outputs, tuple):

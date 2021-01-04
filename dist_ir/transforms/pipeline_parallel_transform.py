@@ -191,15 +191,14 @@ class PipelineParallelTransform:
                 # and add each op in the stage to the transformed function.
                 (stage, microbatch) = self._schedule[timestep][device]
                 stage_outputs = set([v.name for v in stage.get_outputs()])
-                for op_name, orig_op in stage.get_ops().items():
-                    orig_inputs = orig_op.get_in_edges()
-                    orig_outputs = orig_op.get_out_edges()
+                for orig_op in stage.get_ops().values():
+                    orig_inputs = orig_op.in_edges
+                    orig_outputs = orig_op.out_edges
 
                     # Collect the pipelined input values for this op.
                     pipelined_inputs = []
                     for orig_input in orig_inputs:
                         pipelined_input_map = pipelined_value_map[orig_input.name]
-                        pipelined_input = pipelined_input_map[microbatch]
                         pipelined_inputs.append(pipelined_input_map[microbatch])
 
                     # Add the pipelined version of the op for the given microbatch to
@@ -211,7 +210,7 @@ class PipelineParallelTransform:
                     pipelined_outputs = transformed_function.add_op(
                         orig_op.op_type,
                         name=f"{orig_op.name}_{microbatch}",
-                        attributes=orig_op._attributes,
+                        attributes=orig_op.attributes,
                         inputs=pipelined_inputs,
                         output_names=pipelined_output_names,
                     )

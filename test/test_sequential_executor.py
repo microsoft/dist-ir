@@ -41,10 +41,10 @@ def backend(request):
 
 def test_single_add(backend):
     h = Helper(backend)
-    h.function.add_op("Add", "Add_0", inputs=[h.t1, h.t2])
+    res = h.function.add_op("Add", "Add_0", inputs=[h.t1, h.t2])
     h.function.finalize()
     output_data = h.executor.compute(h.function, h.input_data)
-    result = output_data["Add_0/0"]
+    result = output_data[res.name]
     if h.backend == "numpy":
         assert np.array_equal(result, np.add(h.input_data["a"], h.input_data["b"]))
     elif h.backend == "torch":
@@ -54,10 +54,10 @@ def test_single_add(backend):
 def test_double_add(backend):
     h = Helper(backend)
     x = h.function.add_op("Add", "Add_0", inputs=[h.t1, h.t2])
-    h.function.add_op("Add", "Add_1", inputs=[h.t3, x])
+    res = h.function.add_op("Add", "Add_1", inputs=[h.t3, x])
     h.function.finalize()
     output_data = h.executor.compute(h.function, h.input_data)
-    result = output_data["Add_1/0"]
+    result = output_data[res.name]
     if h.backend == "numpy":
         assert np.array_equal(
             result,
@@ -75,10 +75,10 @@ def test_double_add(backend):
 def test_double_add_inverted(backend):
     h = Helper(backend)
     x = h.function.add_op("Add", "Add_0", inputs=[h.t1, h.t2])
-    h.function.add_op("Add", "Add_1", inputs=[x, h.t3])
+    res = h.function.add_op("Add", "Add_1", inputs=[x, h.t3])
     h.function.finalize()
     output_data = h.executor.compute(h.function, h.input_data)
-    result = output_data["Add_1/0"]
+    result = output_data[res.name]
     if h.backend == "numpy":
         assert np.array_equal(
             result,
@@ -95,10 +95,10 @@ def test_double_add_inverted(backend):
 
 def test_single_matmul(backend):
     h = Helper(backend)
-    h.function.add_op("MatMul", "MatMul_0", inputs=[h.t1, h.t2])
+    res = h.function.add_op("MatMul", "MatMul_0", inputs=[h.t1, h.t2])
     h.function.finalize()
     output_data = h.executor.compute(h.function, h.input_data)
-    result = output_data["MatMul_0/0"]
+    result = output_data[res.name]
     if h.backend == "numpy":
         assert np.array_equal(result, np.matmul(h.input_data["a"], h.input_data["b"]))
     elif h.backend == "torch":
@@ -108,10 +108,10 @@ def test_single_matmul(backend):
 def test_double_matmul(backend):
     h = Helper(backend)
     x = h.function.add_op("MatMul", "MatMul_0", inputs=[h.t1, h.t2])
-    h.function.add_op("MatMul", "MatMul_1", inputs=[h.t3, x])
+    res = h.function.add_op("MatMul", "MatMul_1", inputs=[h.t3, x])
     h.function.finalize()
     output_data = h.executor.compute(h.function, h.input_data)
-    result = output_data["MatMul_1/0"]
+    result = output_data[res.name]
     if h.backend == "numpy":
         assert np.array_equal(
             result,
@@ -131,10 +131,10 @@ def test_double_matmul(backend):
 def test_double_matmul_inverted(backend):
     h = Helper(backend)
     x = h.function.add_op("MatMul", "MatMul_0", inputs=[h.t1, h.t2])
-    h.function.add_op("MatMul", "MatMul_1", inputs=[x, h.t3])
+    res = h.function.add_op("MatMul", "MatMul_1", inputs=[x, h.t3])
     h.function.finalize()
     output_data = h.executor.compute(h.function, h.input_data)
-    result = output_data["MatMul_1/0"]
+    result = output_data[res.name]
     if h.backend == "numpy":
         assert np.array_equal(
             result,

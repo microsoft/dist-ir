@@ -41,7 +41,7 @@ def _infer_shapes_for_allreduce(op, inputs, outputs):
 
 def _infer_shapes_for_broadcast(op, inputs, outputs):
     input_type = inputs[0].type
-    devices = op.get_attribute("devices")
+    devices = op.attributes["devices"]
     output_types = []
     for (output_type, device) in zip(outputs[0].type.types, devices):
         if isinstance(output_type, Tensor) and isinstance(input_type, Tensor):
@@ -51,7 +51,7 @@ def _infer_shapes_for_broadcast(op, inputs, outputs):
 
 def _infer_shapes_for_concat(op, inputs, outputs):
     input_shapes = _get_shapes(inputs)
-    dim = op.get_attribute("dim")
+    dim = op.attributes["dim"]
     for i, (dim0, dim1) in enumerate(zip(input_shapes[0], input_shapes[1])):
         if i != dim and dim0 != dim1:
             _error_invalid_shapes(op, input_shapes)
@@ -61,8 +61,8 @@ def _infer_shapes_for_concat(op, inputs, outputs):
 
 
 def _infer_shapes_for_gather(op, inputs, outputs):
-    dim = op.get_attribute("dim")
-    device = op.get_attribute("device")
+    dim = op.attributes["dim"]
+    device = op.attributes["device"]
     output_shape = list(inputs[0].type.types[0].shape)
     for typ in inputs[0].type.types[1:]:
         output_shape[dim] += typ.shape[dim]
@@ -104,7 +104,7 @@ def _infer_shapes_for_loss_grad(op, inputs, outputs):
 
 
 def _infer_shapes_for_pmap(op, inputs, outputs):
-    subfunction = op.get_subfunction(0)
+    subfunction = op.subfunctions[0]
 
     for (pmap_input, subfunction_input) in zip(inputs, subfunction.get_inputs()):
         assert isinstance(pmap_input.type, TupleType)
@@ -125,8 +125,8 @@ def _infer_shapes_for_pmap(op, inputs, outputs):
 
 def _infer_shapes_for_scatter(op, inputs, outputs):
     input_type = inputs[0].type
-    split_dim = op.get_attribute("dim")
-    devices = op.get_attribute("devices")
+    split_dim = op.attributes["dim"]
+    devices = op.attributes["devices"]
     for (output_type, device) in zip(outputs[0].type.types, devices):
         if isinstance(output_type, Tensor) and isinstance(input_type, Tensor):
             output_shape = list(input_type.shape)
@@ -136,7 +136,7 @@ def _infer_shapes_for_scatter(op, inputs, outputs):
 
 
 def _infer_shapes_for_select(op, inputs, outputs):
-    dim = op.get_attribute("dim")
+    dim = op.attributes["dim"]
     outputs[0].type.shape = inputs[0].type.types[dim].shape
     outputs[0].type.dtype = inputs[0].type.types[dim].dtype
 
@@ -147,8 +147,8 @@ def _infer_shapes_for_send(op, inputs, outputs):
 
 
 def _infer_shapes_for_split(op, inputs, outputs):
-    num_splits = op.get_attribute("num_splits")
-    split_dim = op.get_attribute("dim")
+    num_splits = op.attributes["num_splits"]
+    split_dim = op.attributes["dim"]
     output_shape = list(inputs[0].type.shape)
     output_shape[split_dim] //= num_splits
     for typ in outputs[0].type.types:
@@ -182,8 +182,8 @@ def _infer_shapes(function):
     """
 
     for op_name, op in function.get_ops().items():
-        inputs = op.get_in_edges()
-        outputs = op.get_out_edges()
+        inputs = op.in_edges
+        outputs = op.out_edges
 
         # Invariant: types and shapes of input are already inferred
         for input in inputs:

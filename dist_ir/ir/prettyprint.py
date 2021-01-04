@@ -121,15 +121,15 @@ def _(function: Function, ctx):
 
 @register_pretty(Op)
 def _(op: Op, ctx):
-    results = concat(_join(*(pretty_dispatch(r, ctx) for r in op.get_out_edges())))
-    args = concat(_join(*(v.name for v in op.get_in_edges())))
+    results = concat(_join(*(pretty_dispatch(r, ctx) for r in op.out_edges)))
+    args = concat(_join(*(v.name for v in op.in_edges)))
 
     if op.op_type == "Pmap":
         lambda_args = _join(
-            *(pretty_dispatch(i, ctx) for i in op.get_subfunction(0).get_inputs())
+            *(pretty_dispatch(i, ctx) for i in op.subfunctions[0].get_inputs())
         )
         lambda_args = concat([LPAREN, nest(ctx.indent, concat(lambda_args)), RPAREN])
-        lambda_body = _pprint_function_body(op.get_subfunction(0), ctx)
+        lambda_body = _pprint_function_body(op.subfunctions[0], ctx)
         actual_args = group(
             concat(
                 [
@@ -140,7 +140,7 @@ def _(op: Op, ctx):
             )
         )
         # TODO: Also print out the list of devices this pmaps over
-        d = str(op.get_attribute("device_var").device_id)
+        d = str(op.attributes["device_var"].device_id)
         pmap_args = nest(
             ctx.indent,
             concat(

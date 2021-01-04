@@ -20,13 +20,11 @@ class SequentialExecutor:
             results = []
             for inps in inputs:
                 # Execute subfunction with appropriate inputs
-                inp_names = (e.name for e in op.get_subfunction(0).get_inputs())
+                inp_names = (e.name for e in op.subfunctions[0].get_inputs())
                 inp_data = {n: v for n, v in zip(inp_names, inps)}
-                outs = self.compute(op.get_subfunction(0), inp_data)
+                outs = self.compute(op.subfunctions[0], inp_data)
                 # Match output names to output data using the function output order.
-                ordered_outs = [
-                    outs[e.name] for e in op.get_subfunction(0).get_outputs()
-                ]
+                ordered_outs = [outs[e.name] for e in op.subfunctions[0].get_outputs()]
                 results.append(ordered_outs)
             # Unzip the results
             results = tuple(zip(*results))
@@ -59,7 +57,7 @@ class SequentialExecutor:
         # Execute ops in topological order.
         for op_name, op in ops.items():
             inputs = []
-            in_edges = op.get_in_edges()
+            in_edges = op.in_edges
             for in_edge in in_edges:
                 input_name = in_edge.name
                 if function.is_input(input_name):
@@ -77,7 +75,7 @@ class SequentialExecutor:
                 inputs.append(input_value)
 
             res = self._compute_op(op, inputs)
-            out_edges = op.get_out_edges()
+            out_edges = op.out_edges
             for i, out_edge in enumerate(out_edges):
                 output_data[out_edge.name] = res[i]
                 consumers[out_edge.name] = len(

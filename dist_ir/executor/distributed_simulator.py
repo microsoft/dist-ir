@@ -46,8 +46,8 @@ class DistributedSimulator:
     def _simulate(self, function: Function, state: DistributedSimulatorState):
 
         for op_name, op in function.get_ops().items():
-            in_edges = op.get_in_edges()
-            out_edges = op.get_out_edges()
+            in_edges = op.in_edges
+            out_edges = op.out_edges
 
             # Synchronize all input and output devices for this op.
             input_devices = utils.get_all_devices(in_edges)
@@ -64,13 +64,13 @@ class DistributedSimulator:
             if op.op_type == "Pmap":
                 # For Pmap ops we use a fresh state object and update the enclosing
                 # function state using the Pmap state.
-                subfunction = op.get_subfunction(0)
+                subfunction = op.subfunctions[0]
                 subfunction_state = DistributedSimulatorState()
                 self._simulate(subfunction, subfunction_state)
                 device_vars = subfunction_state.timestamps.keys()
                 assert len(device_vars) == 1
                 # TODO what happens when pmaps are nested?
-                bound_devices = op.get_attribute("devices")
+                bound_devices = op.attributes["devices"]
                 # Add subfunction's trace to trace of all participating devices
                 for device in bound_devices:
                     for event in subfunction_state.trace:

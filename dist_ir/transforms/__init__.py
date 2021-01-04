@@ -1,4 +1,5 @@
 from .data_parallel_transform import DataParallelTransform
+from .horizontal_parallel_transform import HorizontalParallelTransform
 from .pipeline_parallel_transform import PipelineParallelTransform
 from .fifo_scheduler import FIFOScheduler
 from .pipedream_scheduler import PipeDreamScheduler

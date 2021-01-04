@@ -139,8 +139,8 @@ def _(op: Op, ctx):
                 ]
             )
         )
-        # TODO: Handle list of devices
-        d = str(op.get_attribute("devices").device_id)
+        # TODO: Also print out the list of devices this pmaps over
+        d = str(op.get_attribute("device_var").device_id)
         pmap_args = nest(
             ctx.indent,
             concat(

@@ -15,7 +15,6 @@ jobs:
     env:
       MLIR_VERSION: 20210104.22
       PY_VERSION: 3.8
-      PYTHONPATH: /tmp/llvm-build/python/
     steps:
     - uses: actions/checkout@v2
  

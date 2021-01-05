@@ -9,25 +9,27 @@ def mlp(
 ```
 
 ### Data parallelism:
-    def mlp(
-        wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 0], x: Tensor[(B, F), 0]
-    ):
-        xs: Tuple[Tensor[(B/N, F), 1], ..., Tensor[(B/N, F), N]] = scatter(x, dim=0, devices=[1..N])
-        wAs: Tuple[Tensor[(F, H), 1], ..., Tensor[(F, H), N]] = broadcast(wA, devices=[1..N])
-        wBs: Tuple[Tensor[(H, C), 1], ..., Tensor[(H, C), N]] = broadcast(wB, devices=[1..N])
-        (
-            yis: Tuple[Tensor[(B/N, C), 1], ..., Tensor[(B/N, C), N]],
-        ) = pmap(
+```Python
+def mlp(
+    wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 0], x: Tensor[(B, F), 0]
+):
+    xs: Tuple[Tensor[(B/N, F), 1], ..., Tensor[(B/N, F), N]] = scatter(x, dim=0, devices=[1..N])
+    wAs: Tuple[Tensor[(F, H), 1], ..., Tensor[(F, H), N]] = broadcast(wA, devices=[1..N])
+    wBs: Tuple[Tensor[(H, C), 1], ..., Tensor[(H, C), N]] = broadcast(wB, devices=[1..N])
+    (
+        yis: Tuple[Tensor[(B/N, C), 1], ..., Tensor[(B/N, C), N]],
+    ) = pmap(
             device_var=d,
             fn=lambda (xi: Tensor[(B/N, F), d]), (wAi: Tensor[(F, H), d]), (wBi: Tensor[(H, C), d]): {
                 ai: Tensor[(B/N, H), d] = MatMul(xi, wAi)
-                yi: Tensor[(B/N, C), d] = MatMul(ai, wBi)
-                return yi
+                 yi: Tensor[(B/N, C), d] = MatMul(ai, wBi)
+                 return yi
             },
             (xs, wAs, wBs)
         )
         y: Tensor[(B, C), 0] = gather(yis, dim=0, device=0)
         return y
+```
  
 ### Horizontal parallelism:
     def mlp(

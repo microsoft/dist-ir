@@ -77,7 +77,7 @@ class OpRegisterEntry_:
                 output_name = output_names[i]
             else:
                 output_name = f"{op.name}/{i}"
-            op.add_out_edge(Value(output_name, value_type=output_type()))
+            op.add_out_edge(Value(output_name, output_type()))
 
 
 class AllreduceOpRegisterEntry(OpRegisterEntry_):
@@ -96,7 +96,7 @@ class AllreduceOpRegisterEntry(OpRegisterEntry_):
         else:
             output_name = f"{op.name}/{0}"
         output_value_type = copy.deepcopy(inputs[0].type)
-        op.add_out_edge(Value(name=output_name, value_type=output_value_type))
+        op.add_out_edge(Value(output_name, output_value_type))
 
 
 class BroadcastScatterOpRegisterEntry(OpRegisterEntry_):
@@ -115,7 +115,7 @@ class BroadcastScatterOpRegisterEntry(OpRegisterEntry_):
         for device in devices:
             output_type = Tensor(dtype=in_type.dtype, shape=shape, device=device)
             output_types.append(output_type)
-        output_value = Value(output_names[0], value_type=TupleType(output_types))
+        output_value = Value(output_names[0], TupleType(output_types))
         op.add_out_edge(output_value)
 
 
@@ -151,7 +151,7 @@ class PmapOpRegisterEntry(OpRegisterEntry_):
                 output_name = f"{out_edge.name}is"
             else:
                 output_name = output_names[i]
-            output_value = Value(output_name, value_type=TupleType(output_types))
+            output_value = Value(output_name, TupleType(output_types))
             op.add_out_edge(output_value)
 
 
@@ -159,9 +159,7 @@ class SelectOpRegisterEntry(OpRegisterEntry_):
     def infer_types(self, op, output_names=None):
         inputs = op.in_edges
         dim = op.attributes["dim"]
-        output_value = Value(
-            output_names[0], value_type=copy.deepcopy(inputs[0].type.types[dim])
-        )
+        output_value = Value(output_names[0], copy.deepcopy(inputs[0].type.types[dim]))
         op.add_out_edge(output_value)
 
 
@@ -172,7 +170,7 @@ class SendOpRegisterEntry(OpRegisterEntry_):
         input_type = inputs[0].type
         device = op.attributes["device"]
         output_value_type = Tensor(input_type.dtype, input_type.shape, device)
-        output_value = Value(output_names[0], value_type=output_value_type)
+        output_value = Value(output_names[0], output_value_type)
         op.add_out_edge(output_value)
 
 
@@ -185,7 +183,7 @@ class SplitOpRegisterEntry(OpRegisterEntry_):
             output_type = copy.deepcopy(inputs[0].type)
             output_type.shape = None
             output_types.append(output_type)
-        output_value = Value(output_names[0], value_type=TupleType(output_types))
+        output_value = Value(output_names[0], TupleType(output_types))
         op.add_out_edge(output_value)
 
 

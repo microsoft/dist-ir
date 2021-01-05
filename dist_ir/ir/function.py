@@ -179,7 +179,7 @@ class FunctionMaker:
 
     def add_input_value(self, name, value_type):
         """Adds an input value to the function and returns the value."""
-        value = Value(name=name, value_type=value_type)
+        value = Value(name, value_type)
         if value in self.inputs:
             raise ValueError(f"Function already has input value {value}")
         self.inputs.append(value)

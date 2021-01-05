@@ -65,10 +65,10 @@ def test_single_variable_partition():
         print(v)
         print()
 
-    assert np.array_equal(orig_res["y"], transformed_res["y"])
+    np.testing.assert_array_almost_equal(orig_res["y"], transformed_res["y"])
 
 
-def test_double_variable_counter_example():
+def test_double_variable_partition():
     batch_size = 16
     input_dim = 32
     hidden_dim = 16
@@ -88,7 +88,7 @@ def test_double_variable_counter_example():
     transform = HorizontalParallelTransform(
         op_names=("MatMul0", "MatMul1"),
         param_dims={"wA": 1, "wB": 0},
-        reduction_params={"y": {"op_type": "Gather", "dim": 0, "device": d0}},
+        reduction_params={"y": {"op_type": "Allreduce", "device": d0}},
         devices=[d0, d1],
     )
     transformed_module = transform.apply(module)
@@ -127,7 +127,7 @@ def test_double_variable_counter_example():
         print(v)
         print()
 
-    assert not np.array_equal(orig_res["y"], transformed_res["y"])
+    np.testing.assert_array_almost_equal(orig_res["y"], transformed_res["ys"][0])
 
 
 def test_data_parallel():
@@ -189,7 +189,7 @@ def test_data_parallel():
         print(v)
         print()
 
-    assert np.array_equal(orig_res["y"], transformed_res["y"])
+    np.testing.assert_array_almost_equal(orig_res["y"], transformed_res["y"])
 
 
 if __name__ == "__main__":

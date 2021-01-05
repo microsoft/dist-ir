@@ -82,7 +82,7 @@
 		# TODO: Move y to device 0?
 		return y 
 
-### Data parallelism -> Horizontal parallelism:
+### Data parallelism over horizontal parallelism:
     def mlp(
         wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 0], x: Tensor[(B, F), 0]
     ):
@@ -113,7 +113,7 @@
         y: Tensor[(B, C), 0] = gather(yis, dim=1, device=0)
         return y
 
-### Horizontal parallelism -> Data parallelism
+### Horizontal parallelism followed by data parallelism:
     def mlp(
         wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 0], x: Tensor[(B, F), 0]
     ):
@@ -144,7 +144,7 @@
         y: Tensor[(B, C), 0] = gather(yis, dim=0, device=0)
         return y
 
-### Data parallelism (Horizontal parallelism) :
+### Data parallelism over horizontal parallelism:
     def mlp(
         wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 0], x: Tensor[(B, F), 0]
     ):
@@ -184,10 +184,10 @@
                     },
                     (as, wBs_hp)
                 )
-		y_hp: Tensor[(B/N, C), d_dp] = gather(yis_hp, dim=1, device=d_dp)
-		return y_hp
-	    },
-	    (xs_dp, wAs_dp, wBs_dp)
+                y_hp: Tensor[(B/N, C), d_dp] = gather(yis_hp, dim=1, device=d_dp)
+                return y_hp
+            },
+            (xs_dp, wAs_dp, wBs_dp)
         )
         y: Tensor[(B, C), 0] = gather(yis_dp, dim=0, device=0)
         return y

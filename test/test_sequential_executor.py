@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import torch
 
-from dist_ir.ir import Device, Function, cpprint
+from dist_ir.ir import Device, FunctionMaker, cpprint
 from dist_ir.ir.type import Float, Tensor, TupleType
 from dist_ir.executor import SequentialExecutor
 from dist_ir.executor.shape_inference import infer_shapes
@@ -12,7 +12,7 @@ class Helper:
     def __init__(self, backend):
         self.backend = backend
         self.executor = SequentialExecutor(self.backend)
-        self.function = Function()
+        self.function = FunctionMaker()
         self.t1 = self.function.add_input_value("a", Tensor(Float(), (4, 4)))
         self.t2 = self.function.add_input_value("b", Tensor(Float(), (4, 4)))
         self.t3 = self.function.add_input_value("c", Tensor(Float(), (4, 4)))
@@ -42,7 +42,7 @@ def backend(request):
 def test_single_add(backend):
     h = Helper(backend)
     res = h.function.add_op("Add", "Add_0", inputs=[h.t1, h.t2])
-    h.function.finalize()
+    h.function = h.function.finalize()
     output_data = h.executor.compute(h.function, h.input_data)
     result = output_data[res.name]
     if h.backend == "numpy":
@@ -55,7 +55,7 @@ def test_double_add(backend):
     h = Helper(backend)
     x = h.function.add_op("Add", "Add_0", inputs=[h.t1, h.t2])
     res = h.function.add_op("Add", "Add_1", inputs=[h.t3, x])
-    h.function.finalize()
+    h.function = h.function.finalize()
     output_data = h.executor.compute(h.function, h.input_data)
     result = output_data[res.name]
     if h.backend == "numpy":
@@ -76,7 +76,7 @@ def test_double_add_inverted(backend):
     h = Helper(backend)
     x = h.function.add_op("Add", "Add_0", inputs=[h.t1, h.t2])
     res = h.function.add_op("Add", "Add_1", inputs=[x, h.t3])
-    h.function.finalize()
+    h.function = h.function.finalize()
     output_data = h.executor.compute(h.function, h.input_data)
     result = output_data[res.name]
     if h.backend == "numpy":
@@ -96,7 +96,7 @@ def test_double_add_inverted(backend):
 def test_single_matmul(backend):
     h = Helper(backend)
     res = h.function.add_op("MatMul", "MatMul_0", inputs=[h.t1, h.t2])
-    h.function.finalize()
+    h.function = h.function.finalize()
     output_data = h.executor.compute(h.function, h.input_data)
     result = output_data[res.name]
     if h.backend == "numpy":
@@ -109,7 +109,7 @@ def test_double_matmul(backend):
     h = Helper(backend)
     x = h.function.add_op("MatMul", "MatMul_0", inputs=[h.t1, h.t2])
     res = h.function.add_op("MatMul", "MatMul_1", inputs=[h.t3, x])
-    h.function.finalize()
+    h.function = h.function.finalize()
     output_data = h.executor.compute(h.function, h.input_data)
     result = output_data[res.name]
     if h.backend == "numpy":
@@ -132,7 +132,7 @@ def test_double_matmul_inverted(backend):
     h = Helper(backend)
     x = h.function.add_op("MatMul", "MatMul_0", inputs=[h.t1, h.t2])
     res = h.function.add_op("MatMul", "MatMul_1", inputs=[x, h.t3])
-    h.function.finalize()
+    h.function = h.function.finalize()
     output_data = h.executor.compute(h.function, h.input_data)
     result = output_data[res.name]
     if h.backend == "numpy":
@@ -153,6 +153,10 @@ def test_double_matmul_inverted(backend):
 
 # TODO: Add test for op with multiple outputs
 
+# TODO for all pmap tests, make a FunctionMaker helper function to add pmap
+# which also creates the device var and sets the attributes etc appropriately.
+# This should also be used by transforms/parsers that create pmap ops.
+
 
 def test_pmap_on_executor():
     d0 = Device(0, "gpu")
@@ -169,13 +173,13 @@ def test_pmap_on_executor():
     _y_0, _y_1 = _y[:4], _y[4:]
 
     # A pmap with 1 input and 1 output
-    function = Function()
+    function = FunctionMaker()
     xs = function.add_input_value("xs", TupleType((x_type(d0), x_type(d1))))
-    subfunction = Function()
+    subfunction = FunctionMaker()
     x = subfunction.add_input_value("x", x_type(None))
     _ = subfunction.add_op("Add", "Add0", inputs=[x, x], output_names=["z"])
     # subfunction.set_outputs()
-    subfunction.finalize()
+    subfunction = subfunction.finalize()
     _ = function.add_op(
         "Pmap",
         inputs=[xs],
@@ -183,7 +187,7 @@ def test_pmap_on_executor():
         subfunctions=[subfunction],
         output_names=["zis"],
     )
-    function.finalize()
+    function = function.finalize()
 
     cpprint(function)
     res = ex.compute(function, {"xs": (_x_0, _x_1)})
@@ -191,14 +195,14 @@ def test_pmap_on_executor():
     assert np.array_equal(res["zis"][1], _x_1 + _x_1)
 
     # A pmap with 2 inputs and 1 output
-    function = Function()
+    function = FunctionMaker()
     xs = function.add_input_value("xs", TupleType((x_type(d0), x_type(d1))))
     ys = function.add_input_value("ys", TupleType((y_type(d0), y_type(d1))))
-    subfunction = Function()
+    subfunction = FunctionMaker()
     x = subfunction.add_input_value("x", x_type(None))
     y = subfunction.add_input_value("y", y_type(None))
     _ = subfunction.add_op("MatMul", "MatMul0", inputs=[x, y], output_names=["z"])
-    subfunction.finalize()
+    subfunction = subfunction.finalize()
     _ = function.add_op(
         "Pmap",
         inputs=[xs, ys],
@@ -206,7 +210,7 @@ def test_pmap_on_executor():
         subfunctions=[subfunction],
         output_names=["zis"],
     )
-    function.finalize()
+    function = function.finalize()
 
     cpprint(function)
     res = ex.compute(function, {"xs": (_x_0, _x_1), "ys": (_y_0, _y_1)})
@@ -214,15 +218,15 @@ def test_pmap_on_executor():
     assert np.array_equal(res["zis"][1], np.matmul(_x_1, _y_1))
 
     # A pmap with 2 inputs and 2 outputs
-    function = Function()
+    function = FunctionMaker()
     xs = function.add_input_value("xs", TupleType((x_type(d0), x_type(d1))))
     ys = function.add_input_value("ys", TupleType((y_type(d0), y_type(d1))))
-    subfunction = Function()
+    subfunction = FunctionMaker()
     x = subfunction.add_input_value("x", x_type(None))
     y = subfunction.add_input_value("y", y_type(None))
     _ = subfunction.add_op("Add", "Add0", inputs=[x, x], output_names=["w"])
     _ = subfunction.add_op("MatMul", "MatMul0", inputs=[x, y], output_names=["z"])
-    subfunction.finalize()
+    subfunction = subfunction.finalize()
     _ = function.add_op(
         "Pmap",
         inputs=[xs, ys],
@@ -230,7 +234,7 @@ def test_pmap_on_executor():
         subfunctions=[subfunction],
         output_names=["wis", "zis"],
     )
-    function.finalize()
+    function = function.finalize()
 
     cpprint(function)
     res = ex.compute(function, {"xs": (_x_0, _x_1), "ys": (_y_0, _y_1)})
@@ -240,15 +244,15 @@ def test_pmap_on_executor():
     assert np.array_equal(res["zis"][1], np.matmul(_x_1, _y_1))
 
     # A pmap with a single device
-    function = Function()
+    function = FunctionMaker()
     xs = function.add_input_value("xs", TupleType((x_type(None),)))
     ys = function.add_input_value("ys", TupleType((y_type(None),)))
-    subfunction = Function()
+    subfunction = FunctionMaker()
     x = subfunction.add_input_value("x", x_type(None))
     y = subfunction.add_input_value("y", y_type(None))
     _ = subfunction.add_op("Add", "Add0", inputs=[x, x], output_names=["w"])
     _ = subfunction.add_op("MatMul", "MatMul0", inputs=[x, y], output_names=["z"])
-    subfunction.finalize()
+    subfunction = subfunction.finalize()
     _ = function.add_op(
         "Pmap",
         inputs=[xs, ys],
@@ -256,7 +260,7 @@ def test_pmap_on_executor():
         subfunctions=[subfunction],
         output_names=["wis", "zis"],
     )
-    function.finalize()
+    function = function.finalize()
 
     cpprint(function)
     res = ex.compute(function, {"xs": (_x_0,), "ys": (_y_0,)})
@@ -265,7 +269,7 @@ def test_pmap_on_executor():
 
 
 def test_pmap_dp():
-    function = Function()
+    function = FunctionMaker()
 
     d0 = Device(0, "gpu")
     d1 = Device(1, "gpu")
@@ -289,13 +293,13 @@ def test_pmap_dp():
         ),
     )
 
-    subfunction = Function()
+    subfunction = FunctionMaker()
     x = subfunction.add_input_value("x", Tensor(Float(), (8, 4)))
     wA = subfunction.add_input_value("wA", Tensor(Float(), (4, 2)))
     wB = subfunction.add_input_value("wB", Tensor(Float(), (2, 1)))
     y = subfunction.add_op("MatMul", "MatMul0", inputs=[x, wA], output_names=["y"])
     _ = subfunction.add_op("MatMul", "MatMul1", inputs=[y, wB], output_names=["z"])
-    subfunction.finalize()
+    subfunction = subfunction.finalize()
     _ = function.add_op(
         "Pmap",
         inputs=[xs, wAs, wBs],
@@ -303,7 +307,7 @@ def test_pmap_dp():
         subfunctions=[subfunction],
         output_names=["zis"],
     )
-    function.finalize()
+    function = function.finalize()
     cpprint(function)
 
     ex = SequentialExecutor("numpy")
@@ -317,7 +321,3 @@ def test_pmap_dp():
     )
     assert np.array_equal(res["zis"][0], np.matmul(np.matmul(x_0, _wA), _wB))
     assert np.array_equal(res["zis"][1], np.matmul(np.matmul(x_1, _wA), _wB))
-
-
-if __name__ == "__main__":
-    test_pmap_on_executor()

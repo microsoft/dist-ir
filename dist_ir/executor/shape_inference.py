@@ -106,7 +106,7 @@ def _infer_shapes_for_loss_grad(op, inputs, outputs):
 def _infer_shapes_for_pmap(op, inputs, outputs):
     subfunction = op.subfunctions[0]
 
-    for (pmap_input, subfunction_input) in zip(inputs, subfunction.get_inputs()):
+    for (pmap_input, subfunction_input) in zip(inputs, subfunction.inputs):
         assert isinstance(pmap_input.type, TupleType)
         # TODO check that all elements of the tuple have the same type and, if
         # they are tensors, that they have the same shape
@@ -115,7 +115,7 @@ def _infer_shapes_for_pmap(op, inputs, outputs):
 
     _infer_shapes(subfunction)
 
-    for (pmap_output, subfunction_output) in zip(outputs, subfunction.get_outputs()):
+    for (pmap_output, subfunction_output) in zip(outputs, subfunction.outputs):
         if isinstance(subfunction_output.type, Tensor):
             assert isinstance(pmap_output.type, TupleType)
             for pmap_output_type in pmap_output.type.types:
@@ -181,7 +181,7 @@ def _infer_shapes(function):
       function: The function to infer shapes for.
     """
 
-    for op_name, op in function.get_ops().items():
+    for op in function.ops:
         inputs = op.in_edges
         outputs = op.out_edges
 
@@ -190,7 +190,7 @@ def _infer_shapes(function):
             assert input.type is not None
             if isinstance(input.type, Tensor):
                 if input.type.shape is None:
-                    raise ValueError(f"Input {input.name} of op {op_name} has no shape")
+                    raise ValueError(f"Input {input.name} of op {op.name} has no shape")
 
         ShapeInferenceRegister[op.op_type](op, inputs, outputs)
         # TODO maybe the register gives back the output types and we can check

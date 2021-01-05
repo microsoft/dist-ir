@@ -1,11 +1,11 @@
 from collections import OrderedDict
 
-from dist_ir.ir import Device, Function
+from dist_ir.ir import Device, FunctionMaker
 from dist_ir.ir.type import Float, Tensor
 
 
 def construct_function_and_partition_map():
-    function = Function()
+    function = FunctionMaker()
 
     d0 = Device(0, "gpu")
     d1 = Device(1, "gpu")
@@ -37,7 +37,7 @@ def construct_function_and_partition_map():
         "MatMulGrad", "MatMul0Grad", inputs=[x, wA, da], output_names=["dx", "dwA"]
     )
     function.set_outputs([l, dwA, dwB])
-    function.finalize()
+    function = function.finalize()
 
     stages = [
         function.get_subfunction(("MatMul0",), name="f0"),

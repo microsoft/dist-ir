@@ -1,13 +1,13 @@
 from pathlib import Path
 
 from dist_ir import import_from_onnx
-from dist_ir.ir import Function, Topology
+from dist_ir.ir import FunctionMaker, Topology
 from dist_ir.ir.type import Float, Tensor
 from dist_ir.ir import cpprint
 
 
 def test_cpprint():
-    function = Function()
+    function = FunctionMaker()
     topology = Topology()
 
     d = topology.add_device("gpu")

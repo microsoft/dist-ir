@@ -1,12 +1,12 @@
 import pytest
 
-from dist_ir.ir import Device, Function
+from dist_ir.ir import Device, FunctionMaker
 from dist_ir.executor.shape_inference import infer_shapes
 from dist_ir.ir.type import Float, Tensor, TupleType
 
 
 def test_add_valid():
-    function = Function()
+    function = FunctionMaker()
 
     a = function.add_input_value("a", Tensor(Float(), (4, 4)))
     b = function.add_input_value("b", Tensor(Float(), (4, 4)))
@@ -16,7 +16,7 @@ def test_add_valid():
 
 
 def test_add_invalid():
-    function = Function()
+    function = FunctionMaker()
 
     a = function.add_input_value("a", Tensor(Float(), (8, 4)))
     b = function.add_input_value("b", Tensor(Float(), (4, 2)))
@@ -26,7 +26,7 @@ def test_add_invalid():
 
 
 def test_allreduce():
-    function = Function()
+    function = FunctionMaker()
 
     d0 = Device(0, "gpu")
     d1 = Device(1, "gpu")
@@ -52,7 +52,7 @@ def test_allreduce():
 
 
 def test_broadcast():
-    function = Function()
+    function = FunctionMaker()
 
     d0 = Device(0, "gpu")
     d1 = Device(1, "gpu")
@@ -75,7 +75,7 @@ def test_broadcast():
 
 
 def test_matmul_valid():
-    function = Function()
+    function = FunctionMaker()
 
     a = function.add_input_value("a", Tensor(Float(), (8, 4)))
     b = function.add_input_value("b", Tensor(Float(), (4, 2)))
@@ -85,7 +85,7 @@ def test_matmul_valid():
 
 
 def test_matmul_invalid():
-    function = Function()
+    function = FunctionMaker()
 
     a = function.add_input_value("a", Tensor(Float(), (8, 8)))
     b = function.add_input_value("b", Tensor(Float(), (4, 2)))
@@ -95,7 +95,7 @@ def test_matmul_invalid():
 
 
 def test_matmul_grad():
-    function = Function()
+    function = FunctionMaker()
 
     x = function.add_input_value("x", Tensor(Float(), (8, 4)))
     w = function.add_input_value("w", Tensor(Float(), (4, 2)))
@@ -109,7 +109,7 @@ def test_matmul_grad():
 
 
 def test_pmap():
-    function = Function()
+    function = FunctionMaker()
 
     d0 = Device(0, "gpu")
     d1 = Device(1, "gpu")
@@ -133,7 +133,7 @@ def test_pmap():
         ),
     )
 
-    subfunction = Function()
+    subfunction = FunctionMaker()
     # TODO: Add a check in shape inference to not overwrite if there is already a shape
     # If there is an existing shape, validate that it is what we expect, otherwise throw error
     x = subfunction.add_input_value("x", Tensor(Float(), (8, 4)))
@@ -164,7 +164,7 @@ def test_pmap():
 
 
 def test_scatter():
-    function = Function()
+    function = FunctionMaker()
 
     d0 = Device(0, "gpu")
     d1 = Device(1, "gpu")

@@ -14,8 +14,7 @@ class FIFOScheduler(PipelineParallelScheduler):
         for ready_stage in self._ready_stages[device]:
             # TODO: Use a more robust method to identify backwards pass stages.
             (stage, microbatch) = ready_stage
-            ops = stage.get_ops()
-            if "Grad" in list(ops.keys())[0]:
+            if "Grad" in list(stage.ops.keys())[0]:
                 ready_stages_by_type["bw"].append(ready_stage)
             else:
                 ready_stages_by_type["fw"].append(ready_stage)

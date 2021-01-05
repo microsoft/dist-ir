@@ -45,7 +45,7 @@ class DistributedSimulator:
 
     def _simulate(self, function: Function, state: DistributedSimulatorState):
 
-        for op_name, op in function.get_ops().items():
+        for op in function.ops:
             in_edges = op.in_edges
             out_edges = op.out_edges
 
@@ -96,7 +96,7 @@ class DistributedSimulator:
                 costs = self._cost_model.infer_costs(op)
                 for device in costs:
                     state.add_trace_event(
-                        op_name,
+                        op.name,
                         device,
                         state.timestamps[device],
                         costs[device],
@@ -105,9 +105,7 @@ class DistributedSimulator:
 
             # Update the live memory.
             for out_edge in out_edges:
-                state.consumers[out_edge] = len(
-                    function.get_consumers_for_value(out_edge.name)
-                )
+                state.consumers[out_edge] = len(function.get_consumers(out_edge))
                 # Output value could live on multiple devices (e.g. scatter) so
                 # update memory on all devices:
                 output_devices = out_edge.type.get_all_devices()
@@ -115,7 +113,9 @@ class DistributedSimulator:
                     state.live_memory[output_device] += out_edge.type.size()
             # TODO: Can we optimize this using a priority queue?
             for value in state.consumers:
-                if state.consumers[value] == 0 and not function.is_input(value.name):
+                if state.consumers[value] == 0 and all(
+                    value != v for v in function.inputs
+                ):
                     devices = value.type.get_all_devices()
                     for device in devices:
                         state.live_memory[device] -= value.type.size()

@@ -11,9 +11,7 @@ class Op:
     name: str = ""
     in_edges: List[Value] = field(default_factory=list)
     attributes: Dict[str, Any] = field(default_factory=dict)
-    subfunctions: List[Any] = field(
-        default_factory=list
-    )  # List[Function] creates cyclic import dependency
+    subfunctions: List["Function"] = field(default_factory=list)
     out_edges: List[Value] = field(init=False)
 
     # This is not a field, just a parameter to init and post_init:
@@ -26,9 +24,9 @@ class Op:
             # Number of inputs is arbitrary but positive
             assert len(self.in_edges) > 0
             # Number of inputs matches subfunction
-            assert len(self.in_edges) == len(self.subfunctions[0].get_inputs())
+            assert len(self.in_edges) == len(self.subfunctions[0].inputs)
             # Number of outputs is given by subfunction
-            num_outputs = len(self.subfunctions[0].get_outputs())
+            num_outputs = len(self.subfunctions[0].outputs)
 
         else:
             if self.op_type not in OpRegister:

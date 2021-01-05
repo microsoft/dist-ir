@@ -20,11 +20,11 @@ class SequentialExecutor:
             results = []
             for inps in inputs:
                 # Execute subfunction with appropriate inputs
-                inp_names = (e.name for e in op.subfunctions[0].get_inputs())
+                inp_names = (e.name for e in op.subfunctions[0].inputs)
                 inp_data = {n: v for n, v in zip(inp_names, inps)}
                 outs = self.compute(op.subfunctions[0], inp_data)
                 # Match output names to output data using the function output order.
-                ordered_outs = [outs[e.name] for e in op.subfunctions[0].get_outputs()]
+                ordered_outs = [outs[e.name] for e in op.subfunctions[0].outputs]
                 results.append(ordered_outs)
             # Unzip the results
             results = tuple(zip(*results))
@@ -52,15 +52,14 @@ class SequentialExecutor:
         """
         output_data = {}
         consumers = {}
-        ops = function.get_ops()
 
         # Execute ops in topological order.
-        for op_name, op in ops.items():
+        for op in function.ops:
             inputs = []
             in_edges = op.in_edges
             for in_edge in in_edges:
                 input_name = in_edge.name
-                if function.is_input(input_name):
+                if in_edge in function.inputs:
                     input_name = in_edge.name
                     if input_name not in input_data:
                         raise ValueError(
@@ -71,21 +70,23 @@ class SequentialExecutor:
                     input_value = output_data[input_name]
                     consumers[input_name] -= 1
                 else:
-                    raise ValueError(f"Invalid input {input_name} for op {op_name}")
+                    raise ValueError(f"Invalid input {input_name} for op {op}")
                 inputs.append(input_value)
 
             res = self._compute_op(op, inputs)
-            out_edges = op.out_edges
-            for i, out_edge in enumerate(out_edges):
+            for i, out_edge in enumerate(op.out_edges):
                 output_data[out_edge.name] = res[i]
-                consumers[out_edge.name] = len(
-                    function.get_consumers_for_value(out_edge.name)
-                )
+                consumers[out_edge.name] = len(function.get_consumers(out_edge))
 
             # Garbage collect the fully consumed output tensors.
             to_free = []
             for output_name in output_data:
-                if consumers[output_name] == 0 and not function.is_output(output_name):
+                # TODO don't use value names. They might not be unique in a function
+                # Use values and value equality instead.
+                # if consumers[output_name] == 0 and not function.is_output(output_name):
+                if consumers[output_name] == 0 and all(
+                    output_name != v.name for v in function.outputs
+                ):
                     to_free.append(output_name)
             for output_name in to_free:
                 del output_data[output_name]

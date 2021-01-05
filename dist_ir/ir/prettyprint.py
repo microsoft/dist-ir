@@ -98,9 +98,9 @@ def interline(*docs):
 
 
 def _pprint_function_body(function: Function, ctx):
-    ops = [pretty_dispatch(op, ctx) for op in function.get_ops().values()]
+    ops = [pretty_dispatch(op, ctx) for op in function.ops]
     # Include the outputs as a final "return" op
-    outputs = concat(_join(*(r.name for r in function.get_outputs())))
+    outputs = concat(_join(*(r.name for r in function.outputs)))
     return_line = group(
         nest(ctx.indent, concat([pp_reserved("return"), LINE, outputs]))
     )
@@ -113,7 +113,7 @@ def _(function: Function, ctx):
     ops = _pprint_function_body(function, ctx)
     return concat(
         [
-            pretty_call(ctx, pp_fnname("Function"), *function.get_inputs()),
+            pretty_call(ctx, pp_fnname("Function"), *function.inputs),
             nest(ctx.indent, concat([COLON, HARDLINE, interline(*ops)])),
         ]
     )
@@ -126,7 +126,7 @@ def _(op: Op, ctx):
 
     if op.op_type == "Pmap":
         lambda_args = _join(
-            *(pretty_dispatch(i, ctx) for i in op.subfunctions[0].get_inputs())
+            *(pretty_dispatch(i, ctx) for i in op.subfunctions[0].inputs)
         )
         lambda_args = concat([LPAREN, nest(ctx.indent, concat(lambda_args)), RPAREN])
         lambda_body = _pprint_function_body(op.subfunctions[0], ctx)

@@ -1,15 +1,15 @@
-from .function import Function
+import onnx
+
+from .function import FunctionMaker
 from .type import Tensor, Float
 from .value import Value
-
-import onnx
 
 
 def import_from_onnx(onnx_model):
     # TODO: Remove prints?
     # TODO: Support types beyond Tensor
     onnx_model = onnx.load(onnx_model)
-    dist_ir_function = Function()
+    dist_ir_function = FunctionMaker("foo")  # TODO get name?
 
     inputs = {}
     output_src = {}
@@ -45,18 +45,23 @@ def import_from_onnx(onnx_model):
                 v = dist_ir_function.add_input_value(value, Tensor(Float()))
                 inputs[value] = v
                 per_node_inputs.append(v)
-        print()
         output_names = node.output
-        op = dist_ir_function.add_op(
+        outputs = dist_ir_function.add_op(
             op_type=node.op_type,
             name=node.name,
             inputs=per_node_inputs,
             output_names=output_names,
         )
-        for output in node.output:
-            # TODO lookup shape and dtype of input if exists
-            v = Value(output, Tensor(Float()))
-            output_src[output] = v
+        # Match node's outputs with the output Values created in op:
+        if len(node.output) == 1:
+            assert isinstance(outputs, Value)
+            outputs = [outputs]
+        else:
+            assert len(outputs) == len(node.output)
+        for out_name, value in zip(node.output, outputs):
+            assert out_name == value.name
+            output_src[out_name] = value
+            print(f"Found output {out_name}")
+        print()
 
-    dist_ir_function.verify_ops_in_topological_order()
-    return dist_ir_function
+    return dist_ir_function.finalize()

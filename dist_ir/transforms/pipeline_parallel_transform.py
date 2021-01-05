@@ -1,7 +1,7 @@
 import copy
 from collections import defaultdict
 
-from ..ir.function import Function
+from ..ir.function import FunctionMaker
 from ..ir.value import Value
 from . import utils
 
@@ -42,7 +42,7 @@ class PipelineParallelTransform:
 
     def _partition_inputs(self, function, transformed_function, pipelined_value_map):
         """Splits the input values according to the number of specified microbatches."""
-        input_values = function.get_inputs()
+        input_values = function.inputs
         for input_value in input_values:
             v = transformed_function.add_input_value(
                 input_value.name, copy.deepcopy(input_value.type)
@@ -75,7 +75,7 @@ class PipelineParallelTransform:
             # Forward the input value(s) if the destination device(s) are not
             # the same as the source device.
             input_device = input_value.type.device
-            consumer_ops = function.get_consumers_for_value(input_value.name)
+            consumer_ops = function.get_consumers(input_value)
             consumer_stages = utils.get_stages_from_op_names(
                 self._op_to_stage_map, consumer_ops
             )
@@ -172,7 +172,7 @@ class PipelineParallelTransform:
     def apply(self, function):
         """Applies the transformation to the function and returns a transformed function."""
 
-        transformed_function = Function()
+        transformed_function = FunctionMaker()
 
         # A map from original value name to another map from microbatch number to
         # pipelined value.
@@ -190,8 +190,8 @@ class PipelineParallelTransform:
                 # Look up the next stage to execute according to the schedule
                 # and add each op in the stage to the transformed function.
                 (stage, microbatch) = self._schedule[timestep][device]
-                stage_outputs = set([v.name for v in stage.get_outputs()])
-                for orig_op in stage.get_ops().values():
+                stage_outputs = {v.name for v in stage.outputs}
+                for orig_op in stage.ops.values():
                     orig_inputs = orig_op.in_edges
                     orig_outputs = orig_op.out_edges
 
@@ -229,7 +229,7 @@ class PipelineParallelTransform:
                             # This output is an intermediate output *within* a stage which does not
                             # require any additional processing.
                             continue
-                        elif function.is_output(orig_output.name):
+                        elif orig_output in function.outputs:
                             # This output is a function output, which means we need to aggregate it
                             # with all other corresponding partitioned outputs for each microbatch.
                             num_completed_microbatches = len(pipelined_output_map)
@@ -250,9 +250,9 @@ class PipelineParallelTransform:
                             consumer_stages = utils.get_stages_from_op_names(
                                 self._op_to_stage_map, consumer_ops
                             )
-                            consumer_devices = set(
-                                [self._partition_map[c] for c in consumer_stages]
-                            )
+                            consumer_devices = {
+                                self._partition_map[c] for c in consumer_stages
+                            }
                             for consumer_device in consumer_devices:
                                 if device != consumer_device:
                                     pipelined_output_map[

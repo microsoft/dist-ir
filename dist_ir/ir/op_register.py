@@ -125,8 +125,8 @@ class PmapOpRegisterEntry(OpRegisterEntry_):
         # types of the inputs
         devices = op.attributes["devices"]
         subfunction = op.subfunctions[0]
-        subfunction_inputs = subfunction.get_inputs()
-        subfunction_outputs = subfunction.get_outputs()
+        subfunction_inputs = subfunction.inputs
+        subfunction_outputs = subfunction.outputs
         # TODO: If we want a more robust solution for nested pmaps, move the
         # parameterization over device variable to the function code
         # TODO: Handle multiple device types?

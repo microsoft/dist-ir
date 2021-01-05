@@ -1,4 +1,6 @@
+from __future__ import annotations
 from collections import OrderedDict, defaultdict
+from dataclasses import dataclass, field
 import copy
 from typing import Any, Dict, Iterable, List, Tuple, Union
 
@@ -6,268 +8,100 @@ from .op import Op
 from .value import Value
 
 
+@dataclass(frozen=True)
 class Function:
-    def __init__(self, name=None):
-        self._ops = OrderedDict()
-        self._inputs = OrderedDict()
-        self._outputs = OrderedDict()
-        self._op_counter = defaultdict(int)
-        self._consumers = defaultdict(list)
-        self._name = name
-        self._hash = None
+    """The core DistIR concept: a function.
+
+    A function has a name, a list of input values, a list of operations, and a
+    list of output values. Functions are immutable.
+    """
+
+    name: str
+    ops: List[Op]
+    inputs: List[Value]
+    outputs: List[Value]
+
+    # Map from Value -> List of Ops that consume it
+    _consumers: Dict[Value, List[Op]] = field(init=False)
+
+    def __post_init__(self):
+        """Creates the _consumers map, verifies the function, and performs
+        type inference. This is called automatically at initialization.
+        """
+        # Can't assign to frozen field:
+        object.__setattr__(self, "_consumers", defaultdict(list))
+        for op in self.ops:
+            for in_edge in op.in_edges:
+                self._consumers[in_edge].append(op)
+
+        # Check that ops don't use values from the future
+        self._verify_ops_in_topological_order()
+
+        # Putting this import at the top level causes an import loop
+        from ..executor.shape_inference import infer_shapes
+
+        # TODO bring this back after refactor
+        # infer_shapes(self)
+
+    def _verify_ops_in_topological_order(self):
+        seen = set()
+        for inp in self.inputs:
+            seen.add(inp)
+        for op in self.ops:
+            for in_edge in op.in_edges:
+                if in_edge not in seen:
+                    raise ValueError(
+                        f"Ops are not in topological order: op {op.name} has "
+                        f"unseen edge {in_edge}"
+                    )
+            for out_edge in op.out_edges:
+                seen.add(out_edge)
+
+    def get_consumers(self, value: Value) -> List[Op]:
+        return self._consumers[value]
 
     def __str__(self):
-        if self._name is not None:
-            return self._name
-        else:
-            return self.get_summary()
-
-    def __repr__(self):
+        # TODO can we use the prettyprint output as __str__?
         return self.get_summary()
-
-    def __hash__(self):
-        if self._hash is None:
-            raise RuntimeError("Cannot hash unfinalized function!")
-        return self._hash
-
-    def __eq__(self, other):
-        for op_name in self._ops:
-            if op_name not in other._ops or self._ops[op_name] != other._ops[op_name]:
-                return False
-        for input_name in self._inputs:
-            if (
-                input_name not in other._inputs
-                or self._inputs[input_name] != other._inputs[input_name]
-            ):
-                return False
-        for output_name in self._outputs:
-            if (
-                output_name not in other._outputs
-                or self._outputs[output_name] != other._outputs[output_name]
-            ):
-                return False
-        return True
 
     def get_summary(self):
         output = ""
         output += "Function inputs:\n"
-        for input_value in self._inputs.values():
+        for input_value in self.inputs:
             output += "  " + str(input_value) + "\n"
         output += "\n"
         output += "Function outputs:\n"
-        for input_value in self._outputs.values():
+        for input_value in self.outputs:
             output += "  " + str(input_value) + "\n"
         output += "\n"
         output += "Ops:\n"
-        for op in self._ops.values():
+        for op in self.ops:
             output += str(op) + "\n"
         return output
 
-    # TODO: Convert to property
-    def get_ops(self):
-        """Returns all ops in the function."""
-        return self._ops
+    def has_input(self, value):
+        """Checks whether the given value is an input of this function."""
+        return value in self.inputs
 
-    def is_op(self, name):
-        """Checks whether a op exists with the specified name."""
-        return name in self._ops
+    def has_output(self, value):
+        """Checks whether the given value is an output of this function."""
+        return value in self.outputs
 
-    def is_input(self, name):
-        """Checks whether an input value exists with the specified name."""
-        return name in self._inputs
-
-    def is_output(self, name):
-        """Checks whether an output value exists with the specified name."""
-        return name in self._outputs
-
-    def get_op(self, name):
-        """Returns the op with the specified name if it exists."""
-        if name not in self._ops:
-            return None
-        return self._ops[name]
-
-    def get_input(self, name):
-        """Returns the input value with the specified name if it exists."""
-        if name not in self._inputs:
-            return None
-        return self._inputs[name]
-
-    def get_inputs(self):
-        """Returns the function inputs."""
-        return self._inputs.values()
-
-    def get_outputs(self):
-        """Returns the function outputs."""
-        return self._outputs.values()
-
-    def add_op(
-        self,
-        op_type,
-        name=None,
-        inputs: List[Value] = None,
-        attributes: Dict[str, Any] = None,
-        subfunctions: List["Function"] = None,
-        output_names: List[str] = None,
-    ) -> Union[None, Value, Tuple[Value, ...]]:
-        """Adds an op to the graph.
-
-        Args:
-          op_type: The op's type.
-          name: The op's name.
-          inputs: The input values for this op.
-          attributes: Any op-specific attributes.
-          subfunctions: Any subfunctions this op is wrapping.
-          output_names: An optinal list of output value names.
-
-        Returns:
-          The outputs of the newly created op.
-        """
-        if name in self._ops:
-            raise ValueError(f"op with name {name} already exists!")
-        elif name is None or name == "":
-            name = f"{op_type}_#{self._op_counter[op_type]}"
-        op = Op(
-            op_type,
-            name,
-            in_edges=inputs,
-            attributes=attributes,
-            subfunctions=subfunctions,
-            output_names=output_names,
-        )
-        self._ops[name] = op
-        self._op_counter[op_type] += 1
-
-        # Update _consumers.
-        out_edges = op.out_edges
-        for in_edge in inputs:
-            self._consumers[in_edge.name].append(op.name)
-        for out_edge in out_edges:
-            self._consumers[out_edge.name] = []
-
-        # Return the op outputs.
-        num_out_edges = len(out_edges)
-        if num_out_edges == 0:
-            return None
-        elif num_out_edges == 1:
-            return out_edges[0]
-        else:
-            return tuple(out_edges)
-
-    def add_input_value(self, name, value_type):
-        """Adds an input value to the graph and returns the value."""
-        value = Value(name=name, value_type=value_type)
-        if value.name in self._inputs:
-            raise ValueError(f"Function already has input value with name {value.name}")
-        self._inputs[value.name] = value
-        return value
-
-    def get_consumers_for_value(self, name):
-        return self._consumers[name]
-
-    def set_outputs(self, outputs: Iterable[Value]):
-        """Sets the output of this function to be the given values. They must be
-        valid values, i.e. outputs of some existing op in the function. This clears
-        any previous outputs registered with this function.
-        """
-        for output in outputs:
-            # NOTE: Using consumers as a proxy for valid values
-            if output.name not in self._consumers:
-                raise ValueError(f"Function has no value {output}")
-        self._outputs.clear()
-        for output in outputs:
-            if output.name in self._outputs:
-                raise ValueError(
-                    f"Function already has output value with name {output.name}"
-                )
-            self._outputs[output.name] = output
-
-    def set_outputs_auto(self):
-        """Marks all sink nodes in the graph as output values."""
-        all_values = OrderedDict()
-        is_output = OrderedDict()
-
-        self._outputs.clear()
-        for input_value_name, input_value in self._inputs.items():
-            all_values[input_value_name] = input_value
-            is_output[input_value_name] = True
-
-        for op in self._ops.values():
-            for in_edge in op.in_edges:
-                is_output[in_edge.name] = False
-            for out_edge in op.out_edges:
-                all_values[out_edge.name] = out_edge
-                is_output[out_edge.name] = True
-
-        for output_value_name in is_output:
-            if is_output[output_value_name]:
-                self._outputs[output_value_name] = all_values[output_value_name]
-
-    def _get_ops_in_topological_order_helper(self, name, visited, order):
-        visited.add(name)
-
-        out_edges = self._ops[name].out_edges
-        for out_edge in out_edges:
-            output_name = out_edge
-            if output_name not in visited:
-                self._get_ops_in_topological_order_helper(output_name, visited, order)
-
-        order.append(name)
-
-    def get_ops_in_topological_order(self):
-        """Return ops in topological order. DEPRECATED, ops should always be
-        topologically ordered.
-        """
-        visited = set()
-        order = []
-        for name in self._ops:
-            if name not in visited:
-                self._get_ops_in_topological_order_helper(name, visited, order)
-        return order[::-1]
-
-    def verify_ops_in_topological_order(self):
-        seen = set()
-        for input_name in self._inputs:
-            seen.add(input_name)
-
-        for op_name, op in self._ops.items():
-            for in_edge in op.in_edges:
-                if in_edge.name not in seen:
-                    raise ValueError(
-                        f"Ops are not in topological order: op {op_name} has "
-                        f"unseen edge {in_edge}"
-                    )
-            for out_edge in op.out_edges:
-                seen.add(out_edge.name)
-
-    def finalize(self):
-        """Performs some standard verification and inference passes. Use at the
-        end whenever creating a function. Assumes that the function will no longer be
-        modified after this function is called.
-        """
-        # Putting this import at the top level causes an import loop
-        from ..executor.shape_inference import infer_shapes
-
-        self.verify_ops_in_topological_order()
-        if len(self._outputs) == 0:
-            self.set_outputs_auto()
-        infer_shapes(self)
-        self._hash = hash(tuple(self._ops.keys()))
-
-    def get_subfunction(self, op_names, name=None):
+    def get_subfunction(self, op_names, name=None) -> Function:
         """Returns a Function comprised of the specified subset of ops."""
-        subfunction = Function(name)
+        # TODO I think we should use a set of ops instead of op_names if possible
+        raise NotImplementedError("get_subfunction")
+        subfunction = FunctionMaker(name)
         value_map = {}
         outputs = []
         op_names_set = set(op_names)
         for op_name in op_names:
-            op = self._ops[op_name]
+            op = self.ops[op_name]
             subfunction_op_inputs = []
-            for input in op.in_edges:
-                if input.name not in value_map:
-                    value_map[input.name] = subfunction.add_input_value(
-                        input.name, input.type
-                    )
-                subfunction_op_inputs.append(value_map[input.name])
+            for inp in op.in_edges:
+                if inp not in value_map:
+                    value_map[inp] = subfunction.add_input_value(inp.name, inp.type)
+                subfunction_op_inputs.append(value_map[inp])
             output_names = [output.name for output in op.out_edges]
             subfunction_op_outputs = subfunction.add_op(
                 op.op_type,
@@ -282,13 +116,129 @@ class Function:
             for output in subfunction_op_outputs:
                 # We need to explicitly set the subfunction outputs because some output
                 # values might have consumers outside the subfunction (external).
-                consumers = self._consumers[output.name]
+                consumers = self._consumers[output]
                 has_external_output = any([c not in op_names_set for c in consumers])
                 if (
-                    output.name in self._outputs or has_external_output
+                    output in self.outputs or has_external_output
                 ) and output.name not in op_names:
                     outputs.append(output)
-                value_map[output.name] = output
+                value_map[output] = output
         subfunction.set_outputs(outputs)
-        subfunction.finalize()
-        return subfunction
+        return subfunction.finalize()
+
+
+@dataclass
+class FunctionMaker:
+    """A helper class for creating Functions."""
+
+    name: str = "foo"
+    ops: List[Op] = field(default_factory=list)
+    inputs: List[Value] = field(default_factory=list)
+    outputs: List[Value] = field(default_factory=list)
+
+    def add_op(
+        self,
+        op_type,
+        name=None,
+        inputs: List[Value] = None,
+        attributes: Dict[str, Any] = None,
+        subfunctions: List["Function"] = None,
+        output_names: List[str] = None,
+    ) -> Union[None, Value, Tuple[Value, ...]]:
+        """Adds an op to the function.
+
+        Args:
+          op_type: The op's type.
+          name: The op's name.
+          inputs: The input values for this op.
+          attributes: Any op-specific attributes.
+          subfunctions: Any subfunctions this op is wrapping.
+          output_names: An optinal list of output value names.
+
+        Returns:
+          The outputs of the newly created op.
+        """
+        op = Op(
+            op_type,
+            name=name,
+            in_edges=inputs,
+            attributes=attributes,
+            subfunctions=subfunctions,
+            output_names=output_names,
+        )
+        self.ops.append(op)
+
+        # Return the op outputs.
+        num_out_edges = len(op.out_edges)
+        if num_out_edges == 0:
+            return None
+        elif num_out_edges == 1:
+            return op.out_edges[0]
+        else:
+            return tuple(op.out_edges)
+
+    def add_input_value(self, name, value_type):
+        """Adds an input value to the function and returns the value."""
+        value = Value(name=name, value_type=value_type)
+        if value in self.inputs:
+            raise ValueError(f"Function already has input value {value}")
+        self.inputs.append(value)
+        return value
+
+    def set_outputs(self, outputs: Iterable[Value]):
+        """Sets the output of this function to be the given values. They must be
+        valid values, i.e. outputs of some existing op in the function. This clears
+        any previous outputs registered with this function.
+        """
+        self.outputs.clear()
+        seen = set()
+        for output in outputs:
+            if output in seen:
+                raise ValueError(f"Function already has output value {output}")
+            seen.add(output)
+            self.outputs.append(output)
+
+    def set_outputs_auto(self):
+        """Marks all sink nodes in the graph as output values."""
+        is_output = OrderedDict()
+
+        self.outputs.clear()
+        for input_value in self.inputs:
+            is_output[input_value] = True
+
+        for op in self.ops:
+            for in_edge in op.in_edges:
+                is_output[in_edge] = False
+            for out_edge in op.out_edges:
+                is_output[out_edge] = True
+
+        self.outputs = [v for v in is_output if is_output[v]]
+
+    def _get_ops_in_topological_order_helper(self, name, visited, order):
+        visited.add(name)
+
+        out_edges = self.ops[name].out_edges
+        for out_edge in out_edges:
+            output_name = out_edge
+            if output_name not in visited:
+                self._get_ops_in_topological_order_helper(output_name, visited, order)
+
+        order.append(name)
+
+    def get_ops_in_topological_order(self):
+        """Return ops in topological order. DEPRECATED, ops should always be
+        topologically ordered.
+        """
+        visited = set()
+        order = []
+        for name in self.ops:
+            if name not in visited:
+                self._get_ops_in_topological_order_helper(name, visited, order)
+        return order[::-1]
+
+    def finalize(self) -> Function:
+        """Returns the created Function. Outputs, if unspecified, are the sinks."""
+        if len(self.outputs) == 0:
+            self.set_outputs_auto()
+
+        return Function(self.name, self.ops, self.inputs, self.outputs)

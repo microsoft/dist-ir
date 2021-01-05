@@ -1,4 +1,4 @@
-from dist_ir.ir import Function
+from dist_ir.ir import FunctionMaker
 from dist_ir.ir import Topology
 from dist_ir.ir.type import Float
 from dist_ir.ir.type import Tensor
@@ -8,7 +8,7 @@ from dist_ir.transforms import DataParallelTransform
 
 
 def test_single_device():
-    function = Function()
+    function = FunctionMaker()
     topology = Topology()
 
     d = topology.add_device("gpu")
@@ -16,7 +16,7 @@ def test_single_device():
     a = function.add_input_value("a", Tensor(dtype=Float(), shape=(4, 4), device=d))
     b = function.add_input_value("b", Tensor(dtype=Float(), shape=(4, 4), device=d))
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b])
-    function.finalize()
+    function = function.finalize()
     device_speeds = {"gpu": 1.0e13}
     cost_model = CostModel(topology, device_speeds)
     simulator = DistributedSimulator(cost_model)
@@ -27,7 +27,7 @@ def test_single_device():
 
 
 def test_data_parallel():
-    function = Function()
+    function = FunctionMaker()
     topology = Topology()
 
     d0 = topology.add_device("gpu")
@@ -39,7 +39,7 @@ def test_data_parallel():
     c = function.add_input_value("c", Tensor(Float(), (4, 4), device=d0))
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
     y = function.add_op("MatMul", "MatMul1", inputs=[x, c], output_names=["y"])
-    function.finalize()
+    function = function.finalize()
     transform = DataParallelTransform(
         batch_dims={"a": 0},
         reduction_params={"y": {"op_type": "Gather", "dim": 0, "device": d0}},
@@ -47,7 +47,6 @@ def test_data_parallel():
     )
     transformed_function = transform.apply(function)
 
-    transformed_function.finalize()
     print(transformed_function)
     device_speeds = {"gpu": 1.0e13}
     cost_model = CostModel(topology, device_speeds)
@@ -61,7 +60,7 @@ def test_data_parallel():
 
 
 def test_chrome_trace():
-    function = Function()
+    function = FunctionMaker()
 
     topology = Topology()
     d0 = topology.add_device("gpu")
@@ -73,7 +72,7 @@ def test_chrome_trace():
     c = function.add_input_value("c", Tensor(Float(), (4, 4), device=d0))
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
     y = function.add_op("MatMul", "MatMul1", inputs=[x, c], output_names=["y"])
-    function.finalize()
+    function = function.finalize()
 
     device_speeds = {"gpu": 1.0e13}
     cost_model = CostModel(topology, device_speeds)
@@ -85,7 +84,6 @@ def test_chrome_trace():
         devices=[d0, d1],
     )
     transformed_function = transform.apply(function)
-    transformed_function.finalize()
 
     simulation = simulator.simulate(transformed_function)
     simulation.dump_chrome_trace("test/trace.json")

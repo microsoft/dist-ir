@@ -1,4 +1,4 @@
-from ..ir.function import Function
+from ..ir.function import FunctionMaker
 
 import copy
 
@@ -28,13 +28,13 @@ class DataParallelTransform:
 
     def apply(self, function):
         """Applies the transformation to the given function and returns the transformed function."""
-        transformed_function = Function()
+        transformed_function = FunctionMaker()
 
         # Either scatter or broadcast each input value depending on what the user
         # has requested.
         # TODO: Add explicit Send ops if the source device is not one of the
         #       destination devices.
-        input_values = function.get_inputs()
+        input_values = function.inputs
         pmap_input_values = []
         for input_value in input_values:
             v = transformed_function.add_input_value(
@@ -63,7 +63,7 @@ class DataParallelTransform:
 
         # Add the Pmap operator to the transformed function. The Pmap operator will
         # encapsulate the original function.
-        output_values = function.get_outputs()
+        output_values = function.outputs
         pmap_output_names = []
         for i, output_value in enumerate(output_values):
             pmap_output_name = f"{output_value.name}is"
@@ -107,4 +107,4 @@ class DataParallelTransform:
                     f"output value {output_value}"
                 )
 
-        return transformed_function
+        return transformed_function.finalize()

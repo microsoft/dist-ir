@@ -27,10 +27,10 @@ class PipelineParallelScheduler(ABC):
     def _prepare_stages_to_schedule(self, function, partition_map):
         """Enumerates the stages to schedule on each device across all microbatches."""
         for stage, device in partition_map.items():
-            inputs = stage.get_inputs()
+            inputs = stage.inputs
             remaining_inputs = len(inputs)
             for input in inputs:
-                if function.is_input(input.name):
+                if input in function.inputs:
                     remaining_inputs -= 1
             for i in range(self._num_microbatches):
                 self._remaining_inputs[(stage, i)] = remaining_inputs
@@ -58,9 +58,9 @@ class PipelineParallelScheduler(ABC):
                     # TODO: Optimize this so it isn't an O(N) call?
                     self._ready_stages[device].remove(stage_to_schedule)
                     num_scheduled_stages += 1
-                    outputs = stage.get_outputs()
+                    outputs = stage.outputs
                     for output in outputs:
-                        consumer_ops = function.get_consumers_for_value(output.name)
+                        consumer_ops = function.get_consumers(output)
                         consumer_stages = utils.get_stages_from_op_names(
                             op_to_stage, consumer_ops
                         )

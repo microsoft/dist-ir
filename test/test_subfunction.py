@@ -1,9 +1,9 @@
-from dist_ir.ir import Function
+from dist_ir.ir import FunctionMaker
 from dist_ir.ir.type import Tensor, Float
 
 
 def test_subfunction():
-    function = Function()
+    function = FunctionMaker()
 
     inputs = []
     outputs = []
@@ -20,23 +20,23 @@ def test_subfunction():
                 "Add", f"Add{i}", inputs=input_values, output_names=[f"a{i}"]
             )
         )
-    function.finalize()
+    function = function.finalize()
 
     subfunction = function.get_subfunction(("Add0", "Add1", "Add2"))
-    subfunction_inputs = subfunction.get_inputs()
-    subfunction_outputs = subfunction.get_outputs()
+    subfunction_inputs = subfunction.inputs
+    subfunction_outputs = subfunction.outputs
     assert [v.name for v in subfunction_inputs] == ["x0", "x1", "x2", "x3"]
     assert [v.name for v in subfunction_outputs] == ["a2"]
 
     subfunction = function.get_subfunction(("Add3", "Add4", "Add5"))
-    subfunction_inputs = subfunction.get_inputs()
-    subfunction_outputs = subfunction.get_outputs()
+    subfunction_inputs = subfunction.inputs
+    subfunction_outputs = subfunction.outputs
     assert [v.name for v in subfunction_inputs] == ["a2", "x4", "x5", "x6"]
     assert [v.name for v in subfunction_outputs] == ["a5"]
 
     subfunction = function.get_subfunction(("Add6", "Add7", "Add8"))
-    subfunction_inputs = subfunction.get_inputs()
-    subfunction_outputs = subfunction.get_outputs()
+    subfunction_inputs = subfunction.inputs
+    subfunction_outputs = subfunction.outputs
     assert [v.name for v in subfunction_inputs] == ["a5", "x7", "x8", "x9"]
     assert [v.name for v in subfunction_outputs] == ["a8"]
 

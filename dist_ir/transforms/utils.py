@@ -8,7 +8,7 @@ def get_op_to_stage_map(stages: Iterable[Function]) -> Dict[str, Function]:
     encompassing stage."""
     op_to_stage = {}
     for stage in stages:
-        for op_name in stage.get_ops():
+        for op_name in stage.ops:
             op_to_stage[op_name] = stage
     return op_to_stage
 

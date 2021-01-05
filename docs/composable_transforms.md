@@ -38,30 +38,20 @@ def mlp(
 ):
     xs: Tuple[Tensor[(B, F), 1], ..., Tensor[(B, F), N]] = broadcast(x, devices=[1..N])
     wAs: Tuple[Tensor[(F, H/N), 1], ..., Tensor[(F, H/N), N]] = scatter(wA, dim=1, devices=[1..N])
-    wBs: Tuple[Tensor[(H, C/N), 1], ..., Tensor[(H, C/N), N]] = scatter(wB, dim=1, devices=[1..N])
+    wBs: Tuple[Tensor[(H, C/N), 1], ..., Tensor[(H, C/N), N]] = scatter(wB, dim=0, devices=[1..N])
     (
-        ais: Tuple[Tensor[(B, C/N), 1], ..., Tensor[(B, C/N), N]],
+        yis: Tuple[Tensor[(B, C/N), 1], ..., Tensor[(B, C/N), N]],
     ) = pmap(
         device_var=d,
-        fn=lambda (xi: Tensor[(B, F), d]), (wAi: Tensor[(F, H/N), d])): {
+        fn=lambda (xi: Tensor[(B, F), d]), (wAi: Tensor[(F, H/N), d]), (wBi: Tensor[(F/N, C), d]): {
             ai: Tensor[(B, H/N), d] = MatMul(xi, wAi)
-            return ai
+            yi: Tensor[(B, C), d] = MatMul(ai, wBi)
+            return yi
         },
-        (xs, wAs)
+        (xs, wAs, wBs)
     )
-    as: Tuple[Tensor[(B, H), 1], ..., Tensor[(B, H), N]] = allgather(ais, dim=1)
-    (
-        yis: Tuple[Tensor[(B, H/N), 1], ..., Tensor[(B, H/N), N]],
-    ) = pmap(
-         device_var=d,
-         fn=lambda (ai: Tensor[(B, H), d]), (wBi: Tensor[(H, C/N), d])): {
-             yi: Tensor[(B, C/N), d] = MatMul(ai, wBi)
-             return yi
-         },
-         (as, wBs)
-    )
-    y: Tensor[(B, C), 0] = gather(yis, dim=0, device=0)
-    return y
+    ys: Tuple[Tensor[(B, C), 1], ..., Tensor[(B, C), N]] = allreduce(yis)
+    return ys
 ```
 
 ### Pipeline parallelism
@@ -90,7 +80,7 @@ def mlp(
     return y
 ```
 
-### Data parallelism over horizontal parallelism:
+### Data parallelism followed by horizontal parallelism:
 ```Python
 def mlp(
     wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 0], x: Tensor[(B, F), 0]
@@ -178,27 +168,16 @@ def mlp(
                 ais: Tuple[Tensor[(B/N, H/N), ?], ..., Tensor[(B/N, H/N), ?]]
             ) = pmap(
                 device_var=d_hp,
-                fn = lambda (xi: Tensor[(B/N, F), d_hp]), (wAi_hp: Tensor[(F, H/N), d_hp]): {
+                fn = lambda (xi: Tensor[(B/N, F), d_hp]), (wAi_hp: Tensor[(F, H/N), d_hp]),
+                            (wBi_hp: Tensor[(F/N, C), d_hp]): {
                     ai: Tensor[(B/N, H/N), d_hp] = MatMul(xi, wAi_hp)
+                    yi: Tensor[(B/N, C), d_hp] = MatMul(ai, wBi_hp)
                 },
-                (xs_hp, wAs_hp)
+                (as, wAs_hp, wBs_hp)
             )
-                    
-            (
-                as: Tuple[Tensor[(B/N, H), ?], ..., Tensor[(B/N, H), ?]
-            ) = allgather(ais, dim=1, devices=[?..?])
-                    
-            (
-                yis_hp: Tuple[Tensor[(B/N, C/N), ?], ..., Tensor[(B/N, C/N), ?]]
-            ) = pmap(
-            device_var=d_hp,
-                fn = lambda (ai: Tensor[(B/N, H/N), d_hp]), (wBi_hp: Tensor[(H/N, C/N), d_hp]): {
-                    yi: Tensor[(B/N, C/N), d_hp] = MatMul(ai, wBi_hp)
-                },
-                (as, wBs_hp)
-            )
-            y_hp: Tensor[(B/N, C), d_dp] = gather(yis_hp, dim=1, device=d_dp)
-            return y_hp
+            ys_hp: Tuple[Tensor[(B/N, C), ?], ..., Tensor[(B/N, C), ?]] = allreduce(yis_hp)
+            # TODO: Select just one copy to return?
+            return ys_hp
         },
         (xs_dp, wAs_dp, wBs_dp)
     )

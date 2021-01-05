@@ -1,10 +1,12 @@
 ﻿### Original function:
+    ```Python
     def mlp(
         wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 0], x: Tensor[(B, F), 0]
         ):
         a: Tensor[(B, H), 0] = MatMul(x, wA)
         y: Tensor[(B, C), 0] = MatMul(a, wB)
         return y
+    ```
 
 ### Data parallelism:
     def mlp(

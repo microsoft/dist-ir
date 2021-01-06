@@ -38,3 +38,7 @@ def test_pipedream_scheduler():
     ]
 
     assert schedule == ref_schedule
+
+
+if __name__ == "__main__":
+    test_fifo_scheduler()

@@ -2,7 +2,8 @@ from __future__ import annotations
 from collections import OrderedDict, defaultdict
 from dataclasses import dataclass, field
 import copy
-from typing import Any, Dict, Iterable, List, Tuple, Union
+from frozendict import frozendict
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 from .op import Op
 from .value import Value
@@ -17,22 +18,27 @@ class Function:
     """
 
     name: str
-    ops: List[Op]
-    inputs: List[Value]
-    outputs: List[Value]
+    ops: Tuple[Op]
+    inputs: Tuple[Value]
+    outputs: Tuple[Value]
 
     # Map from Value -> List of Ops that consume it
-    _consumers: Dict[Value, List[Op]] = field(init=False)
+    _consumers: Dict[Value, Tuple[Op]] = field(init=False)
 
     def __post_init__(self):
         """Creates the _consumers map, verifies the function, and performs
         type inference. This is called automatically at initialization.
         """
-        # Can't assign to frozen field:
-        object.__setattr__(self, "_consumers", defaultdict(list))
+        consumers = defaultdict(list)
         for op in self.ops:
             for in_edge in op.in_edges:
-                self._consumers[in_edge].append(op)
+                consumers[in_edge].append(op)
+            for out_edge in op.out_edges:
+                consumers[out_edge] = []
+        for v in consumers:
+            consumers[v] = tuple(consumers[v])
+        # Can't assign to frozen field:
+        object.__setattr__(self, "_consumers", frozendict(consumers))
 
         # Check that ops don't use values from the future
         self._verify_ops_in_topological_order()
@@ -87,16 +93,19 @@ class Function:
         """Checks whether the given value is an output of this function."""
         return value in self.outputs
 
-    def get_subfunction(self, op_names, name=None) -> Function:
+    def get_subfunction(
+        self, op_names: Tuple[str], name: Optional[str] = None
+    ) -> Function:
         """Returns a Function comprised of the specified subset of ops."""
-        # TODO I think we should use a set of ops instead of op_names if possible
-        raise NotImplementedError("get_subfunction")
         subfunction = FunctionMaker(name)
+        op_names_set = set(op_names)
+        ops = []
+        for op in self.ops:
+            if op.name in op_names_set:
+                ops.append(op)
         value_map = {}
         outputs = []
-        op_names_set = set(op_names)
-        for op_name in op_names:
-            op = self.ops[op_name]
+        for op in ops:
             subfunction_op_inputs = []
             for inp in op.in_edges:
                 if inp not in value_map:
@@ -113,16 +122,19 @@ class Function:
             )
             if not isinstance(subfunction_op_outputs, tuple):
                 subfunction_op_outputs = (subfunction_op_outputs,)
-            for output in subfunction_op_outputs:
+            for orig_output, subfunction_output in zip(
+                op.out_edges, subfunction_op_outputs
+            ):
                 # We need to explicitly set the subfunction outputs because some output
                 # values might have consumers outside the subfunction (external).
-                consumers = self._consumers[output]
-                has_external_output = any([c not in op_names_set for c in consumers])
+                has_external_output = False
                 if (
-                    output in self.outputs or has_external_output
-                ) and output.name not in op_names:
-                    outputs.append(output)
-                value_map[output] = output
+                    orig_output in self.outputs
+                    or orig_output not in self._consumers
+                    or any([c not in ops for c in self._consumers[orig_output]])
+                ):
+                    outputs.append(subfunction_output)
+                value_map[orig_output] = subfunction_output
         subfunction.set_outputs(outputs)
         return subfunction.finalize()
 
@@ -161,10 +173,10 @@ class FunctionMaker:
         op = Op(
             op_type,
             name=name,
-            in_edges=inputs,
-            attributes=attributes,
-            subfunctions=subfunctions,
-            output_names=output_names,
+            in_edges=None if inputs is None else tuple(inputs),
+            attributes=None if attributes is None else frozendict(attributes),
+            subfunctions=None if subfunctions is None else tuple(subfunctions),
+            output_names=None if output_names is None else tuple(output_names),
         )
         self.ops.append(op)
 
@@ -241,4 +253,6 @@ class FunctionMaker:
         if len(self.outputs) == 0:
             self.set_outputs_auto()
 
-        return Function(self.name, self.ops, self.inputs, self.outputs)
+        return Function(
+            self.name, tuple(self.ops), tuple(self.inputs), tuple(self.outputs)
+        )

@@ -94,7 +94,7 @@ class Function:
         return value in self.outputs
 
     def get_subfunction(
-        self, op_names: Tuple[str], name: Optional[str] = None
+        self, op_names: Tuple[str], deepcopy: bool = False, name: Optional[str] = None
     ) -> Function:
         """Returns a Function comprised of the specified subset of ops."""
         subfunction = FunctionMaker(name)
@@ -109,17 +109,25 @@ class Function:
             subfunction_op_inputs = []
             for inp in op.in_edges:
                 if inp not in value_map:
-                    value_map[inp] = subfunction.add_input_value(inp.name, inp.type)
+                    if deepcopy:
+                        value_map[inp] = subfunction.add_input_value(inp.name, inp.type)
+                    else:
+                        subfunction.inputs.append(inp)
+                        value_map[inp] = inp
                 subfunction_op_inputs.append(value_map[inp])
             output_names = [output.name for output in op.out_edges]
-            subfunction_op_outputs = subfunction.add_op(
-                op.op_type,
-                name=op.name,
-                inputs=subfunction_op_inputs,
-                attributes=copy.deepcopy(op.attributes),
-                subfunctions=copy.deepcopy(op.subfunctions),
-                output_names=output_names,
-            )
+            if deepcopy:
+                subfunction_op_outputs = subfunction.add_op(
+                    op.op_type,
+                    name=op.name,
+                    inputs=subfunction_op_inputs,
+                    attributes=copy.deepcopy(op.attributes),
+                    subfunctions=copy.deepcopy(op.subfunctions),
+                    output_names=output_names,
+                )
+            else:
+                subfunction.ops.append(op)
+                subfunction_op_outputs = op.out_edges
             if not isinstance(subfunction_op_outputs, tuple):
                 subfunction_op_outputs = (subfunction_op_outputs,)
             for orig_output, subfunction_output in zip(
@@ -128,10 +136,8 @@ class Function:
                 # We need to explicitly set the subfunction outputs because some output
                 # values might have consumers outside the subfunction (external).
                 has_external_output = False
-                if (
-                    orig_output in self.outputs
-                    or orig_output not in self._consumers
-                    or any([c not in ops for c in self._consumers[orig_output]])
+                if orig_output in self.outputs or any(
+                    [c not in ops for c in self._consumers[orig_output]]
                 ):
                     outputs.append(subfunction_output)
                 value_map[orig_output] = subfunction_output

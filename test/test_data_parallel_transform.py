@@ -136,12 +136,17 @@ def test_mnist():
     _wB = np.ones((2, 1))
     orig_res = ex.compute(
         function,
-        {"x": _x, "z": _z, "wA": _wA, "wB": _wB},
+        {x: _x, z: _z, wA: _wA, wB: _wB},
     )
 
     transformed_res = ex.compute(
         transformed_function,
-        {"x": _x, "z": _z, "wA": _wA, "wB": _wB},
+        {
+            transformed_function.inputs[0]: _x,
+            transformed_function.inputs[1]: _z,
+            transformed_function.inputs[2]: _wA,
+            transformed_function.inputs[3]: _wB,
+        },
     )
 
     print("-" * 88)
@@ -160,9 +165,10 @@ def test_mnist():
         print(v)
         print()
 
-    assert np.array_equal(orig_res["l"], np.concatenate(transformed_res["ls"], axis=0))
-    assert np.array_equal(orig_res["dwA"], transformed_res["dwAs"][0])
-    assert np.array_equal(orig_res["dwB"], transformed_res["dwBs"][0])
+    (ls, dwAs, dwBs) = transformed_function.outputs
+    assert np.array_equal(orig_res[l], np.concatenate(transformed_res[ls], axis=0))
+    assert np.array_equal(orig_res[dwA], transformed_res[dwAs][0])
+    assert np.array_equal(orig_res[dwB], transformed_res[dwBs][0])
 
 
 if __name__ == "__main__":

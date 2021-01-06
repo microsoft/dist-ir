@@ -191,7 +191,7 @@ class PipelineParallelTransform:
                 # and add each op in the stage to the transformed function.
                 (stage, microbatch) = self._schedule[timestep][device]
                 stage_outputs = {v.name for v in stage.outputs}
-                for orig_op in stage.ops.values():
+                for orig_op in stage.ops:
                     orig_inputs = orig_op.in_edges
                     orig_outputs = orig_op.out_edges
 
@@ -244,9 +244,7 @@ class PipelineParallelTransform:
                             # This output is an intermediate stage output, which means we need to
                             # forward the output to the next stage if the next stage is located on
                             # a different device.
-                            consumer_ops = function.get_consumers_for_value(
-                                orig_output.name
-                            )
+                            consumer_ops = function.get_consumers(orig_output)
                             consumer_stages = utils.get_stages_from_op_names(
                                 self._op_to_stage_map, consumer_ops
                             )

@@ -64,6 +64,8 @@ def _parse_type(mlir_type, context: Context):
         shape, dtype = parse_shape_dtype(args[0])
         device = _get_device(args[1].strip(), context)
         return Tensor(dtype, shape, device)
+
+    # TODO handle tuple types
     raise ValueError(f"Unknown MLIR type {mlir_type}")
 
 

@@ -40,13 +40,9 @@ class Op:
             num_outputs = OpRegister[self.op_type].num_outputs
 
         # Create the correct number of output values with type=None
-        out_edges = []
         if output_names is None:
             output_names = [f"{self.name}_out_{i}" for i in range(num_outputs)]
         else:
             assert len(output_names) == num_outputs
-        for out_name in output_names:
-            out_edges.append(Value(out_name, None))
-        object.__setattr__(
-            self, "out_edges", tuple(out_edges)
-        )  # Can't assign to frozen field
+        out_edges = tuple(Value(out_name, None) for out_name in output_names)
+        object.__setattr__(self, "out_edges", out_edges)  # Can't assign to frozen field

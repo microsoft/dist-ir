@@ -321,15 +321,3 @@ def test_pmap_dp():
     )
     assert np.array_equal(res[zis][0], np.matmul(np.matmul(x_0, _wA), _wB))
     assert np.array_equal(res[zis][1], np.matmul(np.matmul(x_1, _wA), _wB))
-
-
-if __name__ == "__main__":
-    backend = "numpy"
-    test_single_add(backend)
-    test_double_add(backend)
-    test_double_add_inverted(backend)
-    test_single_matmul(backend)
-    test_double_matmul(backend)
-    test_double_matmul_inverted(backend)
-    test_pmap_on_executor()
-    test_pmap_dp()

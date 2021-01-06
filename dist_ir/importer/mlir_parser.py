@@ -50,17 +50,6 @@ def _parse_type(mlir_type, context: Context):
         dims = shape_str.strip().split("x")
         return tuple(int(d) for d in dims[:-1]), dtype_map[dims[-1]]
 
-    def parse_device(device_str):
-        # TODO currently assumes all device variables are unique
-        # Maybe it would be better to create a fresh device variable when
-        # processing pmap and add to _devices, so just look up here
-        device_str = device_str.strip()
-        try:
-            device = int(device_str)
-        except ValueError:
-            device = device_str
-        return _get_device(device, context)
-
     # tensor<4x8xf32>
     matches = re.match(r"tensor<([^>]*)>", str(mlir_type))
     if matches:
@@ -73,7 +62,7 @@ def _parse_type(mlir_type, context: Context):
         args = matches.group(1).split(",")
         assert len(args) == 2
         shape, dtype = parse_shape_dtype(args[0])
-        device = parse_device(args[1])
+        device = _get_device(args[1].strip(), context)
         return Tensor(dtype, shape, device)
     raise ValueError(f"Unknown MLIR type {mlir_type}")
 
@@ -141,6 +130,7 @@ def _parse_module(mlir_region, context=None):
             op_name = "Pmap"
             # Create a new device and add it to the context.devices map
             new_device = Device.get_new_device_variable("gpu")
+            assert attributes["device_var"] not in context.devices
             context.devices[attributes["device_var"]] = new_device
             # Parse the submodule
             submodules.append(_parse_module(op.regions[0], context))
@@ -195,7 +185,6 @@ def parse_mlir_file(filename):
 
 
 # TODO things missing in MLIR Python bindings:
-# - op.name
 # - MLIR tensor type -> rank and dims and dtype
 # - pointer from operand to operation that created it
 # - hash for PyValue

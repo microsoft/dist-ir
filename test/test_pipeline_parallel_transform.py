@@ -56,7 +56,12 @@ def test_mnist_fw_bw():
 
     transformed_res = ex.compute(
         transformed_function,
-        {"x": _x, "z": _z, "wA": _wA, "wB": _wB},
+        {
+            transformed_function.inputs[0]: _x,
+            transformed_function.inputs[1]: _z,
+            transformed_function.inputs[2]: _wA,
+            transformed_function.inputs[3]: _wB,
+        },
     )
 
     print("-" * 88)
@@ -75,6 +80,15 @@ def test_mnist_fw_bw():
         print(v)
         print()
 
-    assert np.array_equal(orig_res["l"], transformed_res["l"])
-    assert np.array_equal(orig_res["dwA"], transformed_res["dwA"])
-    assert np.array_equal(orig_res["dwB"], transformed_res["dwB"])
+    outputs = transformed_function.outputs
+    assert np.array_equal(orig_res[l], transformed_res[transformed_function.outputs[0]])
+    assert np.array_equal(
+        orig_res[dwA], transformed_res[transformed_function.outputs[1]]
+    )
+    assert np.array_equal(
+        orig_res[dwB], transformed_res[transformed_function.outputs[2]]
+    )
+
+
+if __name__ == "__main__":
+    test_mnist_fw_bw()

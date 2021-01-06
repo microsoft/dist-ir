@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field, InitVar
-from typing import Any, Dict, List
+from frozendict import frozendict
+from typing import Any, Dict, List, Tuple
 
 from .op_register import OpRegister
 from .value import Value
@@ -9,13 +10,15 @@ from .value import Value
 class Op:
     op_type: str
     name: str = ""
-    in_edges: List[Value] = field(default_factory=list)
-    attributes: Dict[str, Any] = field(default_factory=dict)
-    subfunctions: List["Function"] = field(default_factory=list)
-    out_edges: List[Value] = field(init=False)
+    in_edges: Tuple[Value] = field(default_factory=tuple)
+    attributes: Dict[str, Any] = field(
+        default_factory=frozendict
+    )  # TODO: Replace with frozendict
+    subfunctions: Tuple["Function"] = field(default_factory=tuple)
+    out_edges: Tuple[Value] = field(init=False)
 
     # This is not a field, just a parameter to init and post_init:
-    output_names: InitVar[List[str]] = None
+    output_names: InitVar[Tuple[str]] = None
 
     def __post_init__(self, output_names):
         if self.op_type == "Pmap":
@@ -44,4 +47,6 @@ class Op:
             assert len(output_names) == num_outputs
         for out_name in output_names:
             out_edges.append(Value(out_name, None))
-        object.__setattr__(self, "out_edges", out_edges)  # Can't assign to frozen field
+        object.__setattr__(
+            self, "out_edges", tuple(out_edges)
+        )  # Can't assign to frozen field

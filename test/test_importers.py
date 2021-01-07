@@ -37,15 +37,15 @@ def test_parser():
     return %y: !dist.tensor<8x6xf32, 0>
     }
     """
-    modules = mlir_parser.parse_mlir_str(mlir_str)
-    assert len(modules) == 1
-    module = modules[0]
-    cpprint(module)
+    functions = mlir_parser.parse_mlir_str(mlir_str)
+    assert len(functions) == 1
+    function = functions[0]
+    cpprint(function)
 
     ex = SequentialExecutor("numpy")
     _wA = np.ones((4, 6))
     _x = np.arange(8 * 4).reshape((8, 4))
-    res = ex.compute(module, {"%arg1": _x, "%arg0": _wA})
+    res = ex.compute(function, {function.inputs[0]: _wA, function.inputs[1]: _x})
 
     # TODO fix concat's implementation in numpy register for this:
     # assert np.array_equal(res["%var4"], np.matmul(_x, _wA))

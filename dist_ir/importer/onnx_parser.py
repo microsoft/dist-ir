@@ -1,8 +1,7 @@
 import onnx
 
-from .function import FunctionMaker
-from .type import Tensor, Float
-from .value import Value
+from ..ir import FunctionMaker, Value
+from ..ir.type import Tensor, Float
 
 
 def import_from_onnx(onnx_model):

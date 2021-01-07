@@ -11,15 +11,15 @@ on:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     env:
+      MLIR_VERSION: 20210104.22
       PY_VERSION: 3.8
 
     steps:
     - uses: actions/checkout@v2
- 
+
     - name: Set up Python
       uses: actions/setup-python@v2
       with:
@@ -44,6 +44,7 @@ jobs:
       run: |
         pip install pylint pytest black
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        pip install --upgrade mlir-snapshot==${{ env.MLIR_VERSION }} -f https://github.com/stellaraccident/mlir-py-release/releases
 
     - name: Check formatting (black)
       run: black --diff --check .

@@ -160,7 +160,7 @@ def mlp(
     ) = pmap(
         device_var=d_dp,
         fn=lambda (xi_dp: Tensor[(B/N, F), d_dp]), (wAi_dp: Tensor[(F, H), d_dp]),
-              (wBi_dp: Tensor[(H, C), d_dp]): {
+                  (wBi_dp: Tensor[(H, C), d_dp]): {
             xs_hp = broadcast(xi_dp, devices=[?..?])
             wAs_hp = scatter(wAi_dp, dim=1, devices=[?..?])
             wBs_hp = scatter(wBi_dp, dim=1, devices=[?..?])
@@ -197,7 +197,8 @@ def mlp(
         yis_hp: Tuple[Tensor(B, C), ?], ..., Tensor[Tensor(B, C), ?]]
     ) = pmap(
         device_var=d_hp,
-        fn=lambda (xi_hp: Tensor[(B, F), d_hp]), (wA_hp: Tensor[(F, H/N), d_hp]), (wB_hp: Tensor[(H/N, C), d_hp]): {
+        fn=lambda (xi_hp: Tensor[(B, F), d_hp]), (wA_hp: Tensor[(F, H/N), d_hp]),
+                  (wB_hp: Tensor[(H/N, C), d_hp]): {
             xs_dp: Tuple[Tensor[(B/N, F), 1], ..., Tensor[(B/N, F), N]] = scatter(xi_hp, dim=0, devices=[?..?])
             wAs_dp: Tuple[Tensor[(F, H/N), 1], ..., Tensor[(F, H/H), N]] = broadcast(wA_hp, devices=[?..?])
             wBs_dp: Tuple[Tensor[(H/N, C), 1], ..., Tensor[(H/N, C), N]] = broadcast(wB_hp, devices=[?..?])
@@ -205,7 +206,8 @@ def mlp(
                 yis_dp: Tuple[Tensor[(B/N, C), ?], ..., Tensor[(B/N, C), ?]],
             ) = pmap(
                 device_var=d_dp,
-                fn=lambda (xi_dp: Tensor[(B/N, F), d_dp]), (wAi_dp: Tensor[(F, H/N), d_dp]), (wBi_dp: Tensor[(H/N, C), d_dp]): {
+                fn=lambda (xi_dp: Tensor[(B/N, F), d_dp]), (wAi_dp: Tensor[(F, H/N), d_dp]),
+                          (wBi_dp: Tensor[(H/N, C), d_dp]): {
                     ai_dp: Tensor[(B/N, H/N), d_dp] = MatMul(xi, wAi)
                     yi_dp: Tensor[(B/N, C), d_dp] = MatMul(ai, wBi)
                     return yi_dp
@@ -219,4 +221,40 @@ def mlp(
     )
     y_hp: Tensor[(B, C), ?] = allreduce(yis_hp)
     return y_hp
+```
+
+### Data parallelism over pipeline parallelism
+```Python
+def mlp(
+    wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 0], x: Tensor[(B, F), 0]
+):
+    xs: Tuple[Tensor[(B/N, F), 1], ..., Tensor[(B/N, F), N]] = scatter(x, dim=0, devices=[1..N])
+    wAs: Tuple[Tensor[(F, H), 1], ..., Tensor[(F, H), N]] = broadcast(wA, devices=[1..N])
+    wBs: Tuple[Tensor[(H, C), 1], ..., Tensor[(H, C), N]] = broadcast(wB, devices=[1..N])
+    (
+        yis: Tuple[Tensor[(B/N, C), 1], ..., Tensor[(B/N, C), N]],
+    ) = pmap(
+        device_var=d,
+        fn=lambda (xi: Tensor[(B/N, F), d]), (wAi: Tensor[(F, H), d]), (wBi: Tensor[(H, C), d]): {
+            xis: Tuple[Tensor[(B/N/K, F), d], ..., Tensor[(B/N/K, F), d] = split(xi, K)
+            
+            # Timestep 0
+            ai_0: Tensor[(B/N/K, H), ?] = MatMul(xis[0], wAi)
+            ai_0@d?: Tensor[(B/N/K, H), ?] = send(xis[0], ?)
+            
+            # Timestep 1
+            ai_1: Tensor[(B/N/K, H), ?] = MatMul(xis[1], wAi)
+            ai_1@d?: Tensor[(B/N/K, H), ?] = send(xis[0], ?)
+            yi_0: Tensor[(B/N/K, C), ?] = MatMul(ai_0@d?, wBi)
+            
+            # Timestep 2
+            yi_1: Tensor[(B/N/K, C), ?] = MatMul(ai_1@d?, wBi)
+            
+            yi: Tensor[(B/N, C), ?] = concat((yi_0, yi_1), dim=0) 
+            return yi
+        },
+        (xs, wAs, wBs)
+    )
+    y: Tensor[(B, C), 0] = gather(yis, dim=0, device=0)
+    return y
 ```

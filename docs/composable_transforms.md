@@ -265,7 +265,7 @@ def mlp(
 def mlp(
     wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 0], x: Tensor[(B, F), 0]
 ):
-    xs: Tuple[Tensor[(B/N, F), ?], ..., Tensor[(B, F), ?]] = broadcast(x, devices=[?..?])
+    xs: Tuple[Tensor[(B, F), ?], ..., Tensor[(B, F), ?]] = broadcast(x, devices=[?..?])
     wAs: Tuple[Tensor[(F, H/N), ?], ..., Tensor[(F, H/N), N?]] = scatter(wA, dim=1, devices=[?..?])
     wBs: Tuple[Tensor[(H/N, C), ?], ..., Tensor[(H/N, C), N]] = broadcast(wB, dim=0, devices=[?..?])
     (

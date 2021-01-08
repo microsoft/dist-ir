@@ -108,7 +108,7 @@ def mlp(
     )
     as: Tuple[Tensor[(B, H), 1], ..., Tensor[(B, H), N]] = allgather(ais, dim=0)
     (
-        yis: Tuple[Tensor[(B, H/N), 1], ..., Tensor[(B, H/N), N]],
+        yis: Tuple[Tensor[(B, C/N), 1], ..., Tensor[(B, C/N), N]],
     ) = pmap(
         device_var=d,
         fn=lambda (ai: Tensor[(B, H), d]), (wBi: Tensor[(H, C/N), d])): {
@@ -128,7 +128,7 @@ def mlp(
 ):
     xs: Tuple[Tensor[(B, F), 1], ..., Tensor[(B, F), N]] = broadcast(x, devices=[1..N])
     wAs: Tuple[Tensor[(F, H/N), 1], ..., Tensor[(F, H/N), N]] = scatter(wA, dim=1, devices=[1..N])
-    wBs: Tuple[Tensor[(H, C/N), 1], ..., Tensor[(H, C/N), N]] = broadcast(wB, dim=1, devices=[1..N])
+    wBs: Tuple[Tensor[(H, C), 1], ..., Tensor[(H, C), N]] = broadcast(wB, devices=[1..N])
     (
         ais: Tuple[Tensor[(B, H/N), 1], ..., Tensor[(B, H/N), N]],
     ) = pmap(
@@ -141,7 +141,7 @@ def mlp(
     )
     as: Tuple[Tensor[(B, H), 1], ..., Tensor[(B, H), N]] = allgather(ais, dim=1)
     (
-        yis: Tuple[Tensor[(B/N, H), 1], ..., Tensor[(B/N, H), N]],
+        yis: Tuple[Tensor[(B/N, C), 1], ..., Tensor[(B/N, C), N]],
     ) = pmap(
         device_var=d,
         fn=lambda (ai: Tensor[(B/N, H), d]), (wBi: Tensor[(H, C), d])): {

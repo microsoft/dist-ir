@@ -228,16 +228,17 @@ def mlp(
 def mlp(
     wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 0], x: Tensor[(B, F), 0]
 ):
-    xs: Tuple[Tensor[(B/N, F), 1], ..., Tensor[(B/N, F), N]] = scatter(x, dim=0, devices=[1..N])
-    wAs: Tuple[Tensor[(F, H), 1], ..., Tensor[(F, H), N]] = broadcast(wA, devices=[1..N])
-    wBs: Tuple[Tensor[(H, C), 1], ..., Tensor[(H, C), N]] = broadcast(wB, devices=[1..N])
+    xs: Tuple[Tensor[(B/N, F), 1], ..., Tensor[(B/N, F), N]] = scatter(x, dim=0, devices=[?..?])
+    wAs: Tuple[Tensor[(F, H), 1], ..., Tensor[(F, H), N]] = broadcast(wA, devices=[?..?])
+    wBs: Tuple[Tensor[(H, C), 1], ..., Tensor[(H, C), N]] = broadcast(wB, devices=[?..?])
     (
-        yis: Tuple[Tensor[(B/N, C), 1], ..., Tensor[(B/N, C), N]],
+        yis: Tuple[Tensor[(B/N, C), ?], ..., Tensor[(B/N, C), ?]],
     ) = pmap(
         device_var=d,
         fn=lambda (xi: Tensor[(B/N, F), d]), (wAi: Tensor[(F, H), d]), (wBi: Tensor[(H, C), d]): {
             xis: Tuple[Tensor[(B/N/K, F), d], ..., Tensor[(B/N/K, F), d] = split(xi, K)
             
+            # NOTE: Assume K = 2
             # Timestep 0
             ai_0: Tensor[(B/N/K, H), ?] = MatMul(xis[0], wAi)
             ai_0@d?: Tensor[(B/N/K, H), ?] = send(xis[0], ?)
@@ -255,6 +256,43 @@ def mlp(
         },
         (xs, wAs, wBs)
     )
-    y: Tensor[(B, C), 0] = gather(yis, dim=0, device=0)
+    y: Tensor[(B, C), ?] = gather(yis, dim=0, device=?)
+    return y
+```
+
+### Horizontal parallelism over pipeline parallelism
+```Python
+def mlp(
+    wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 0], x: Tensor[(B, F), 0]
+):
+    xs: Tuple[Tensor[(B/N, F), ?], ..., Tensor[(B, F), ?]] = broadcast(x, devices=[?..?])
+    wAs: Tuple[Tensor[(F, H/N), ?], ..., Tensor[(F, H/N), N?]] = scatter(wA, dim=1, devices=[?..?])
+    wBs: Tuple[Tensor[(H/N, C), ?], ..., Tensor[(H/N, C), N]] = broadcast(wB, dim=0, devices=[?..?])
+    (
+        yis: Tuple[Tensor[(B, C), ?], ..., Tensor[(B, C), ?]],
+    ) = pmap(
+        device_var=d,
+        fn=lambda (xi: Tensor[(B, F), d]), (wAi: Tensor[(F, H/N), d]), (wBi: Tensor[(H/N, C), d]): {
+            xis: Tuple[Tensor[(B/K, F), d], ..., Tensor[(B/K, F), d] = split(xi, K)
+            
+            # NOTE: Assume K = 2
+            # Timestep 0
+            ai_0: Tensor[(B/K, H/N), ?] = MatMul(xis[0], wAi)
+            ai_0@d?: Tensor[(B/K, H/N), ?] = send(xis[0], ?)
+            
+            # Timestep 1
+            ai_1: Tensor[(B/K, H/N), ?] = MatMul(xis[1], wAi)
+            ai_1@d?: Tensor[(B/K, H/N), ?] = send(xis[0], ?)
+            yi_0: Tensor[(B/K, C), ?] = MatMul(ai_0@d?, wBi)
+            
+            # Timestep 2
+            yi_1: Tensor[(B/K, C), ?] = MatMul(ai_1@d?, wBi)
+            
+            yi: Tensor[(B, C), ?] = concat((yi_0, yi_1), dim=0) 
+            return yi
+        },
+        (xs, wAs, wBs)
+    )
+    y: Tensor[(B, C), ?] = allreduce(yis)
     return y
 ```

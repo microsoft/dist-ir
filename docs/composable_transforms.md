@@ -1,4 +1,8 @@
-﻿### Original function:
+# Composable Transformation Examples
+
+This doc presents examples exploring the joint space of D/H/P parallelism for a simple 2-layer toy model.
+
+### Original function:
 ```Python
 def mlp(
     wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 0], x: Tensor[(B, F), 0]
@@ -7,6 +11,8 @@ def mlp(
     y: Tensor[(B, C), 0] = MatMul(a, wB)
     return y
 ```
+
+## Single parallelism style examples
 
 ### Data parallelism:
 ```Python
@@ -80,6 +86,8 @@ def mlp(
     return y
 ```
 
+## Sequentially composed parallelism examples 
+
 ### Data parallelism followed by horizontal parallelism:
 ```Python
 def mlp(
@@ -145,6 +153,8 @@ def mlp(
     y: Tensor[(B, C), 0] = gather(yis, dim=0, device=0)
     return y
 ```
+
+## Recursively composed parallelism examples 
 
 ### Data parallelism over horizontal parallelism:
 ```Python

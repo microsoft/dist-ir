@@ -139,7 +139,8 @@ def mlp(
         },
         (xs, wAs)
     )
-    as: Tuple[Tensor[(B, H), 1], ..., Tensor[(B, H), N]] = allgather(ais, dim=1)
+    a: Tensor[(B, H), 0] = gather(ais, dim=1, device=0)
+    as: Tuple[Tensor[(B/N, H), 1], ..., Tensor[(B/N, H), N]] = scatter(a, dim=1, devices=[1..N])
     (
         yis: Tuple[Tensor[(B/N, C), 1], ..., Tensor[(B/N, C), N]],
     ) = pmap(

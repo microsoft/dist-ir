@@ -15,6 +15,7 @@ class OpRegisterEntry:
 
 OpRegister = {
     "Add": OpRegisterEntry(num_inputs=2, num_outputs=1),
+    "Allgather": OpRegisterEntry(num_inputs=1, num_outputs=1),
     "Allreduce": OpRegisterEntry(num_inputs=1, num_outputs=1),
     "Broadcast": OpRegisterEntry(num_inputs=1, num_outputs=1),
     "BroadcastGradientArgs": OpRegisterEntry(num_inputs=2, num_outputs=2),

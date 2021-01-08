@@ -35,6 +35,11 @@ def _infer_shapes_for_add(op, inputs, outputs):
     outputs[0].type = output_type
 
 
+def _infer_shapes_for_allgather(op, inputs, outputs):
+    # TODO
+    pass
+
+
 def _infer_shapes_for_allreduce(op, inputs, outputs):
     outputs[0].type = copy.deepcopy(inputs[0].type)
 
@@ -158,6 +163,7 @@ def _infer_shapes_for_split(op, inputs, outputs):
 
 ShapeInferenceRegister = {
     "Add": _infer_shapes_for_add,
+    "Allgather": _infer_shapes_for_allgather,
     "Allreduce": _infer_shapes_for_allreduce,
     "Broadcast": _infer_shapes_for_broadcast,
     "Concat": _infer_shapes_for_concat,

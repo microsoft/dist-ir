@@ -11,6 +11,12 @@ def allreduce(op, inputs):
     return [sum_ for i in range(len(inputs[0]))]
 
 
+def allgather(op, inputs):
+    dim = op.attributes["dim"]
+    output = np.concatenate(inputs[0], axis=dim)
+    return [output for i in range(len(inputs[0]))]
+
+
 def broadcast(op, inputs):
     return [inputs[0] for _ in range(len(op.attributes["devices"]))]
 
@@ -21,6 +27,11 @@ def concat(op, inputs):
     # return np.concatenate(inputs[0], axis=dim)
     dim = op.attributes["dim"]
     return np.concatenate(inputs, axis=dim)
+
+
+def gather(op, inputs):
+    dim = op.attributes["dim"]
+    return np.concatenate(inputs[0], axis=dim)
 
 
 def identity(op, inputs):
@@ -67,9 +78,10 @@ def split(op, inputs):
 NumPyRegister = {
     "Add": add,
     "Allreduce": allreduce,
+    "Allgather": allgather,
     "Broadcast": broadcast,
     "Concat": concat,
-    "Gather": concat,
+    "Gather": gather,
     "Loss": loss,
     "LossGrad": loss_grad,
     "MatMul": matmul,

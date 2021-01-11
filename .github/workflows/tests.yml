@@ -13,7 +13,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      MLIR_VERSION: 20210104.22
+      MLIR_VERSION: 20210111.38
       PY_VERSION: 3.8
     steps:
     - uses: actions/checkout@v2

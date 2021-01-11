@@ -1,9 +1,11 @@
 from dataclasses import dataclass, field, InitVar
-from frozendict import frozendict
 from typing import Any, Dict, List, Tuple
+
+from frozendict import frozendict
 
 from .op_register import OpRegister
 from .value import Value
+from .type import Type
 
 
 @dataclass(frozen=True)
@@ -11,16 +13,15 @@ class Op:
     op_type: str
     name: str = ""
     in_edges: Tuple[Value] = field(default_factory=tuple)
-    attributes: Dict[str, Any] = field(
-        default_factory=frozendict
-    )  # TODO: Replace with frozendict
+    attributes: Dict[str, Any] = field(default_factory=frozendict)
     subfunctions: Tuple["Function"] = field(default_factory=tuple)
     out_edges: Tuple[Value] = field(init=False)
 
-    # This is not a field, just a parameter to init and post_init:
+    # These are not fields, just parameters to init and post_init:
     output_names: InitVar[Tuple[str]] = None
+    output_types: InitVar[Tuple[Type]] = None
 
-    def __post_init__(self, output_names):
+    def __post_init__(self, output_names, output_types):
         if self.op_type == "Pmap":
             # Handle pmap specially
             assert len(self.subfunctions) == 1
@@ -39,10 +40,17 @@ class Op:
             # Number of outputs is given by OpRegister
             num_outputs = OpRegister[self.op_type].num_outputs
 
-        # Create the correct number of output values with type=None
+        # Create the correct number of output values with appropriate types
         if output_names is None:
             output_names = [f"{self.name}_out_{i}" for i in range(num_outputs)]
         else:
             assert len(output_names) == num_outputs
-        out_edges = tuple(Value(out_name, None) for out_name in output_names)
+        if output_types is None:
+            output_types = [None for i in range(num_outputs)]
+        else:
+            assert len(output_types) == num_outputs
+        out_edges = tuple(
+            Value(out_name, out_type)
+            for out_name, out_type in zip(output_names, output_types)
+        )
         object.__setattr__(self, "out_edges", out_edges)  # Can't assign to frozen field

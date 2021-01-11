@@ -70,13 +70,16 @@ def infer_types(function: Function, inputs: List[Value]) -> Function:
         input_types = tuple(v.type for v in typed_inputs)
 
         # Infer types of outputs and create output values
-        out_types = TypePropRegister[op.op_type](op, *input_types)
-        if not isinstance(out_types, tuple):
-            assert isinstance(out_types, Type)
-            out_types = (out_types,)
-
-        # TODO Recursively handle subfunctions
-        subfunctions = []
+        if op.op_type == "Pmap":
+            # TODO handle Pmaps by getting their input value types from the tuples
+            # they map over and then calling infer_types on the subfunction
+            raise NotImplementedError
+        else:
+            out_types = TypePropRegister[op.op_type](op, *input_types)
+            if not isinstance(out_types, tuple):
+                assert isinstance(out_types, Type)
+                out_types = (out_types,)
+            subfunctions = []
 
         new_op = Op(
             op.op_type,
@@ -84,7 +87,7 @@ def infer_types(function: Function, inputs: List[Value]) -> Function:
             typed_inputs,
             op.attributes,
             subfunctions,
-            op.output_names,
+            tuple(v.name for v in op.out_edges),
             out_types,
         )
         new_function.ops.append(new_op)

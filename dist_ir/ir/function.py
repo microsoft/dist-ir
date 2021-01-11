@@ -1,9 +1,10 @@
 from __future__ import annotations
 from collections import OrderedDict, defaultdict
-from dataclasses import dataclass, field
 import copy
-from frozendict import frozendict
+from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
+
+from frozendict import frozendict
 
 from .op import Op
 from .value import Value
@@ -171,7 +172,7 @@ class FunctionMaker:
           inputs: The input values for this op.
           attributes: Any op-specific attributes.
           subfunctions: Any subfunctions this op is wrapping.
-          output_names: An optinal list of output value names.
+          output_names: An optional list of output value names.
 
         Returns:
           The outputs of the newly created op.

@@ -3,6 +3,7 @@ from dist_ir.ir import Topology
 from dist_ir.ir.type import Float
 from dist_ir.ir.type import Tensor
 from dist_ir.executor.cost_inference import CostModel
+from dist_ir.executor.type_inference import infer_types
 from dist_ir.executor import DistributedSimulator
 from dist_ir.transforms import DataParallelTransform
 
@@ -17,7 +18,9 @@ def test_single_device():
     b = function.add_input_value("b", Tensor(dtype=Float(), shape=(4, 4), device=d))
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b])
     function = function.finalize()
+    function = infer_types(function, [a, b])
     device_speeds = {"gpu": 1.0e13}
+    # TODO shouldn't device_speeds be set in the topology?
     cost_model = CostModel(topology, device_speeds)
     simulator = DistributedSimulator(cost_model)
     simulator_state = simulator.simulate(function)
@@ -40,6 +43,7 @@ def test_data_parallel():
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
     y = function.add_op("MatMul", "MatMul1", inputs=[x, c], output_names=["y"])
     function = function.finalize()
+    function = infer_types(function, [a, b, c])
     transform = DataParallelTransform(
         batch_dims={"a": 0},
         reduction_params={"y": {"op_type": "Gather", "dim": 0, "device": d0}},
@@ -73,6 +77,7 @@ def test_chrome_trace():
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
     y = function.add_op("MatMul", "MatMul1", inputs=[x, c], output_names=["y"])
     function = function.finalize()
+    function = infer_types(function, [a, b, c])
 
     device_speeds = {"gpu": 1.0e13}
     cost_model = CostModel(topology, device_speeds)

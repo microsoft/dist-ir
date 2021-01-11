@@ -16,8 +16,19 @@ def _elementwise_tensor_op_prop_fn(op, x, y):
     return x
 
 
+def _matmul_prop_fn(op, x, y):
+    assert isinstance(x, Tensor) and isinstance(y, Tensor)
+    assert x.dtype == y.dtype and x.device == y.device
+    assert x.shape[1] == y.shape[0]
+    return Tensor(dtype=x.dtype, shape=(x.shape[0], y.shape[1]), device=x.device)
+
+
+# TODO migrate the rest of the prop fns from shape_inference.py
+
+
 TypePropRegister = {
     "Add": _elementwise_tensor_op_prop_fn,
+    "MatMul": _matmul_prop_fn,
 }
 """
 Type propagation functions:
@@ -67,16 +78,20 @@ def infer_types(function: Function, inputs: List[Value]) -> Function:
         # TODO Recursively handle subfunctions
         subfunctions = []
 
-        new_function.ops.append(
-            Op(
-                op.op_type,
-                op.name,
-                typed_inputs,
-                op.attributes,
-                subfunctions,
-                op.output_names,
-                out_types,
-            )
+        new_op = Op(
+            op.op_type,
+            op.name,
+            typed_inputs,
+            op.attributes,
+            subfunctions,
+            op.output_names,
+            out_types,
         )
+        new_function.ops.append(new_op)
+
+        # Add op's outputs to value_map
+        for old_out, out in zip(op.out_edges, new_op.out_edges):
+            assert_is_typed(out)
+            value_map[old_out] = out
 
     return new_function.finalize()

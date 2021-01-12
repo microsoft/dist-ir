@@ -23,6 +23,11 @@ def concat(op, inputs):
     return np.concatenate(inputs, axis=dim)
 
 
+def gather(op, inputs):
+    dim = op.attributes["dim"]
+    return np.concatenate(inputs[0], axis=dim)
+
+
 def identity(op, inputs):
     return inputs[0]
 
@@ -69,7 +74,7 @@ NumPyRegister = {
     "Allreduce": allreduce,
     "Broadcast": broadcast,
     "Concat": concat,
-    "Gather": concat,
+    "Gather": gather,
     "Loss": loss,
     "LossGrad": loss_grad,
     "MatMul": matmul,

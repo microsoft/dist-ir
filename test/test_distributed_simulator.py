@@ -45,8 +45,10 @@ def test_data_parallel():
     function = function.finalize()
     function = infer_types(function, [a, b, c])
     transform = DataParallelTransform(
-        batch_dims={"a": 0},
-        reduction_params={"y": {"op_type": "Gather", "dim": 0, "device": d0}},
+        batch_dims={function.inputs[0]: 0},
+        reduction_params={
+            function.outputs[0]: {"op_type": "Gather", "dim": 0, "device": d0}
+        },
         devices=[d0, d1],
     )
     transformed_function = transform.apply(function)
@@ -84,8 +86,10 @@ def test_chrome_trace():
     simulator = DistributedSimulator(cost_model)
 
     transform = DataParallelTransform(
-        batch_dims={"a": 0},
-        reduction_params={"y": {"op_type": "Gather", "dim": 0, "device": d0}},
+        batch_dims={function.inputs[0]: 0},
+        reduction_params={
+            function.outputs[0]: {"op_type": "Gather", "dim": 0, "device": d0}
+        },
         devices=[d0, d1],
     )
     transformed_function = transform.apply(function)

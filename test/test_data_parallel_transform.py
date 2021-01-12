@@ -15,10 +15,12 @@ def test_single_variable_partition():
     a = function.add_input_value("a", Tensor(Float(), (4, 4)))
     b = function.add_input_value("b", Tensor(Float(), (4, 4)))
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
-    function.finalize()
+    function = function.finalize()
     transform = DataParallelTransform(
-        batch_dims={"a": 0},
-        reduction_params={"x": {"op_type": "Gather", "dim": 0, "device": d0}},
+        batch_dims={function.inputs[0]: 0},
+        reduction_params={
+            function.outputs[0]: {"op_type": "Gather", "dim": 0, "device": d0}
+        },
         devices=[d0, d1],
     )
     transformed_function = transform.apply(function)
@@ -33,11 +35,35 @@ def test_single_variable_partition():
     print("-" * 88)
     print(transformed_function)
 
-    # TODO is this really testing something useful?
-    # assert transformed_function.is_op("Scatter/a")
-    # assert transformed_function.is_op("Broadcast/b")
-    # assert transformed_function.is_op("Pmap_#0")
-    # assert transformed_function.is_op("Gather/x")
+    ex = SequentialExecutor("numpy")
+    _a = np.ones((4, 4))
+    _b = np.ones((4, 4))
+    orig_res = ex.compute(function, {function.inputs[0]: _a, function.inputs[1]: _b})
+
+    transformed_res = ex.compute(
+        transformed_function,
+        {transformed_function.inputs[0]: _a, transformed_function.inputs[1]: _b},
+    )
+
+    print("-" * 88)
+    print("Original function results")
+    print("-" * 88)
+    for k, v in orig_res.items():
+        print(k)
+        print(v)
+        print()
+    print()
+    print("-" * 88)
+    print("Transformed function results")
+    print("-" * 88)
+    for k, v in transformed_res.items():
+        print(k)
+        print(v)
+        print()
+
+    np.testing.assert_array_almost_equal(
+        orig_res[function.outputs[0]], transformed_res[transformed_function.outputs[0]]
+    )
 
 
 def test_double_variable_partition():
@@ -49,12 +75,14 @@ def test_double_variable_partition():
     a = function.add_input_value("a", Tensor(Float(), (4, 4)))
     b = function.add_input_value("b", Tensor(Float(), (4, 4)))
     c = function.add_input_value("c", Tensor(Float(), (4, 4)))
-    x = function.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
-    y = function.add_op("MatMul", "MatMul1", inputs=[x, c], output_names=["y"])
-    function.finalize()
+    x = function.add_op("MatMul", "MatMul", inputs=[a, b], output_names=["x"])
+    y = function.add_op("Add", "Add", inputs=[x, c], output_names=["y"])
+    function = function.finalize()
     transform = DataParallelTransform(
-        batch_dims={"a": 0, "c": 0},
-        reduction_params={"y": {"op_type": "Gather", "dim": 0, "device": d0}},
+        batch_dims={function.inputs[0]: 0, function.inputs[2]: 0},
+        reduction_params={
+            function.outputs[0]: {"op_type": "Gather", "dim": 0, "device": d0}
+        },
         devices=[d0, d1],
     )
     transformed_function = transform.apply(function)
@@ -69,11 +97,43 @@ def test_double_variable_partition():
     print("-" * 88)
     print(transformed_function)
 
-    # assert transformed_function.is_op("Scatter/a")
-    # assert transformed_function.is_op("Broadcast/b")
-    # assert transformed_function.is_op("Scatter/c")
-    # assert transformed_function.is_op("Pmap_#0")
-    # assert transformed_function.is_op("Gather/y")
+    ex = SequentialExecutor("numpy")
+    _a = np.ones((4, 4))
+    _b = np.ones((4, 4))
+    _c = np.ones((4, 4))
+    orig_res = ex.compute(
+        function,
+        {function.inputs[0]: _a, function.inputs[1]: _b, function.inputs[2]: _c},
+    )
+
+    transformed_res = ex.compute(
+        transformed_function,
+        {
+            transformed_function.inputs[0]: _a,
+            transformed_function.inputs[1]: _b,
+            transformed_function.inputs[2]: _c,
+        },
+    )
+
+    print("-" * 88)
+    print("Original function results")
+    print("-" * 88)
+    for k, v in orig_res.items():
+        print(k)
+        print(v)
+        print()
+    print()
+    print("-" * 88)
+    print("Transformed function results")
+    print("-" * 88)
+    for k, v in transformed_res.items():
+        print(k)
+        print(v)
+        print()
+
+    np.testing.assert_array_almost_equal(
+        orig_res[function.outputs[0]], transformed_res[transformed_function.outputs[0]]
+    )
 
 
 def test_mnist():
@@ -105,15 +165,14 @@ def test_mnist():
     dx, dwA = function.add_op(
         "MatMulGrad", "MatMul0Grad", inputs=[x, wA, da], output_names=["dx", "dwA"]
     )
-    function.set_outputs([l, dwA, dwB])
     function = function.finalize()
     transform = DataParallelTransform(
-        batch_dims={"x": 0, "z": 0},
+        batch_dims={function.inputs[0]: 0, function.inputs[1]: 0},
         reduction_params={
-            "l": {"op_type": "Gather", "dim": 0, "device": d0},
-            "dx": {"op_type": "Gather", "dim": 0, "device": d0},
-            "dwA": {"op_type": "Allreduce"},
-            "dwB": {"op_type": "Allreduce"},
+            function.outputs[0]: {"op_type": "Gather", "dim": 0, "device": d0},
+            function.outputs[1]: {"op_type": "Allreduce"},
+            function.outputs[2]: {"op_type": "Gather", "dim": 0, "device": d0},
+            function.outputs[3]: {"op_type": "Allreduce"},
         },
         devices=[d0, d1],
     )
@@ -136,7 +195,12 @@ def test_mnist():
     _wB = np.ones((2, 1))
     orig_res = ex.compute(
         function,
-        {x: _x, z: _z, wA: _wA, wB: _wB},
+        {
+            function.inputs[0]: _x,
+            function.inputs[1]: _z,
+            function.inputs[2]: _wA,
+            function.inputs[3]: _wB,
+        },
     )
 
     transformed_res = ex.compute(
@@ -165,11 +229,18 @@ def test_mnist():
         print(v)
         print()
 
-    (ls, dwAs, dwBs) = transformed_function.outputs
-    assert np.array_equal(orig_res[l], np.concatenate(transformed_res[ls], axis=0))
-    assert np.array_equal(orig_res[dwA], transformed_res[dwAs][0])
-    assert np.array_equal(orig_res[dwB], transformed_res[dwBs][0])
-
-
-if __name__ == "__main__":
-    test_mnist()
+    np.testing.assert_array_almost_equal(
+        orig_res[function.outputs[0]], transformed_res[transformed_function.outputs[0]]
+    )
+    np.testing.assert_array_almost_equal(
+        orig_res[function.outputs[1]],
+        transformed_res[transformed_function.outputs[1]][0],
+    )
+    np.testing.assert_array_almost_equal(
+        orig_res[function.outputs[2]],
+        transformed_res[transformed_function.outputs[2]],
+    )
+    np.testing.assert_array_almost_equal(
+        orig_res[function.outputs[3]],
+        transformed_res[transformed_function.outputs[3]][0],
+    )

@@ -40,14 +40,14 @@ class DataParallelTransform:
             v = transformed_function.add_input_value(
                 input_value.name, copy.deepcopy(input_value.type)
             )
-            if input_value.name in self._batch_dims:
+            if input_value in self._batch_dims:
                 vs = transformed_function.add_op(
                     "Scatter",
                     name=f"Scatter/{v.name}",
                     inputs=[v],
                     attributes={
                         "devices": self._devices,
-                        "dim": self._batch_dims[input_value.name],
+                        "dim": self._batch_dims[input_value],
                     },
                     output_names=[f"{v.name}s"],
                 )
@@ -83,7 +83,7 @@ class DataParallelTransform:
         # TODO: Add explicit Send ops if the destination device is not one of the
         #       source devices.
         for i, output_value in enumerate(output_values):
-            reduction_op_type = self._reduction_params[output_value.name]["op_type"]
+            reduction_op_type = self._reduction_params[output_value]["op_type"]
             if reduction_op_type == "Allreduce":
                 transformed_function.add_op(
                     "Allreduce",
@@ -92,14 +92,14 @@ class DataParallelTransform:
                     output_names=[f"{output_value.name}s"],
                 )
             elif reduction_op_type == "Gather":
-                dim = self._reduction_params[output_value.name]["dim"]
-                device = self._reduction_params[output_value.name]["device"]
+                dim = self._reduction_params[output_value]["dim"]
+                device = self._reduction_params[output_value]["device"]
                 transformed_function.add_op(
                     "Gather",
                     name=f"Gather/{output_value.name}",
                     inputs=[pmap_output_values[i]],
                     attributes={"dim": dim, "device": device},
-                    output_names=[f"{output_value.name}s"],
+                    output_names=[f"{output_value.name}"],
                 )
             else:
                 raise ValueError(

@@ -21,12 +21,12 @@ def test_mnist_fw_bw():
     ]
     transform = PipelineParallelTransform(
         num_microbatches=2,
-        batch_dims={"x": 0, "z": 0},
+        batch_dims={function.inputs[0]: 0, function.inputs[1]: 0},
         reduction_params={
-            "dwB": {"op_type": "Add"},
-            "dwA": {"op_type": "Add"},
-            "l": {"op_type": "Concat", "dim": 0},
-            "dx": {"op_type": "Concat", "dim": 0},
+            function.outputs[0]: {"op_type": "Concat", "dim": 0},  # l
+            function.outputs[1]: {"op_type": "Add"},  # dwB
+            function.outputs[2]: {"op_type": "Concat", "dim": 0},  # dx
+            function.outputs[3]: {"op_type": "Add"},  # dwA
         },
         partition_map=partition_map,
         schedule=schedule,

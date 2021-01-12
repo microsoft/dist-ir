@@ -47,12 +47,10 @@ class Op:
             assert len(output_names) == num_outputs
         if output_types is None:
             output_types = [None for i in range(num_outputs)]
-        else:
-            if len(output_types) != num_outputs:
-                raise ValueError(
-                    f"Op {self.name} has {num_outputs} outputs; {len(output_types)} expected"
-                )
-            assert len(output_types) == num_outputs
+        elif len(output_types) != num_outputs:
+            raise ValueError(
+                f"Op {self.name} has {num_outputs} outputs; {len(output_types)} expected"
+            )
         out_edges = tuple(
             Value(out_name, out_type)
             for out_name, out_type in zip(output_names, output_types)

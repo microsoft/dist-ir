@@ -172,9 +172,10 @@ def infer_types(function: Function, inputs: List[Value]) -> Function:
 
         # Infer types of outputs and create output values
         if op.op_type == "Pmap":
-            # TODO handle Pmaps by getting their input value types from the tuples
-            # they map over and then calling infer_types on the subfunction
-            raise NotImplementedError
+            # TODO: Propagate device variables here?
+            for inp in op.subfunctions[0].inputs:
+                assert_is_typed(inp)
+            subfunctions = [infer_types(op.subfunctions[0], op.subfunctions[0].inputs)]
         else:
             out_types = TypePropRegister[op.op_type](op, *input_types)
             if not isinstance(out_types, tuple):

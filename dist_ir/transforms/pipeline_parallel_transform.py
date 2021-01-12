@@ -72,7 +72,7 @@ class PipelineParallelTransform:
             # the same as the source device.
             input_device = input_value.type.device
             consumer_ops = function.get_consumers(input_value)
-            consumer_stages = utils.get_stages_from_op_names(
+            consumer_stages = utils.get_stages_from_ops(
                 self._op_to_stage_map, consumer_ops
             )
             consumer_devices = set([self._partition_map[c] for c in consumer_stages])
@@ -234,7 +234,7 @@ class PipelineParallelTransform:
                             # forward the output to the next stage if the next stage is located on
                             # a different device.
                             consumer_ops = function.get_consumers(orig_output)
-                            consumer_stages = utils.get_stages_from_op_names(
+                            consumer_stages = utils.get_stages_from_ops(
                                 self._op_to_stage_map, consumer_ops
                             )
                             consumer_devices = {

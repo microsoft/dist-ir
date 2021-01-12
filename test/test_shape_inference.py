@@ -1,7 +1,7 @@
 import pytest
 
-from dist_ir.ir import Device, FunctionMaker
-from dist_ir.executor.shape_inference import infer_shapes
+from dist_ir.ir import cpprint, Device, Function, FunctionMaker, Op, Value
+from dist_ir.executor.type_inference import infer_types
 from dist_ir.ir.type import Float, Tensor, TupleType
 
 
@@ -11,8 +11,9 @@ def test_add_valid():
     a = function.add_input_value("a", Tensor(Float(), (4, 4)))
     b = function.add_input_value("b", Tensor(Float(), (4, 4)))
     x = function.add_op("Add", "Add0", inputs=[a, b], output_names=["x"])
-    infer_shapes(function)
-    assert x.type.shape == (4, 4)
+    function = function.finalize()
+    typed_function = infer_types(function, [a, b])
+    assert typed_function.outputs[0].type.shape == (4, 4)
 
 
 def test_add_invalid():
@@ -21,29 +22,30 @@ def test_add_invalid():
     a = function.add_input_value("a", Tensor(Float(), (8, 4)))
     b = function.add_input_value("b", Tensor(Float(), (4, 2)))
     x = function.add_op("Add", "Add0", inputs=[a, b], output_names=["x"])
+    function = function.finalize()
     with pytest.raises(ValueError):
-        infer_shapes(function)
+        infer_types(function, [a, b])
 
 
 def test_allreduce():
-    function = FunctionMaker()
-
     d0 = Device(0, "gpu")
     d1 = Device(1, "gpu")
 
-    xis = function.add_input_value(
+    xis = Value(
         "xis",
         TupleType(
             (Tensor(Float(), (4, 4), device=d0), Tensor(Float(), (4, 4), device=d1))
         ),
     )
-    xs = function.add_op(
+    op1 = Op(
         "Allreduce",
         "Allreduces/xis",
-        inputs=[xis],
+        in_edges=[xis],
         output_names=["xs"],
     )
-    infer_shapes(function)
+    function = Function("foo", (op1,), (xis,), (op1.out_edges[0],))
+    function = infer_types(function, [xis])
+    xs = function.outputs[0]
 
     assert isinstance(xs.type, TupleType)
     for i, value_type in enumerate(xis.type.types):
@@ -65,7 +67,9 @@ def test_broadcast():
         attributes={"devices": [d0, d1]},
         output_names=["xs"],
     )
-    infer_shapes(function)
+    function = function.finalize()
+    function = infer_types(function, [x])
+    xs = function.outputs[0]
 
     assert isinstance(xs.type, TupleType)
     assert xs.type.types[0].shape == (4, 4)
@@ -80,8 +84,9 @@ def test_matmul_valid():
     a = function.add_input_value("a", Tensor(Float(), (8, 4)))
     b = function.add_input_value("b", Tensor(Float(), (4, 2)))
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
-    infer_shapes(function)
-    assert x.type.shape == (8, 2)
+    function = function.finalize()
+    function = infer_types(function, [a, b])
+    assert function.outputs[0].type.shape == (8, 2)
 
 
 def test_matmul_invalid():
@@ -90,8 +95,9 @@ def test_matmul_invalid():
     a = function.add_input_value("a", Tensor(Float(), (8, 8)))
     b = function.add_input_value("b", Tensor(Float(), (4, 2)))
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
+    function = function.finalize()
     with pytest.raises(ValueError):
-        infer_shapes(function)
+        function = infer_types(function, [a, b])
 
 
 def test_matmul_grad():
@@ -103,7 +109,9 @@ def test_matmul_grad():
     dx, dw = function.add_op(
         "MatMulGrad", "MatMulGrad0", inputs=[x, w, l], output_names=["dx", "dw"]
     )
-    infer_shapes(function)
+    function = function.finalize()
+    function = infer_types(function, [x, w, l])
+    dx, dw = function.outputs
     assert dx.type.shape == x.type.shape
     assert dw.type.shape == w.type.shape
 
@@ -134,29 +142,34 @@ def test_pmap():
     )
 
     subfunction = FunctionMaker()
-    # TODO: Add a check in shape inference to not overwrite if there is already a shape
-    # If there is an existing shape, validate that it is what we expect, otherwise throw error
-    x = subfunction.add_input_value("x", Tensor(Float(), (8, 4)))
-    wA = subfunction.add_input_value("wA", Tensor(Float(), (4, 2)))
-    wB = subfunction.add_input_value("wB", Tensor(Float(), (2, 1)))
+    x = subfunction.add_input_value("x", None)
+    wA = subfunction.add_input_value("wA", None)
+    wB = subfunction.add_input_value("wB", None)
     y = subfunction.add_op("MatMul", "MatMul0", inputs=[x, wA], output_names=["y"])
     z = subfunction.add_op("MatMul", "MatMul1", inputs=[y, wB], output_names=["z"])
-    subfunction.finalize()
+    subfunction = subfunction.finalize()
 
     zis = function.add_op(
         "Pmap",
         inputs=[xs, wAs, wBs],
-        attributes={"devices": [d0, d1]},
+        attributes={
+            "devices": [d0, d1],
+            "device_var": Device.get_new_device_variable(
+                "gpu"
+            ),  # TODO where best to do this?
+        },
         subfunctions=[subfunction],
         output_names=["zis"],
     )
 
-    infer_shapes(function)
-
-    print(function)
+    function = function.finalize()
+    cpprint(function)
+    function = infer_types(function, [xs, wAs, wBs])
+    cpprint(function)
 
     # TODO: Verify subfunction shapes and devices
 
+    zis = function.outputs[0]
     assert zis.type.types[0].shape == (8, 1)
     assert zis.type.types[0].device == d0
     assert zis.type.types[1].shape == (8, 1)
@@ -177,7 +190,9 @@ def test_scatter():
         attributes={"dim": 0, "devices": [d0, d1]},
         output_names=["xs"],
     )
-    infer_shapes(function)
+    function = function.finalize()
+    function = infer_types(function, [x])
+    xs = function.outputs[0]
 
     assert isinstance(xs.type, TupleType)
     assert xs.type.types[0].shape == (2, 4)

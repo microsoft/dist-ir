@@ -49,7 +49,8 @@ class Op:
             output_types = [None for i in range(num_outputs)]
         elif len(output_types) != num_outputs:
             raise ValueError(
-                f"Op {self.name} has {num_outputs} outputs; {len(output_types)} expected"
+                f"Op {self.name} has {len(output_types)} outputs; "
+                f"num_outputs expected"
             )
         outputs = tuple(
             Value(out_name, out_type)

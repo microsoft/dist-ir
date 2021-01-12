@@ -14,7 +14,7 @@ Type inference requires a register mapping ops to type propagation functions:
 
 from typing import Dict, List, Tuple
 
-from ..ir import Function, FunctionMaker, Op, Value
+from ..ir import Device, Function, FunctionMaker, Op, Value
 from ..ir.type import Type, Tensor, TupleType
 
 
@@ -59,9 +59,9 @@ def _concat_prop_fn(op, x, y):
     for i, (d0, d1) in enumerate(zip(x.shape, y.shape)):
         if not i != dim and d0 != d1:
             _raise_type_error(op, x, y)
-    output_shape = list(x.shape)
-    output.shape[dim] += y.shape[dim]
-    output_shape = tuple(output_shape)
+    output_shape = tuple(
+        n + (y.shape[i] if i == dim else 0) for i, n in enumerate(x.shape)
+    )
     return Tensor(dtype=x.dtype, shape=output_shape, device=x.device)
 
 
@@ -131,6 +131,9 @@ def _scatter_prop_fn(op, x):
     if not isinstance(x, Tensor):
         _raise_type_error(op, x)
     devices = op.attributes["devices"]
+    # Check devices is a list of distinct Devices
+    assert isinstance(devices, list) and all(isinstance(d, Device) for d in devices)
+    assert len(devices) == len(set(devices))
     dim = op.attributes["dim"]
     # TODO: Should we add another function to raise an attribute error?
     assert x.shape[dim] % len(devices) == 0

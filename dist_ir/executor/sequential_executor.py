@@ -79,9 +79,6 @@ class SequentialExecutor:
             # Garbage collect the fully consumed output tensors.
             to_free = []
             for out_edge in output_data:
-                # TODO don't use value names. They might not be unique in a function
-                # Use values and value equality instead.
-                # if consumers[output_name] == 0 and not function.is_output(output_name):
                 if consumers[out_edge] == 0 and not out_edge in function.outputs:
                     to_free.append(out_edge)
             for out_edge in to_free:

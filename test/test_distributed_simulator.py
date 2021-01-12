@@ -52,6 +52,9 @@ def test_data_parallel():
         devices=[d0, d1],
     )
     transformed_function = transform.apply(function)
+    transformed_function = infer_types(
+        transformed_function, transformed_function.inputs
+    )
 
     print(transformed_function)
     device_speeds = {"gpu": 1.0e13}
@@ -93,6 +96,9 @@ def test_chrome_trace():
         devices=[d0, d1],
     )
     transformed_function = transform.apply(function)
+    transformed_function = infer_types(
+        transformed_function, transformed_function.inputs
+    )
 
     simulation = simulator.simulate(transformed_function)
     simulation.dump_chrome_trace("test/trace.json")

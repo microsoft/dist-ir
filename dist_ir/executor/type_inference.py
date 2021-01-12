@@ -7,13 +7,56 @@ example inputs.
 from typing import Dict, List
 
 from ..ir import Function, FunctionMaker, Op, Value
-from ..ir.type import Type, Tensor
+from ..ir.type import Type, Tensor, TupleType
+
+
+def _allreduce_prop_fn(op, x):
+    assert isinstance(x, TupleType)
+    return x
+
+
+def _broadcast_prop_fn(op, x):
+    assert isinstance(x, Tensor)
+    devices = op.attributes["devices"]
+    types = []
+    for device in devices:
+        types.append(Tensor(dtype=x.dtype, shape=x.shape, device=device))
+    return TupleType(tuple(types))
+
+
+def _concat_prop_fn(op, x, y):
+    assert isinstance(x, Tensor) and isinstance(y, Tensor)
+    assert x.dtype == y.dtype and x.device == y.device
+    dim = op.attributes["dim"]
+    for i, (d0, d1) in enumerate(zip(x.shape, y.shape)):
+        assert i == dim or d0 == d1
+    output_shape = list(x.shape)
+    output.shape[dim] += y.shape[dim]
+    output_shape = tuple(output_shape)
+    return Tensor(dtype=x.dtype, shape=output_shape, device=x.device)
 
 
 def _elementwise_tensor_op_prop_fn(op, x, y):
     assert isinstance(x, Tensor) and isinstance(y, Tensor)
     assert x.dtype == y.dtype and x.shape == y.shape and x.device == y.device
     return x
+
+
+def _gather_prop_fn(op, x):
+    assert isinstance(x, TupleType)
+    dim = op.attributes["dim"]
+    device = op.attributes["device"]
+    output_shape = list(x.types[0].shape)
+    for i in range(1, len(x.types)):
+        assert len(x.types[i].shape) == len(x.types[0].shape)
+        assert x.types[i].dtype == x.types[0].dtype
+        for j in range(len(x.types[i].shape)):
+            if j == dim:
+                output_shape[j] += x.types[i].shape[j]
+            else:
+                assert x.types[i].shape[j] == x.types[0].shape[j]
+    output_shape = tuple(output_shape)
+    return Tensor(dtype=x.types[0].dtype, shape=output_shape, device=device)
 
 
 def _matmul_prop_fn(op, x, y):
@@ -23,12 +66,70 @@ def _matmul_prop_fn(op, x, y):
     return Tensor(dtype=x.dtype, shape=(x.shape[0], y.shape[1]), device=x.device)
 
 
-# TODO migrate the rest of the prop fns from shape_inference.py
+def _matmul_grad_prop_fn(op, x, y, z):
+    assert isinstance(x, Tensor) and isinstance(y, Tensor) and isinstance(z, Tensor)
+    assert x.dtype == y.dtype and x.dtype == z.dtype
+    assert x.device == y.device and x.device == z.device
+    return (x, y)
+
+
+def _scatter_prop_fn(op, x):
+    assert isinstance(x, Tensor)
+    devices = op.attributes["devices"]
+    dim = op.attributes["dim"]
+    assert x.shape[dim] % len(devices) == 0
+    output_shape = list(x.shape)
+    output_shape[dim] //= len(devices)
+    output_shape = tuple(output_shape)
+    types = []
+    for device in devices:
+        types.append(Tensor(dtype=x.dtype, shape=output_shape, device=device))
+    return TupleType(tuple(types))
+
+
+def _select_prop_fn(op, x):
+    assert isinstance(x, TupleType)
+    dim = op.attributes["dim"]
+    assert isinstance(x.types[dim], Tensor)
+    return x.types[dim]
+
+
+def _send_prop_fn(op, x):
+    assert isinstance(x, Tensor)
+    device = op.attributes["device"]
+    return Tensor(dtype=x.dtype, shape=x.shape, device=device)
+
+
+def _split_prop_fn(op, x):
+    assert isinstance(x, Tensor)
+    num_splits = op.attributes["num_splits"]
+    split_dim = op.attributes["dim"]
+    output_shape = list(x.shape)
+    assert output_shape[split_dim] % num_splits == 0
+    output_shape[split_dim] //= num_splits
+    output_shape = tuple(output_shape)
+    types = [
+        Tensor(dtype=x.dtype, shape=output_shape, device=x.device)
+        for i in range(num_splits)
+    ]
+    return TupleType(tuple(types))
 
 
 TypePropRegister = {
     "Add": _elementwise_tensor_op_prop_fn,
+    # "Allgather": TODO,
+    "Allreduce": _allreduce_prop_fn,
+    "Broadcast": _broadcast_prop_fn,
+    "Concat": _concat_prop_fn,
+    "Gather": _gather_prop_fn,
+    "Loss": _elementwise_tensor_op_prop_fn,
+    "LossGrad": _elementwise_tensor_op_prop_fn,
     "MatMul": _matmul_prop_fn,
+    "MatMulGrad": _matmul_grad_prop_fn,
+    "Scatter": _scatter_prop_fn,
+    "Select": _select_prop_fn,
+    "Send": _send_prop_fn,
+    "Split": _split_prop_fn,
 }
 """
 Type propagation functions:

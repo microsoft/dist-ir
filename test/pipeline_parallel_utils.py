@@ -36,7 +36,6 @@ def construct_function_and_partition_map():
     _, dwA = function.add_op(
         "MatMulGrad", "MatMul0Grad", inputs=[x, wA, da], output_names=["dx", "dwA"]
     )
-    function.set_outputs([l, dwA, dwB])
     function = function.finalize()
 
     stages = [

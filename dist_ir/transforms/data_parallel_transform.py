@@ -107,5 +107,4 @@ class DataParallelTransform:
                     f"output value {output_value}"
                 )
 
-        # TODO needs to call infer_types
         return transformed_function.finalize()

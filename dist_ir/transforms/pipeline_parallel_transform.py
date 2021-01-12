@@ -131,11 +131,17 @@ class PipelineParallelTransform:
         else:
             merged_output = merged_output_map[orig_output.name]
 
+            """
             # Forward the output value if necessary.
-            if merged_output.type.device != pipelined_output.type.device:
+            if merged_output.type is None:
+                raise ValueError(f"None type for merged_output {merged_output}")
+            elif pipelined_output.type.device is None:
+                raise ValueError(f"None type for pipelined_output {pipelined_output}")
+            elif merged_output.type.device != pipelined_output.type.device:
                 pipelined_output = self._forward_value(
                     transformed_function, pipelined_output, merged_output.type.device
                 )
+            """
 
             # Prepare the reduction op name and output value name.
             op_name = (
@@ -261,4 +267,4 @@ class PipelineParallelTransform:
                                         consumer_device,
                                     )
 
-        return transformed_function
+        return transformed_function.finalize()

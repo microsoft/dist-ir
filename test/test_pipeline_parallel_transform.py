@@ -26,12 +26,12 @@ def test_mnist_fw_bw():
             "dwB": {"op_type": "Add"},
             "dwA": {"op_type": "Add"},
             "l": {"op_type": "Concat", "dim": 0},
+            "dx": {"op_type": "Concat", "dim": 0},
         },
         partition_map=partition_map,
         schedule=schedule,
     )
     transformed_function = transform.apply(function)
-    transformed_function.finalize()
 
     print("-" * 88)
     print("Original function")
@@ -51,7 +51,12 @@ def test_mnist_fw_bw():
     _wB = np.ones((2, 1))
     orig_res = ex.compute(
         function,
-        {"x": _x, "z": _z, "wA": _wA, "wB": _wB},
+        {
+            function.inputs[0]: _x,
+            function.inputs[1]: _z,
+            function.inputs[2]: _wA,
+            function.inputs[3]: _wB,
+        },
     )
 
     transformed_res = ex.compute(
@@ -80,14 +85,11 @@ def test_mnist_fw_bw():
         print(v)
         print()
 
-    outputs = transformed_function.outputs
-    assert np.array_equal(orig_res[l], transformed_res[transformed_function.outputs[0]])
-    assert np.array_equal(
-        orig_res[dwA], transformed_res[transformed_function.outputs[1]]
-    )
-    assert np.array_equal(
-        orig_res[dwB], transformed_res[transformed_function.outputs[2]]
-    )
+    for i in range(len(function.outputs)):
+        np.testing.assert_array_almost_equal(
+            orig_res[function.outputs[i]],
+            transformed_res[transformed_function.outputs[i]],
+        )
 
 
 if __name__ == "__main__":

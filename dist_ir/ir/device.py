@@ -5,11 +5,11 @@ from typing import ClassVar
 @dataclass(frozen=True)
 class Device:
 
-    device_variable_id: ClassVar[int] = 0
-
     device_id: str
     device_type: str
     is_variable: bool = False
+
+    device_variable_id: ClassVar[int] = 0
 
     def __str__(self):
         return f"{self.device_id} ({self.device_type})"

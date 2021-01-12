@@ -1,4 +1,3 @@
-import copy
 from collections import defaultdict
 
 from ..ir.function import FunctionMaker
@@ -43,9 +42,7 @@ class PipelineParallelTransform:
     def _partition_inputs(self, function, transformed_function, pipelined_value_map):
         """Splits the input values according to the number of specified microbatches."""
         for input_value in function.inputs:
-            v = transformed_function.add_input_value(
-                input_value.name, copy.deepcopy(input_value.type)
-            )
+            v = transformed_function.add_input_value(input_value.name, input_value.type)
             pipelined_input_map = pipelined_value_map[input_value]
             if input_value in self._batch_dims:
                 vs = transformed_function.add_op(

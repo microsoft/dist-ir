@@ -1,7 +1,5 @@
 from ..ir.function import FunctionMaker
 
-import copy
-
 
 class DataParallelTransform:
     """Partitions a function using data parallelism.
@@ -37,9 +35,7 @@ class DataParallelTransform:
         input_values = function.inputs
         pmap_input_values = []
         for input_value in input_values:
-            v = transformed_function.add_input_value(
-                input_value.name, copy.deepcopy(input_value.type)
-            )
+            v = transformed_function.add_input_value(input_value.name, input_value.type)
             if input_value in self._batch_dims:
                 vs = transformed_function.add_op(
                     "Scatter",

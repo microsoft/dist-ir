@@ -16,11 +16,11 @@ Distributed strategies we want to support:
 - Overlapping computation and communication
 - Local layer parallelism
 
-# Requirements/Installation
+## Requirements/Installation
 
 See the [build file](.github/workflows/tests.yml) and [PIP packages list](requirements.txt).
 
-# Directory structure
+## Directory structure
 
 - dist_ir: Python source for DistIR
     - ir: IR definitions
@@ -30,14 +30,14 @@ See the [build file](.github/workflows/tests.yml) and [PIP packages list](requir
 - notebooks: small experiments and worked examples
 - test: unit tests, small/toy example models
 
-# Running tests
+## Running tests
 
 Run the following from the root of this repository:
 ```bash
 python -m pytest
 ```
 
-# Components
+## Components
 
 - Executors:
     - SequentialExecutor: a reference implementation that runs a DistIR function

@@ -39,18 +39,26 @@ def _allreduce_prop_fn(op, x):
 
 
 def _broadcast_prop_fn(op, x):
-    assert isinstance(x, Tensor)
+    if not isinstance(x, Tensor):
+        _raise_type_error(op, x)
     devices = op.attributes["devices"]
-    types = (Tensor(dtype=x.dtype, shape=x.shape, device=device) for device in devices)
-    return TupleType(tuple(types))
+    return TupleType(
+        tuple(Tensor(dtype=x.dtype, shape=x.shape, device=device) for device in devices)
+    )
 
 
 def _concat_prop_fn(op, x, y):
-    assert isinstance(x, Tensor) and isinstance(y, Tensor)
-    assert x.dtype == y.dtype and x.device == y.device
+    if not (
+        isinstance(x, Tensor)
+        and isinstance(y, Tensor)
+        and x.dtype == y.dtype
+        and x.device == y.device
+    ):
+        _raise_type_error(op, x, y)
     dim = op.attributes["dim"]
     for i, (d0, d1) in enumerate(zip(x.shape, y.shape)):
-        assert i == dim or d0 == d1
+        if not i != dim and d0 != d1:
+            _raise_type_error(op, x, y)
     output_shape = list(x.shape)
     output.shape[dim] += y.shape[dim]
     output_shape = tuple(output_shape)
@@ -70,18 +78,23 @@ def _elementwise_tensor_op_prop_fn(op, x, y):
 
 
 def _gather_prop_fn(op, x):
-    assert isinstance(x, TupleType)
+    if not (
+        isinstance(x, TupleType)
+        and all(isinstance(t, Tensor) for t in x.types)
+        and len(set(t.shape for t in x.types)) == 1
+        and len(set(t.dtype for t in x.types)) == 1
+        and len(x.types) > 0
+    ):
+        _raise_type_error(op, x)
     dim = op.attributes["dim"]
     device = op.attributes["device"]
     output_shape = list(x.types[0].shape)
     for i in range(1, len(x.types)):
-        assert len(x.types[i].shape) == len(x.types[0].shape)
-        assert x.types[i].dtype == x.types[0].dtype
         for j in range(len(x.types[i].shape)):
             if j == dim:
                 output_shape[j] += x.types[i].shape[j]
-            else:
-                assert x.types[i].shape[j] == x.types[0].shape[j]
+            elif x.types[i].shape[j] != x.types[0].shape[j]:
+                _raise_type_error(op, x)
     output_shape = tuple(output_shape)
     return Tensor(dtype=x.types[0].dtype, shape=output_shape, device=device)
 
@@ -99,52 +112,75 @@ def _matmul_prop_fn(op, x, y):
 
 
 def _matmul_grad_prop_fn(op, x, y, z):
-    assert isinstance(x, Tensor) and isinstance(y, Tensor) and isinstance(z, Tensor)
-    assert x.dtype == y.dtype and x.dtype == z.dtype
-    assert x.device == y.device and x.device == z.device
+    # TODO: Check that shapes can be multipled together?
+    if not (
+        isinstance(x, Tensor)
+        and isinstance(y, Tensor)
+        and isinstance(z, Tensor)
+        and x.dtype == y.dtype
+        and x.dtype == z.dtype
+        and x.device == y.device
+        and x.device == z.device
+    ):
+        _raise_type_error(op, x, y, z)
+
     return (x, y)
 
 
 def _scatter_prop_fn(op, x):
-    assert isinstance(x, Tensor)
+    if not isinstance(x, Tensor):
+        _raise_type_error(op, x)
     devices = op.attributes["devices"]
     dim = op.attributes["dim"]
+    # TODO: Should we add another function to raise an attribute error?
     assert x.shape[dim] % len(devices) == 0
     output_shape = list(x.shape)
     output_shape[dim] //= len(devices)
     output_shape = tuple(output_shape)
-    types = []
-    for device in devices:
-        types.append(Tensor(dtype=x.dtype, shape=output_shape, device=device))
-    return TupleType(tuple(types))
+    return TupleType(
+        tuple(
+            Tensor(dtype=x.dtype, shape=output_shape, device=device)
+            for device in devices
+        )
+    )
 
 
 def _select_prop_fn(op, x):
-    assert isinstance(x, TupleType)
+    if not (
+        isinstance(x, TupleType)
+        and all(isinstance(t, Tensor) for t in x.types)
+        and len(x.types) > 0
+        and all(t.shape == x.types[0].shape for t in x.types)
+        and len(set(t.device for t in x.types)) == 1
+    ):
+        _raise_type_error(op, x)
     dim = op.attributes["dim"]
-    assert isinstance(x.types[dim], Tensor)
     return x.types[dim]
 
 
 def _send_prop_fn(op, x):
-    assert isinstance(x, Tensor)
+    if not isinstance(x, Tensor):
+        _raise_type_error(op, x)
     device = op.attributes["device"]
     return Tensor(dtype=x.dtype, shape=x.shape, device=device)
 
 
 def _split_prop_fn(op, x):
-    assert isinstance(x, Tensor)
+    if not isinstance(x, Tensor):
+        _raise_type_error(op, x)
     num_splits = op.attributes["num_splits"]
     split_dim = op.attributes["dim"]
     output_shape = list(x.shape)
+    # TODO: Move this check to attribute error function?
     assert output_shape[split_dim] % num_splits == 0
     output_shape[split_dim] //= num_splits
     output_shape = tuple(output_shape)
-    types = [
-        Tensor(dtype=x.dtype, shape=output_shape, device=x.device)
-        for i in range(num_splits)
-    ]
-    return TupleType(tuple(types))
+    return TupleType(
+        tuple(
+            Tensor(dtype=x.dtype, shape=output_shape, device=x.device)
+            for i in range(num_splits)
+        )
+    )
 
 
 TypePropRegister = {

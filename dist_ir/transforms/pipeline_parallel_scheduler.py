@@ -2,14 +2,14 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from typing import Dict, Set, Tuple
 
-from ..ir import Module, Device, Op
+from ..ir import Function, Device, Op
 from . import utils
 
 
 class PipelineParallelScheduler(ABC):
     """Interface for a pipeline parallel scheduler.
 
-    Pipeline parallel schedulers take as input a DistIR module, the number of
+    Pipeline parallel schedulers take as input a DistIR function, the number of
     microbatches to partition each minibatch into, and a partition map which
     captures the explicit placement of each stage onto corresponding devices.
     The scheduler will return a time-ordered list of stages to execute on each
@@ -24,13 +24,13 @@ class PipelineParallelScheduler(ABC):
         self._remaining_inputs = defaultdict(lambda: 0)
         self._ready_stages = defaultdict(list)
 
-    def _prepare_stages_to_schedule(self, module, partition_map):
+    def _prepare_stages_to_schedule(self, function, partition_map):
         """Enumerates the stages to schedule on each device across all microbatches."""
         for stage, device in partition_map.items():
-            inputs = stage.get_inputs()
+            inputs = stage.inputs
             remaining_inputs = len(inputs)
             for input in inputs:
-                if module.is_input(input.name):
+                if input in function.inputs:
                     remaining_inputs -= 1
             for i in range(self._num_microbatches):
                 self._remaining_inputs[(stage, i)] = remaining_inputs
@@ -38,11 +38,11 @@ class PipelineParallelScheduler(ABC):
                     self._ready_stages[device].append((stage, i))
 
     @abstractmethod
-    def _get_next_stage_to_schedule(self, device: Device) -> Tuple[Module, int]:
+    def _get_next_stage_to_schedule(self, device: Device) -> Tuple[Function, int]:
         raise NotImplementedError()
 
-    def schedule(self, module, partition_map):
-        self._prepare_stages_to_schedule(module, partition_map)
+    def schedule(self, function, partition_map):
+        self._prepare_stages_to_schedule(function, partition_map)
         op_to_stage = utils.get_op_to_stage_map(list(partition_map.keys()))
         num_scheduled_stages = 0
         total_stages_to_schedule = len(partition_map) * self._num_microbatches
@@ -58,10 +58,10 @@ class PipelineParallelScheduler(ABC):
                     # TODO: Optimize this so it isn't an O(N) call?
                     self._ready_stages[device].remove(stage_to_schedule)
                     num_scheduled_stages += 1
-                    outputs = stage.get_outputs()
+                    outputs = stage.outputs
                     for output in outputs:
-                        consumer_ops = module.get_consumers_for_value(output.name)
-                        consumer_stages = utils.get_stages_from_op_names(
+                        consumer_ops = function.get_consumers(output)
+                        consumer_stages = utils.get_stages_from_ops(
                             op_to_stage, consumer_ops
                         )
                         for consumer_stage in consumer_stages:

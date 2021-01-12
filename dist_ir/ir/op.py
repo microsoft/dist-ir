@@ -1,86 +1,59 @@
+from dataclasses import dataclass, field, InitVar
+from typing import Any, Dict, List, Tuple
+
+from frozendict import frozendict
+
 from .op_register import OpRegister
-from .type import *
 from .value import Value
+from .type import Type
 
 
+@dataclass(frozen=True)
 class Op:
-    def __init__(
-        self,
-        name,
-        op_type,
-        in_edges=None,
-        attributes=None,
-        submodules=None,
-        output_names=None,
-    ):
-        if op_type not in OpRegister:
-            raise ValueError(f"Invalid op type {op_type}")
-        self._name = name
-        self._op_type = op_type
-        if in_edges is None:
-            self._in_edges = []
+    op_type: str
+    name: str = ""
+    inputs: Tuple[Value] = field(default_factory=tuple)
+    attributes: Dict[str, Any] = field(default_factory=frozendict)
+    subfunctions: Tuple["Function"] = field(default_factory=tuple)
+    outputs: Tuple[Value] = field(init=False)
+
+    # These are not fields, just parameters to init and post_init:
+    output_names: InitVar[Tuple[str]] = None
+    output_types: InitVar[Tuple[Type]] = None
+
+    def __post_init__(self, output_names, output_types):
+        if self.op_type == "Pmap":
+            # Handle pmap specially
+            assert len(self.subfunctions) == 1
+            # Number of inputs is arbitrary but positive
+            assert len(self.inputs) > 0
+            # Number of inputs matches subfunction
+            assert len(self.inputs) == len(self.subfunctions[0].inputs)
+            # Number of outputs is given by subfunction
+            num_outputs = len(self.subfunctions[0].outputs)
+
         else:
-            self._in_edges = in_edges
-        if attributes is None:
-            self._attributes = {}
+            if self.op_type not in OpRegister:
+                raise ValueError(f"Invalid op type {self.op_type}")
+            # Check that we got the right number of inputs
+            assert len(self.inputs) == OpRegister[self.op_type].num_inputs
+            # Number of outputs is given by OpRegister
+            num_outputs = OpRegister[self.op_type].num_outputs
+
+        # Create the correct number of output values with appropriate types
+        if output_names is None:
+            output_names = [f"{self.name}_out_{i}" for i in range(num_outputs)]
         else:
-            self._attributes = attributes
-        if submodules is None:
-            self._submodules = []
-        else:
-            self._submodules = submodules
-        self._out_edges = []
-        OpRegister[op_type].infer_types(self, output_names)
-
-    def __str__(self):
-        output = ""
-        output += f"Name: {self._name}\n"
-        output += f"Op type: {self._op_type}\n"
-        output += "Inputs:\n"
-        for in_edge in self._in_edges:
-            output += "  " + str(in_edge) + "\n"
-        output += "Outputs:\n"
-        for out_edge in self._out_edges:
-            output += "  " + str(out_edge) + "\n"
-        if len(self._submodules) > 0:
-            output += "Submodules:\n"
-            for submodule in self._submodules:
-                output += "\n".join(
-                    ["  " + line for line in str(submodule).split("\n")]
-                )
-        return output
-
-    def __repr__(self):
-        return str(self)
-
-    def add_in_edge(self, in_edge: Value):
-        """Adds an input edge."""
-        self._in_edges.append(in_edge)
-
-    def add_out_edge(self, out_edge: Value):
-        """Adds an output edge."""
-        self._out_edges.append(out_edge)
-
-    def get_in_edges(self):
-        """Returns all input edges."""
-        return self._in_edges
-
-    def get_out_edges(self):
-        """Returns all output edges."""
-        return self._out_edges
-
-    def get_attribute(self, attribute_name):
-        """Returns the specified attributes, or throws error if it does not exist."""
-        return self._attributes[attribute_name]
-
-    def get_submodule(self, idx):
-        """Returns the submodule at the specified index."""
-        return self._submodules[idx]
-
-    @property
-    def name(self):
-        return self._name
-
-    @property
-    def op_type(self):
-        return self._op_type
+            assert len(output_names) == num_outputs
+        if output_types is None:
+            output_types = [None for i in range(num_outputs)]
+        elif len(output_types) != num_outputs:
+            raise ValueError(
+                f"Op {self.name} has {len(output_types)} outputs; "
+                f"num_outputs expected"
+            )
+        outputs = tuple(
+            Value(out_name, out_type)
+            for out_name, out_type in zip(output_names, output_types)
+        )
+        object.__setattr__(self, "outputs", outputs)  # Can't assign to frozen field

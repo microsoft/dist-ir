@@ -2,20 +2,19 @@ import numpy as np
 import pytest
 import torch
 
-from dist_ir.ir import Device, Module
+from dist_ir.ir import Device, FunctionMaker, cpprint
 from dist_ir.ir.type import Float, Tensor, TupleType
 from dist_ir.executor import SequentialExecutor
-from dist_ir.executor.shape_inference import infer_shapes
 
 
 class Helper:
     def __init__(self, backend):
         self.backend = backend
         self.executor = SequentialExecutor(self.backend)
-        self.module = Module()
-        self.t1 = self.module.add_input_value("a", Tensor(Float(), (4, 4)))
-        self.t2 = self.module.add_input_value("b", Tensor(Float(), (4, 4)))
-        self.t3 = self.module.add_input_value("c", Tensor(Float(), (4, 4)))
+        self.function = FunctionMaker()
+        self.a = self.function.add_input_value("a", Tensor(Float(), (4, 4)))
+        self.b = self.function.add_input_value("b", Tensor(Float(), (4, 4)))
+        self.c = self.function.add_input_value("c", Tensor(Float(), (4, 4)))
         if self.backend == "numpy":
             a = np.random.normal(size=(4, 4))
             b = np.random.normal(size=(4, 4))
@@ -27,9 +26,9 @@ class Helper:
         else:
             raise ValueError(f"Unknown backend {self.backend}")
         self.input_data = {
-            "a": a,
-            "b": b,
-            "c": c,
+            self.a: a,
+            self.b: b,
+            self.c: c,
         }
         print(f"Backend: {self.backend}")
 
@@ -41,117 +40,121 @@ def backend(request):
 
 def test_single_add(backend):
     h = Helper(backend)
-    h.module.add_op("Add", "Add_0", inputs=[h.t1, h.t2])
-    h.module.finalize()
-    output_data = h.executor.compute(h.module, h.input_data)
-    result = output_data["Add_0/0"]
+    res = h.function.add_op("Add", "Add_0", inputs=[h.a, h.b])
+    h.function = h.function.finalize()
+    output_data = h.executor.compute(h.function, h.input_data)
+    result = output_data[res]
     if h.backend == "numpy":
-        assert np.array_equal(result, np.add(h.input_data["a"], h.input_data["b"]))
+        assert np.array_equal(result, np.add(h.input_data[h.a], h.input_data[h.b]))
     elif h.backend == "torch":
-        assert result.equal(torch.add(h.input_data["a"], h.input_data["b"]))
+        assert result.equal(torch.add(h.input_data[h.a], h.input_data[h.b]))
 
 
 def test_double_add(backend):
     h = Helper(backend)
-    x = h.module.add_op("Add", "Add_0", inputs=[h.t1, h.t2])
-    h.module.add_op("Add", "Add_1", inputs=[h.t3, x])
-    h.module.finalize()
-    output_data = h.executor.compute(h.module, h.input_data)
-    result = output_data["Add_1/0"]
+    x = h.function.add_op("Add", "Add_0", inputs=[h.a, h.b])
+    res = h.function.add_op("Add", "Add_1", inputs=[h.c, x])
+    h.function = h.function.finalize()
+    output_data = h.executor.compute(h.function, h.input_data)
+    result = output_data[res]
     if h.backend == "numpy":
         assert np.array_equal(
             result,
-            np.add(h.input_data["c"], np.add(h.input_data["a"], h.input_data["b"])),
+            np.add(h.input_data[h.c], np.add(h.input_data[h.a], h.input_data[h.b])),
         )
     elif h.backend == "torch":
         assert result.equal(
             torch.add(
-                h.input_data["c"],
-                torch.add(h.input_data["a"], h.input_data["b"]),
+                h.input_data[h.c],
+                torch.add(h.input_data[h.a], h.input_data[h.b]),
             )
         )
 
 
 def test_double_add_inverted(backend):
     h = Helper(backend)
-    x = h.module.add_op("Add", "Add_0", inputs=[h.t1, h.t2])
-    h.module.add_op("Add", "Add_1", inputs=[x, h.t3])
-    h.module.finalize()
-    output_data = h.executor.compute(h.module, h.input_data)
-    result = output_data["Add_1/0"]
+    x = h.function.add_op("Add", "Add_0", inputs=[h.a, h.b])
+    res = h.function.add_op("Add", "Add_1", inputs=[x, h.c])
+    h.function = h.function.finalize()
+    output_data = h.executor.compute(h.function, h.input_data)
+    result = output_data[res]
     if h.backend == "numpy":
         assert np.array_equal(
             result,
-            np.add(np.add(h.input_data["a"], h.input_data["b"]), h.input_data["c"]),
+            np.add(np.add(h.input_data[h.a], h.input_data[h.b]), h.input_data[h.c]),
         )
     elif h.backend == "torch":
         assert result.equal(
             torch.add(
-                torch.add(h.input_data["a"], h.input_data["b"]),
-                h.input_data["c"],
+                torch.add(h.input_data[h.a], h.input_data[h.b]),
+                h.input_data[h.c],
             )
         )
 
 
 def test_single_matmul(backend):
     h = Helper(backend)
-    h.module.add_op("MatMul", "MatMul_0", inputs=[h.t1, h.t2])
-    h.module.finalize()
-    output_data = h.executor.compute(h.module, h.input_data)
-    result = output_data["MatMul_0/0"]
+    res = h.function.add_op("MatMul", "MatMul_0", inputs=[h.a, h.b])
+    h.function = h.function.finalize()
+    output_data = h.executor.compute(h.function, h.input_data)
+    result = output_data[res]
     if h.backend == "numpy":
-        assert np.array_equal(result, np.matmul(h.input_data["a"], h.input_data["b"]))
+        assert np.array_equal(result, np.matmul(h.input_data[h.a], h.input_data[h.b]))
     elif h.backend == "torch":
-        assert result.equal(torch.matmul(h.input_data["a"], h.input_data["b"]))
+        assert result.equal(torch.matmul(h.input_data[h.a], h.input_data[h.b]))
 
 
 def test_double_matmul(backend):
     h = Helper(backend)
-    x = h.module.add_op("MatMul", "MatMul_0", inputs=[h.t1, h.t2])
-    h.module.add_op("MatMul", "MatMul_1", inputs=[h.t3, x])
-    h.module.finalize()
-    output_data = h.executor.compute(h.module, h.input_data)
-    result = output_data["MatMul_1/0"]
+    x = h.function.add_op("MatMul", "MatMul_0", inputs=[h.a, h.b])
+    res = h.function.add_op("MatMul", "MatMul_1", inputs=[h.c, x])
+    h.function = h.function.finalize()
+    output_data = h.executor.compute(h.function, h.input_data)
+    result = output_data[res]
     if h.backend == "numpy":
         assert np.array_equal(
             result,
             np.matmul(
-                h.input_data["c"], np.matmul(h.input_data["a"], h.input_data["b"])
+                h.input_data[h.c], np.matmul(h.input_data[h.a], h.input_data[h.b])
             ),
         )
     elif h.backend == "torch":
         assert result.equal(
             torch.matmul(
-                h.input_data["c"],
-                torch.matmul(h.input_data["a"], h.input_data["b"]),
+                h.input_data[h.c],
+                torch.matmul(h.input_data[h.a], h.input_data[h.b]),
             )
         )
 
 
 def test_double_matmul_inverted(backend):
     h = Helper(backend)
-    x = h.module.add_op("MatMul", "MatMul_0", inputs=[h.t1, h.t2])
-    h.module.add_op("MatMul", "MatMul_1", inputs=[x, h.t3])
-    h.module.finalize()
-    output_data = h.executor.compute(h.module, h.input_data)
-    result = output_data["MatMul_1/0"]
+    x = h.function.add_op("MatMul", "MatMul_0", inputs=[h.a, h.b])
+    res = h.function.add_op("MatMul", "MatMul_1", inputs=[x, h.c])
+    h.function = h.function.finalize()
+    output_data = h.executor.compute(h.function, h.input_data)
+    result = output_data[res]
     if h.backend == "numpy":
         assert np.array_equal(
             result,
             np.matmul(
-                np.matmul(h.input_data["a"], h.input_data["b"]), h.input_data["c"]
+                np.matmul(h.input_data[h.a], h.input_data[h.b]), h.input_data[h.c]
             ),
         )
     elif h.backend == "torch":
         assert result.equal(
             torch.matmul(
-                torch.matmul(h.input_data["a"], h.input_data["b"]),
-                h.input_data["c"],
+                torch.matmul(h.input_data[h.a], h.input_data[h.b]),
+                h.input_data[h.c],
             )
         )
 
 
 # TODO: Add test for op with multiple outputs
+
+# TODO for all pmap tests, make a FunctionMaker helper function to add pmap
+# which also creates the device var and sets the attributes etc appropriately.
+# This should also be used by transforms/parsers that create pmap ops.
 
 
 def test_pmap_on_executor():
@@ -169,137 +172,142 @@ def test_pmap_on_executor():
     _y_0, _y_1 = _y[:4], _y[4:]
 
     # A pmap with 1 input and 1 output
-    module = Module()
-    xs = module.add_input_value("xs", TupleType((x_type(d0), x_type(d1))))
-    submodule = Module()
-    x = submodule.add_input_value("x", x_type(None))
-    _ = submodule.add_op("Add", "Add0", inputs=[x, x], output_names=["z"])
-    # submodule.set_outputs()
-    submodule.finalize()
-    _ = module.add_op(
+    function = FunctionMaker()
+    xs = function.add_input_value("xs", TupleType((x_type(d0), x_type(d1))))
+    subfunction = FunctionMaker()
+    x = subfunction.add_input_value("x", x_type(None))
+    _ = subfunction.add_op("Add", "Add0", inputs=[x, x], output_names=["z"])
+    # subfunction.set_outputs()
+    subfunction = subfunction.finalize()
+    zis = function.add_op(
         "Pmap",
         inputs=[xs],
         attributes={"devices": [d0, d1]},
-        submodules=[submodule],
+        subfunctions=[subfunction],
         output_names=["zis"],
     )
-    module.finalize()
+    function = function.finalize()
 
-    res = ex.compute(module, {"xs": (_x_0, _x_1)})
-    assert np.array_equal(res["zis"][0], _x_0 + _x_0)
-    assert np.array_equal(res["zis"][1], _x_1 + _x_1)
+    cpprint(function)
+    res = ex.compute(function, {xs: (_x_0, _x_1)})
+    assert np.array_equal(res[zis][0], _x_0 + _x_0)
+    assert np.array_equal(res[zis][1], _x_1 + _x_1)
 
     # A pmap with 2 inputs and 1 output
-    module = Module()
-    xs = module.add_input_value("xs", TupleType((x_type(d0), x_type(d1))))
-    ys = module.add_input_value("ys", TupleType((y_type(d0), y_type(d1))))
-    submodule = Module()
-    x = submodule.add_input_value("x", x_type(None))
-    y = submodule.add_input_value("y", y_type(None))
-    _ = submodule.add_op("MatMul", "MatMul0", inputs=[x, y], output_names=["z"])
-    submodule.finalize()
-    _ = module.add_op(
+    function = FunctionMaker()
+    xs = function.add_input_value("xs", TupleType((x_type(d0), x_type(d1))))
+    ys = function.add_input_value("ys", TupleType((y_type(d0), y_type(d1))))
+    subfunction = FunctionMaker()
+    x = subfunction.add_input_value("x", x_type(None))
+    y = subfunction.add_input_value("y", y_type(None))
+    _ = subfunction.add_op("MatMul", "MatMul0", inputs=[x, y], output_names=["z"])
+    subfunction = subfunction.finalize()
+    zis = function.add_op(
         "Pmap",
         inputs=[xs, ys],
         attributes={"devices": [d0, d1]},
-        submodules=[submodule],
+        subfunctions=[subfunction],
         output_names=["zis"],
     )
-    module.finalize()
+    function = function.finalize()
 
-    res = ex.compute(module, {"xs": (_x_0, _x_1), "ys": (_y_0, _y_1)})
-    assert np.array_equal(res["zis"][0], np.matmul(_x_0, _y_0))
-    assert np.array_equal(res["zis"][1], np.matmul(_x_1, _y_1))
+    cpprint(function)
+    res = ex.compute(function, {xs: (_x_0, _x_1), ys: (_y_0, _y_1)})
+    assert np.array_equal(res[zis][0], np.matmul(_x_0, _y_0))
+    assert np.array_equal(res[zis][1], np.matmul(_x_1, _y_1))
 
     # A pmap with 2 inputs and 2 outputs
-    module = Module()
-    xs = module.add_input_value("xs", TupleType((x_type(d0), x_type(d1))))
-    ys = module.add_input_value("ys", TupleType((y_type(d0), y_type(d1))))
-    submodule = Module()
-    x = submodule.add_input_value("x", x_type(None))
-    y = submodule.add_input_value("y", y_type(None))
-    _ = submodule.add_op("Add", "Add0", inputs=[x, x], output_names=["w"])
-    _ = submodule.add_op("MatMul", "MatMul0", inputs=[x, y], output_names=["z"])
-    submodule.finalize()
-    _ = module.add_op(
+    function = FunctionMaker()
+    xs = function.add_input_value("xs", TupleType((x_type(d0), x_type(d1))))
+    ys = function.add_input_value("ys", TupleType((y_type(d0), y_type(d1))))
+    subfunction = FunctionMaker()
+    x = subfunction.add_input_value("x", x_type(None))
+    y = subfunction.add_input_value("y", y_type(None))
+    _ = subfunction.add_op("Add", "Add0", inputs=[x, x], output_names=["w"])
+    _ = subfunction.add_op("MatMul", "MatMul0", inputs=[x, y], output_names=["z"])
+    subfunction = subfunction.finalize()
+    (wis, zis) = function.add_op(
         "Pmap",
         inputs=[xs, ys],
         attributes={"devices": [d0, d1]},
-        submodules=[submodule],
+        subfunctions=[subfunction],
         output_names=["wis", "zis"],
     )
-    module.finalize()
+    function = function.finalize()
 
-    res = ex.compute(module, {"xs": (_x_0, _x_1), "ys": (_y_0, _y_1)})
-    assert np.array_equal(res["wis"][0], _x_0 + _x_0)
-    assert np.array_equal(res["wis"][1], _x_1 + _x_1)
-    assert np.array_equal(res["zis"][0], np.matmul(_x_0, _y_0))
-    assert np.array_equal(res["zis"][1], np.matmul(_x_1, _y_1))
+    cpprint(function)
+    res = ex.compute(function, {xs: (_x_0, _x_1), ys: (_y_0, _y_1)})
+    assert np.array_equal(res[wis][0], _x_0 + _x_0)
+    assert np.array_equal(res[wis][1], _x_1 + _x_1)
+    assert np.array_equal(res[zis][0], np.matmul(_x_0, _y_0))
+    assert np.array_equal(res[zis][1], np.matmul(_x_1, _y_1))
 
     # A pmap with a single device
-    module = Module()
-    xs = module.add_input_value("xs", TupleType((x_type(None),)))
-    ys = module.add_input_value("ys", TupleType((y_type(None),)))
-    submodule = Module()
-    x = submodule.add_input_value("x", x_type(None))
-    y = submodule.add_input_value("y", y_type(None))
-    _ = submodule.add_op("Add", "Add0", inputs=[x, x], output_names=["w"])
-    _ = submodule.add_op("MatMul", "MatMul0", inputs=[x, y], output_names=["z"])
-    submodule.finalize()
-    _ = module.add_op(
+    function = FunctionMaker()
+    xs = function.add_input_value("xs", TupleType((x_type(None),)))
+    ys = function.add_input_value("ys", TupleType((y_type(None),)))
+    subfunction = FunctionMaker()
+    x = subfunction.add_input_value("x", x_type(None))
+    y = subfunction.add_input_value("y", y_type(None))
+    _ = subfunction.add_op("Add", "Add0", inputs=[x, x], output_names=["w"])
+    _ = subfunction.add_op("MatMul", "MatMul0", inputs=[x, y], output_names=["z"])
+    subfunction = subfunction.finalize()
+    (wis, zis) = function.add_op(
         "Pmap",
         inputs=[xs, ys],
         attributes={"devices": [d0]},
-        submodules=[submodule],
+        subfunctions=[subfunction],
         output_names=["wis", "zis"],
     )
-    module.finalize()
+    function = function.finalize()
 
-    res = ex.compute(module, {"xs": (_x_0,), "ys": (_y_0,)})
-    assert np.array_equal(res["wis"][0], _x_0 + _x_0)
-    assert np.array_equal(res["zis"][0], np.matmul(_x_0, _y_0))
+    cpprint(function)
+    res = ex.compute(function, {xs: (_x_0,), ys: (_y_0,)})
+    assert np.array_equal(res[wis][0], _x_0 + _x_0)
+    assert np.array_equal(res[zis][0], np.matmul(_x_0, _y_0))
 
 
 def test_pmap_dp():
-    module = Module()
+    function = FunctionMaker()
 
     d0 = Device(0, "gpu")
     d1 = Device(1, "gpu")
 
-    xs = module.add_input_value(
+    xs = function.add_input_value(
         "xs",
         TupleType(
             (Tensor(Float(), (8, 4), device=d0), Tensor(Float(), (8, 4), device=d1))
         ),
     )
-    wAs = module.add_input_value(
+    wAs = function.add_input_value(
         "wAs",
         TupleType(
             (Tensor(Float(), (4, 2), device=d0), Tensor(Float(), (4, 2), device=d1))
         ),
     )
-    wBs = module.add_input_value(
+    wBs = function.add_input_value(
         "wBs",
         TupleType(
             (Tensor(Float(), (2, 1), device=d0), Tensor(Float(), (2, 1), device=d1))
         ),
     )
 
-    submodule = Module()
-    x = submodule.add_input_value("x", Tensor(Float(), (8, 4)))
-    wA = submodule.add_input_value("wA", Tensor(Float(), (4, 2)))
-    wB = submodule.add_input_value("wB", Tensor(Float(), (2, 1)))
-    y = submodule.add_op("MatMul", "MatMul0", inputs=[x, wA], output_names=["y"])
-    _ = submodule.add_op("MatMul", "MatMul1", inputs=[y, wB], output_names=["z"])
-    submodule.finalize()
-    _ = module.add_op(
+    subfunction = FunctionMaker()
+    x = subfunction.add_input_value("x", Tensor(Float(), (8, 4)))
+    wA = subfunction.add_input_value("wA", Tensor(Float(), (4, 2)))
+    wB = subfunction.add_input_value("wB", Tensor(Float(), (2, 1)))
+    y = subfunction.add_op("MatMul", "MatMul0", inputs=[x, wA], output_names=["y"])
+    _ = subfunction.add_op("MatMul", "MatMul1", inputs=[y, wB], output_names=["z"])
+    subfunction = subfunction.finalize()
+    zis = function.add_op(
         "Pmap",
         inputs=[xs, wAs, wBs],
         attributes={"devices": [d0, d1]},
-        submodules=[submodule],
+        subfunctions=[subfunction],
         output_names=["zis"],
     )
-    module.finalize()
+    function = function.finalize()
+    cpprint(function)
 
     ex = SequentialExecutor("numpy")
     _x = np.arange(16 * 4).reshape((16, 4))
@@ -307,12 +315,8 @@ def test_pmap_dp():
     _wA = np.ones((4, 2))
     _wB = np.ones((2, 1))
     res = ex.compute(
-        module,
-        {"xs": (x_0, x_1), "wAs": (_wA, _wA), "wBs": (_wB, _wB)},
+        function,
+        {xs: (x_0, x_1), wAs: (_wA, _wA), wBs: (_wB, _wB)},
     )
-    assert np.array_equal(res["zis"][0], np.matmul(np.matmul(x_0, _wA), _wB))
-    assert np.array_equal(res["zis"][1], np.matmul(np.matmul(x_1, _wA), _wB))
-
-
-if __name__ == "__main__":
-    test_pmap_on_executor()
+    assert np.array_equal(res[zis][0], np.matmul(np.matmul(x_0, _wA), _wB))
+    assert np.array_equal(res[zis][1], np.matmul(np.matmul(x_1, _wA), _wB))

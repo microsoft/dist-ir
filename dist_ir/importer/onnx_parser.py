@@ -1,6 +1,6 @@
 import onnx
 
-from ..ir import Module, Value
+from ..ir import FunctionMaker, Value
 from ..ir.type import Tensor, Float
 
 
@@ -8,14 +8,14 @@ def import_from_onnx(onnx_model):
     # TODO: Remove prints?
     # TODO: Support types beyond Tensor
     onnx_model = onnx.load(onnx_model)
-    dist_ir_module = Module()
+    dist_ir_function = FunctionMaker("foo")  # TODO get name?
 
     inputs = {}
     output_src = {}
 
     def add_input(value):
         # TODO lookup shape and dtype of input if exists
-        v = dist_ir_module.add_input_value(value.name, Tensor(Float()))
+        v = dist_ir_function.add_input_value(value.name, Tensor(Float()))
         inputs[value.name] = v
 
     for value in onnx_model.graph.value_info:
@@ -41,21 +41,26 @@ def import_from_onnx(onnx_model):
             else:
                 print(f"---> Could not find input {value}!")
                 # TODO do something better here
-                v = dist_ir_module.add_input_value(value, Tensor(Float()))
+                v = dist_ir_function.add_input_value(value, Tensor(Float()))
                 inputs[value] = v
                 per_node_inputs.append(v)
-        print()
         output_names = node.output
-        op = dist_ir_module.add_op(
+        outputs = dist_ir_function.add_op(
             op_type=node.op_type,
             name=node.name,
             inputs=per_node_inputs,
             output_names=output_names,
         )
-        for output in node.output:
-            # TODO lookup shape and dtype of input if exists
-            v = Value(output, Tensor(Float()))
-            output_src[output] = v
+        # Match node's outputs with the output Values created in op:
+        if len(node.output) == 1:
+            assert isinstance(outputs, Value)
+            outputs = [outputs]
+        else:
+            assert len(outputs) == len(node.output)
+        for out_name, value in zip(node.output, outputs):
+            assert out_name == value.name
+            output_src[out_name] = value
+            print(f"Found output {out_name}")
+        print()
 
-    dist_ir_module.verify_ops_in_topological_order()
-    return dist_ir_module
+    return dist_ir_function.finalize()

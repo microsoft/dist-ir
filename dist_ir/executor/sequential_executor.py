@@ -1,7 +1,7 @@
 from typing import Any, Dict, List
 
 from .backend_register import BackendRegister
-from ..ir import Module, Op
+from ..ir import Function, Op, Value
 
 
 class SequentialExecutor:
@@ -19,12 +19,11 @@ class SequentialExecutor:
             # Iterate over the inputs
             results = []
             for inps in inputs:
-                # Execute submodule with appropriate inputs
-                inp_names = (e.name for e in op.get_submodule(0).get_inputs())
-                inp_data = {n: v for n, v in zip(inp_names, inps)}
-                outs = self.compute(op.get_submodule(0), inp_data)
-                # Match output names to output data using the module output order.
-                ordered_outs = [outs[e.name] for e in op.get_submodule(0).get_outputs()]
+                # Execute subfunction with appropriate inputs
+                inp_data = {k: v for k, v in zip(op.subfunctions[0].inputs, inps)}
+                outs = self.compute(op.subfunctions[0], inp_data)
+                # Match output names to output data using the function output order.
+                ordered_outs = [outs[e] for e in op.subfunctions[0].outputs]
                 results.append(ordered_outs)
             # Unzip the results
             results = tuple(zip(*results))
@@ -39,56 +38,51 @@ class SequentialExecutor:
             output_data = (output_data,)
         return output_data
 
-    def compute(self, module: Module, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Executes the module given the specified inputs and returns the final result.
+    def compute(
+        self, function: Function, input_data: Dict[Value, Any]
+    ) -> Dict[Value, Any]:
+        """Executes the function given the specified inputs and returns the final result.
 
         Args:
-          module: The module to execute.
-          input_data: A map from input tensor name to data represented in the
+          function: The function to execute.
+          input_data: A map from input value to data represented in the
                       specified backend.
 
         Returns:
-          A map from output tensor name to output tensor.
+          A map from output value to output data.
         """
         output_data = {}
         consumers = {}
-        ops = module.get_ops()
 
         # Execute ops in topological order.
-        for op_name, op in ops.items():
+        for op in function.ops:
             inputs = []
-            in_edges = op.get_in_edges()
-            for in_edge in in_edges:
-                input_name = in_edge.name
-                if module.is_input(input_name):
-                    input_name = in_edge.name
-                    if input_name not in input_data:
+            for in_edge in op.inputs:
+                if in_edge in function.inputs:
+                    if in_edge not in input_data:
                         raise ValueError(
-                            f"Could not find input {input_name} in input_data"
+                            f"Could not find input {in_edge} in input_data"
                         )
-                    input_value = input_data[input_name]
-                elif input_name in output_data:
-                    input_value = output_data[input_name]
-                    consumers[input_name] -= 1
+                    input_value = input_data[in_edge]
+                elif in_edge in output_data:
+                    input_value = output_data[in_edge]
+                    consumers[in_edge] -= 1
                 else:
-                    raise ValueError(f"Invalid input {input_name} for op {op_name}")
+                    raise ValueError(f"Invalid input {in_edge} for op {op}")
                 inputs.append(input_value)
 
             res = self._compute_op(op, inputs)
-            out_edges = op.get_out_edges()
-            for i, out_edge in enumerate(out_edges):
-                output_data[out_edge.name] = res[i]
-                consumers[out_edge.name] = len(
-                    module.get_consumers_for_value(out_edge.name)
-                )
+            for i, out_edge in enumerate(op.outputs):
+                output_data[out_edge] = res[i]
+                consumers[out_edge] = len(function.get_consumers(out_edge))
 
             # Garbage collect the fully consumed output tensors.
             to_free = []
-            for output_name in output_data:
-                if consumers[output_name] == 0 and not module.is_output(output_name):
-                    to_free.append(output_name)
-            for output_name in to_free:
-                del output_data[output_name]
+            for out_edge in output_data:
+                if consumers[out_edge] == 0 and not out_edge in function.outputs:
+                    to_free.append(out_edge)
+            for out_edge in to_free:
+                del output_data[out_edge]
 
         # Return the outputs.
         return output_data

@@ -1,24 +1,26 @@
-from abc import ABC
+from dataclasses import dataclass
 from functools import reduce
 from operator import add, mul
-from typing import Optional, Tuple, TypeVar
+from typing import Optional, Set, Tuple
 
 from .device import Device
 from .utils import singleton
 
 
+@dataclass(frozen=True)
 class Type:
-    def __init__(self, has_device=False):
-        self._has_device = has_device
-        self._device = None
+    """Base class for all types."""
 
-    def set_device(self, device):
-        if self._has_device:
-            self._device = device
+    device: Optional[Device] = None
 
-    def get_all_devices(self):
-        if self._has_device and self._device is not None:
-            return set([self._device])
+    def get_all_devices(self) -> Set[Device]:
+        """Returns all devices that a value of this type lives on. For example,
+        a tuple can have different elements live on different devices.
+
+        Subclasses should override this default implementation.
+        """
+        if self.device is not None:
+            return set([self.device])
         return set()
 
 
@@ -29,11 +31,8 @@ class Type:
 class Int(Type):
     """The integer type. A singleton class."""
 
-    def __str__(self):
-        return "Int"
-
     def __repr__(self):
-        return str(self)
+        return "Int"
 
     @property
     def size(self):
@@ -44,90 +43,61 @@ class Int(Type):
 class Float(Type):
     """The float type. A singleton class."""
 
-    def __str__(self):
-        return f"Float"
-
     def __repr__(self):
-        return str(self)
+        return "Float"
 
     @property
     def size(self):
         return 4
 
 
+@dataclass(frozen=True)
 class Tensor(Type):
     """The tensor type. Contains a shape and an element type (dtype)."""
 
     # TODO have a global cache to avoid creating multiple objects of same type?
 
-    def __init__(
-        self,
-        dtype: Type = None,
-        shape: Optional[Tuple[int]] = None,
-        device: Device = None,
-    ):
-        Type.__init__(self, has_device=True)
-        self._device = device
-        self._shape = shape
-        self._dtype = dtype
+    dtype: Type = None  # Unable to make this non-optional, but this should be
+    shape: Optional[Tuple[int]] = None
+
+    def __init__(self, dtype=None, shape=None, device=None):
+        # TODO make dtype a required argument?
+        assert dtype is None or isinstance(dtype, Type)
+        assert shape is None or (
+            isinstance(shape, tuple) and all(isinstance(n, int) for n in shape)
+        )
+        object.__setattr__(self, "dtype", dtype)  # Can't assign to frozen field
+        object.__setattr__(self, "shape", shape)
+        Type.__init__(self, device=device)
 
     def __repr__(self):
-        return (
-            f"Tensor[shape={self._shape}, dtype={self._dtype}, device={self._device}]"
-        )
-
-    def __eq__(self, other):
-        return (
-            self._dtype == other._dtype
-            and self._shape == other._shape
-            and self._device == other._device
-        )
-
-    @property
-    def shape(self):
-        return self._shape
-
-    @shape.setter
-    def shape(self, shape):
-        self._shape = shape
-
-    @property
-    def dtype(self):
-        return self._dtype
-
-    @dtype.setter
-    def dtype(self, dtype):
-        self._dtype = dtype
-
-    @property
-    def device(self):
-        return self._device
+        return f"Tensor[shape={self.shape}, dtype={self.dtype}, device={self.device}]"
 
     def size(self):
-        return reduce(mul, self._shape) * self._dtype.size
+        return reduce(mul, self.shape) * self.dtype.size
 
 
+@dataclass(frozen=True)
 class TupleType(Type):
-    def __init__(self, types):
-        Type.__init__(self)
-        self._types = types
 
-    def __str__(self):
-        elems_str = ", ".join(str(t) for t in self._types)
-        return f"Tuple[{elems_str}]"
+    types: Tuple[Type] = None
+
+    def __init__(self, types):
+        # Override __init__ because it doesn't make sense for a tuple to have a
+        # device. Devices are stored in each tuple element.
+        object.__setattr__(self, "types", types)  # Can't assign to frozen field
+        assert isinstance(types, tuple) and all(isinstance(t, Type) for t in types)
+        assert self.device is None
 
     def __repr__(self):
-        return str(self)
+        elems_str = ", ".join(str(t) for t in self.types)
+        return f"Tuple[{elems_str}]"
 
-    @property
-    def types(self):
-        return self._types
-
-    def get_all_devices(self):
+    def get_all_devices(self) -> Set[Device]:
         devices = set()
-        for typ in self._types:
+        for typ in self.types:
             devices.update(typ.get_all_devices())
         return devices
 
     def size(self):
-        return reduce(add, [typ.size() for typ in self._types])
+        return reduce(add, [typ.size() for typ in self.types])

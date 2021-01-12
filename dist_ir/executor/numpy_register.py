@@ -12,12 +12,20 @@ def allreduce(op, inputs):
 
 
 def broadcast(op, inputs):
-    return [inputs[0] for _ in range(len(op.get_attribute("devices")))]
+    return [inputs[0] for _ in range(len(op.attributes["devices"]))]
 
 
 def concat(op, inputs):
-    dim = op.get_attribute("dim")
+    # assert len(inputs) == 1
+    # dim = op.attributes["dim"]
+    # return np.concatenate(inputs[0], axis=dim)
+    dim = op.attributes["dim"]
     return np.concatenate(inputs, axis=dim)
+
+
+def gather(op, inputs):
+    dim = op.attributes["dim"]
+    return np.concatenate(inputs[0], axis=dim)
 
 
 def identity(op, inputs):
@@ -25,12 +33,12 @@ def identity(op, inputs):
 
 
 def loss(op, inputs):
-    N = op.get_attribute("N")
+    N = op.attributes["N"]
     return np.square(inputs[0] - inputs[1]) / N
 
 
 def loss_grad(op, inputs):
-    N = op.get_attribute("N")
+    N = op.attributes["N"]
     return 2 * (inputs[0] - inputs[1]) / N
 
 
@@ -47,16 +55,16 @@ def relu(op, inputs):
 
 
 def select(op, inputs):
-    dim = op.get_attribute("dim")
+    dim = op.attributes["dim"]
     return inputs[0][dim]
 
 
 def split(op, inputs):
-    dim = op.get_attribute("dim")
+    dim = op.attributes["dim"]
     if op.op_type == "Split":
-        num_splits = op.get_attribute("num_splits")
+        num_splits = op.attributes["num_splits"]
     elif op.op_type == "Scatter":
-        num_splits = len(op.get_attribute("devices"))
+        num_splits = len(op.attributes["devices"])
 
     return np.split(inputs[0], num_splits, axis=dim)
 
@@ -66,7 +74,7 @@ NumPyRegister = {
     "Allreduce": allreduce,
     "Broadcast": broadcast,
     "Concat": concat,
-    "Gather": concat,
+    "Gather": gather,
     "Loss": loss,
     "LossGrad": loss_grad,
     "MatMul": matmul,

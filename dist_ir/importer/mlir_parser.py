@@ -1,10 +1,10 @@
 from dataclasses import dataclass, field
 import json
 import re
-from typing import Any, Dict, Union
+from typing import Any, Dict, List, Union
 
 import mlir
-from ..ir import cpprint, Module, Value
+from ..ir import Function, FunctionMaker, Value
 from ..ir.device import Device
 from ..ir.type import Float, Tensor
 
@@ -69,8 +69,8 @@ def _parse_type(mlir_type, context: Context):
     raise ValueError(f"Unknown MLIR type {mlir_type}")
 
 
-def _parse_module(mlir_region, context=None):
-    """Creates a DistIR Module out of an MLIR region. The region must be either
+def _parse_function(mlir_region, context: Context = None) -> Function:
+    """Creates a DistIR Function out of an MLIR region. The region must be either
     the single region in a function, or the sub-region of a pmap operator.
     """
     if context is None:
@@ -79,11 +79,11 @@ def _parse_module(mlir_region, context=None):
     assert len(mlir_region.blocks) == 1
     entry_block = mlir_region.blocks[0]
 
-    module = Module()
+    function = FunctionMaker()
 
     # Find the inputs
     for arg in entry_block.arguments:
-        v = module.add_input_value(
+        v = function.add_input_value(
             f"%arg{arg.arg_number}", _parse_type(arg.type, context)
         )
         assert str(arg) not in context.values
@@ -121,11 +121,11 @@ def _parse_module(mlir_region, context=None):
         # Create output names (TODO should be done by Op.__init__ or add_op)
         output_names = [_make_fresh_var(context) for _ in op.results]
 
-        submodules = []
+        subfunctions = []
 
         if op_name == "std.return" or op_name == "dist.return":
-            # Set return values as module outputs
-            module.set_outputs(args)
+            # Set return values as function outputs
+            function.set_outputs(args)
             returned = True
             continue
         if op_name == "dist.pmap":
@@ -134,18 +134,18 @@ def _parse_module(mlir_region, context=None):
             new_device = Device.get_new_device_variable("gpu")
             assert attributes["device_var"] not in context.devices
             context.devices[attributes["device_var"]] = new_device
-            # Parse the submodule
-            submodules.append(_parse_module(op.regions[0], context))
-            # Remove device var from context.devices as it is only in scope for submodule
+            # Parse the subfunction
+            subfunctions.append(_parse_function(op.regions[0], context))
+            # Remove device var from context.devices as it is only in scope for subfunction
             del context.devices[attributes["device_var"]]
 
-        # Create an op and add it to the module
-        outs = module.add_op(
+        # Create an op and add it to the function
+        outs = function.add_op(
             op_name,
             inputs=args,
             attributes=attributes,
             output_names=output_names,
-            submodules=submodules,
+            subfunctions=subfunctions,
         )
         if not isinstance(outs, tuple):
             outs = (outs,)
@@ -156,22 +156,21 @@ def _parse_module(mlir_region, context=None):
             assert str(mlirval) not in context.values
             context.values[str(mlirval)] = val
 
-    module.finalize()
-    return module
+    return function.finalize()
 
 
-def _parse_mlir_module(mlir_module):
-    modules = []
+def _parse_mlir_module(mlir_module) -> List[Function]:
+    functions = []
     for func in mlir_module.body.operations:
         if str(func) == "module_terminator":
             break
         assert len(func.regions) == 1
 
-        modules.append(_parse_module(func.regions[0]))
-    return modules
+        functions.append(_parse_function(func.regions[0]))
+    return functions
 
 
-def parse_mlir_str(mlir_str):
+def parse_mlir_str(mlir_str: str) -> List[Function]:
     ctx = mlir.ir.Context()
     ctx.allow_unregistered_dialects = True
 
@@ -179,7 +178,7 @@ def parse_mlir_str(mlir_str):
     return _parse_mlir_module(mlir_module)
 
 
-def parse_mlir_file(filename):
+def parse_mlir_file(filename) -> List[Function]:
     with open(filename, "r") as fin:
         mlir_str = fin.read()
 

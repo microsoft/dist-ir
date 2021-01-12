@@ -1,7 +1,7 @@
 # The DistIR Internal Representation
 
 ```
-Module = {
+Function = {
     # Invariant: ops are in topological order
     ops: List[Op]
     inputs: List[Value]
@@ -17,16 +17,16 @@ Device = {
 
 Op = {
     name: String
-        # Do we need this to be unique in a module? Across all modules?
+        # Do we need this to be unique in a function? Across all functions?
     op_type: OpType
         # The type of operator
     in_edges: List[Value]
-        # Pointer to a Value object either in Module.inputs or another Op.out_edges
+        # Pointer to a Value object either in Function.inputs or another Op.out_edges
     out_edges: List[Value]
         # To support ops that have more than one output
     attributes: Dict[String, Any]
         # Constant data for ops, e.g. stride of convolution or devices to scatter
-    submodules: List[Module]
+    subfunctions: List[Function]
 }
 
 OpType = 
@@ -37,7 +37,7 @@ OpType =
 
 Value = {
     name: String
-        # Again, does it need to be unique in a module?
+        # Again, does it need to be unique in a function?
     type: Type
     device: DeviceID
         # Which device this value lives on
@@ -366,7 +366,7 @@ def mlp(
 ```
 
 TODO do we want explicit free?
-If so, then need to add it to input module after say importing from onnx,
+If so, then need to add it to input function after say importing from onnx,
 and need a free after last occurrence of every value.
 If not, then simulator has to do a liveness analysis. This isn't hard/expensive.
 But how do we deal with inplace operations? Have an attribute on those ops?
@@ -398,16 +398,16 @@ two layer FF or attention layers?
 
 - Can we do without a special BroadcastScatterOpRegisterEntry?
 - Why do we even need types at op creation time?
-- Think about best way to create pmap device variable: before/after submodule creation?
+- Think about best way to create pmap device variable: before/after subfunction creation?
 
 - Create `HardwareConfiguration` that has all device speeds as well as topology and bandwidth information
 
-- Have a validation pass that checks module is valid (e.g. that inputs are on the same device for matmul)
-- Add test that `DistributedSimulator` doesn't modify module
+- Have a validation pass that checks function is valid (e.g. that inputs are on the same device for matmul)
+- Add test that `DistributedSimulator` doesn't modify function
 
-- Maybe one problem with the return value of a pmap or scatter is that we are expecting things to have types but not shapes at module creation time, and then run a shape inference pass later to fill in the shapes. Would it be cleaner to just infer shapes and fill in a "full" type at op-creation time? Will we ever need to run shape inference later?
+- Maybe one problem with the return value of a pmap or scatter is that we are expecting things to have types but not shapes at function creation time, and then run a shape inference pass later to fill in the shapes. Would it be cleaner to just infer shapes and fill in a "full" type at op-creation time? Will we ever need to run shape inference later?
 
 
 ## Problems
 
-- Should a tensor never have a device? What if a pmap's submodule expects a tensor? Then how do we enforce that it is on device d? Is it better to go back to all values have an `Option[Device]`?
+- Should a tensor never have a device? What if a pmap's subfunction expects a tensor? Then how do we enforce that it is on device d? Is it better to go back to all values have an `Option[Device]`?

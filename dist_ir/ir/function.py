@@ -32,9 +32,9 @@ class Function:
         """
         consumers = defaultdict(list)
         for op in self.ops:
-            for in_edge in op.in_edges:
+            for in_edge in op.inputs:
                 consumers[in_edge].append(op)
-            for out_edge in op.out_edges:
+            for out_edge in op.outputs:
                 consumers[out_edge] = []
         for v in consumers:
             consumers[v] = tuple(consumers[v])
@@ -49,13 +49,13 @@ class Function:
         for inp in self.inputs:
             seen.add(inp)
         for op in self.ops:
-            for in_edge in op.in_edges:
+            for in_edge in op.inputs:
                 if in_edge not in seen:
                     raise ValueError(
                         f"Ops are not in topological order: op {op.name} has "
                         f"unseen edge {in_edge}"
                     )
-            for out_edge in op.out_edges:
+            for out_edge in op.outputs:
                 seen.add(out_edge)
 
     def get_consumers(self, value: Value) -> List[Op]:
@@ -102,7 +102,7 @@ class Function:
         outputs = []
         for op in ops:
             subfunction_op_inputs = []
-            for inp in op.in_edges:
+            for inp in op.inputs:
                 if inp not in value_map:
                     if deepcopy:
                         value_map[inp] = subfunction.add_input_value(inp.name, inp.type)
@@ -110,7 +110,7 @@ class Function:
                         subfunction.inputs.append(inp)
                         value_map[inp] = inp
                 subfunction_op_inputs.append(value_map[inp])
-            output_names = [output.name for output in op.out_edges]
+            output_names = [output.name for output in op.outputs]
             if deepcopy:
                 subfunction_op_outputs = subfunction.add_op(
                     op.op_type,
@@ -122,11 +122,11 @@ class Function:
                 )
             else:
                 subfunction.ops.append(op)
-                subfunction_op_outputs = op.out_edges
+                subfunction_op_outputs = op.outputs
             if not isinstance(subfunction_op_outputs, tuple):
                 subfunction_op_outputs = (subfunction_op_outputs,)
             for orig_output, subfunction_output in zip(
-                op.out_edges, subfunction_op_outputs
+                op.outputs, subfunction_op_outputs
             ):
                 # We need to explicitly set the subfunction outputs because some output
                 # values might have consumers outside the subfunction (external).
@@ -174,7 +174,7 @@ class FunctionMaker:
         op = Op(
             op_type,
             name=name,
-            in_edges=None if inputs is None else tuple(inputs),
+            inputs=None if inputs is None else tuple(inputs),
             attributes=None if attributes is None else frozendict(attributes),
             subfunctions=None if subfunctions is None else tuple(subfunctions),
             output_names=None if output_names is None else tuple(output_names),
@@ -182,13 +182,13 @@ class FunctionMaker:
         self.ops.append(op)
 
         # Return the op outputs.
-        num_out_edges = len(op.out_edges)
+        num_out_edges = len(op.outputs)
         if num_out_edges == 0:
             return None
         elif num_out_edges == 1:
-            return op.out_edges[0]
+            return op.outputs[0]
         else:
-            return tuple(op.out_edges)
+            return tuple(op.outputs)
 
     def add_input_value(self, name, value_type):
         """Adds an input value to the function and returns the value."""
@@ -220,9 +220,9 @@ class FunctionMaker:
             is_output[input_value] = True
 
         for op in self.ops:
-            for in_edge in op.in_edges:
+            for in_edge in op.inputs:
                 is_output[in_edge] = False
-            for out_edge in op.out_edges:
+            for out_edge in op.outputs:
                 is_output[out_edge] = True
 
         self.outputs = [v for v in is_output if is_output[v]]
@@ -230,7 +230,7 @@ class FunctionMaker:
     def _get_ops_in_topological_order_helper(self, name, visited, order):
         visited.add(name)
 
-        out_edges = self.ops[name].out_edges
+        out_edges = self.ops[name].outputs
         for out_edge in out_edges:
             output_name = out_edge
             if output_name not in visited:

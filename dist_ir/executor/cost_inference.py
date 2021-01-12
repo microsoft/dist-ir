@@ -140,7 +140,7 @@ class CostModel:
         return costs
 
     def infer_costs(self, op):
-        inputs = op.in_edges
-        outputs = op.out_edges
+        inputs = op.inputs
+        outputs = op.outputs
 
         return self._op_register[op.op_type](op, inputs, outputs)

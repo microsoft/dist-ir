@@ -12,10 +12,10 @@ from .type import Type
 class Op:
     op_type: str
     name: str = ""
-    in_edges: Tuple[Value] = field(default_factory=tuple)
+    inputs: Tuple[Value] = field(default_factory=tuple)
     attributes: Dict[str, Any] = field(default_factory=frozendict)
     subfunctions: Tuple["Function"] = field(default_factory=tuple)
-    out_edges: Tuple[Value] = field(init=False)
+    outputs: Tuple[Value] = field(init=False)
 
     # These are not fields, just parameters to init and post_init:
     output_names: InitVar[Tuple[str]] = None
@@ -26,9 +26,9 @@ class Op:
             # Handle pmap specially
             assert len(self.subfunctions) == 1
             # Number of inputs is arbitrary but positive
-            assert len(self.in_edges) > 0
+            assert len(self.inputs) > 0
             # Number of inputs matches subfunction
-            assert len(self.in_edges) == len(self.subfunctions[0].inputs)
+            assert len(self.inputs) == len(self.subfunctions[0].inputs)
             # Number of outputs is given by subfunction
             num_outputs = len(self.subfunctions[0].outputs)
 
@@ -36,7 +36,7 @@ class Op:
             if self.op_type not in OpRegister:
                 raise ValueError(f"Invalid op type {self.op_type}")
             # Check that we got the right number of inputs
-            assert len(self.in_edges) == OpRegister[self.op_type].num_inputs
+            assert len(self.inputs) == OpRegister[self.op_type].num_inputs
             # Number of outputs is given by OpRegister
             num_outputs = OpRegister[self.op_type].num_outputs
 
@@ -51,8 +51,8 @@ class Op:
             raise ValueError(
                 f"Op {self.name} has {num_outputs} outputs; {len(output_types)} expected"
             )
-        out_edges = tuple(
+        outputs = tuple(
             Value(out_name, out_type)
             for out_name, out_type in zip(output_names, output_types)
         )
-        object.__setattr__(self, "out_edges", out_edges)  # Can't assign to frozen field
+        object.__setattr__(self, "outputs", outputs)  # Can't assign to frozen field

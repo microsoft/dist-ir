@@ -57,7 +57,7 @@ class SequentialExecutor:
         # Execute ops in topological order.
         for op in function.ops:
             inputs = []
-            for in_edge in op.in_edges:
+            for in_edge in op.inputs:
                 if in_edge in function.inputs:
                     if in_edge not in input_data:
                         raise ValueError(
@@ -72,7 +72,7 @@ class SequentialExecutor:
                 inputs.append(input_value)
 
             res = self._compute_op(op, inputs)
-            for i, out_edge in enumerate(op.out_edges):
+            for i, out_edge in enumerate(op.outputs):
                 output_data[out_edge] = res[i]
                 consumers[out_edge] = len(function.get_consumers(out_edge))
 

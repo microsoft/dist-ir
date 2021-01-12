@@ -46,8 +46,8 @@ class DistributedSimulator:
     def _simulate(self, function: Function, state: DistributedSimulatorState):
 
         for op in function.ops:
-            in_edges = op.in_edges
-            out_edges = op.out_edges
+            in_edges = op.inputs
+            out_edges = op.outputs
 
             # Synchronize all input and output devices for this op.
             input_devices = utils.get_all_devices(in_edges)

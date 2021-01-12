@@ -239,7 +239,7 @@ def infer_types(function: Function, inputs: List[Value]) -> Function:
     op: Op  # https://stackoverflow.com/q/59102038
     for op in function.ops:
         # Invariant: inputs of op are already typed (as ops are toposorted)
-        typed_inputs = tuple(value_map[inp] for inp in op.in_edges)
+        typed_inputs = tuple(value_map[inp] for inp in op.inputs)
         input_types = tuple(v.type for v in typed_inputs)
 
         # Infer types of outputs and create output values
@@ -258,13 +258,13 @@ def infer_types(function: Function, inputs: List[Value]) -> Function:
             typed_inputs,
             op.attributes,
             subfunctions,
-            tuple(v.name for v in op.out_edges),
+            tuple(v.name for v in op.outputs),
             out_types,
         )
         new_function.ops.append(new_op)
 
         # Add op's outputs to value_map
-        for old_out, out in zip(op.out_edges, new_op.out_edges):
+        for old_out, out in zip(op.outputs, new_op.outputs):
             assert_is_typed(out)
             value_map[old_out] = out
 

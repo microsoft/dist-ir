@@ -121,8 +121,8 @@ def _(function: Function, ctx):
 
 @register_pretty(Op)
 def _(op: Op, ctx):
-    results = concat(_join(*(pretty_dispatch(r, ctx) for r in op.out_edges)))
-    args = concat(_join(*(v.name for v in op.in_edges)))
+    results = concat(_join(*(pretty_dispatch(r, ctx) for r in op.outputs)))
+    args = concat(_join(*(v.name for v in op.inputs)))
 
     if op.op_type == "Pmap":
         lambda_args = _join(

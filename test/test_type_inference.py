@@ -40,10 +40,10 @@ def test_allreduce():
     op1 = Op(
         "Allreduce",
         "Allreduces/xis",
-        in_edges=[xis],
+        inputs=[xis],
         output_names=["xs"],
     )
-    function = Function("foo", (op1,), (xis,), (op1.out_edges[0],))
+    function = Function("foo", (op1,), (xis,), (op1.outputs[0],))
     function = infer_types(function, [xis])
     xs = function.outputs[0]
 

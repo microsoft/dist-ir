@@ -51,7 +51,7 @@ class OpRegisterEntry_:
 
     def infer_types(self, op, output_names=None):
         # Verify that number of inputs and input types match the expected input types.
-        inputs = op.in_edges
+        inputs = op.inputs
         if len(inputs) != len(self._input_types):
             raise ValueError(
                 f"Op {op.name}: Expected {len(self._input_types)} inputs, "
@@ -83,7 +83,7 @@ class OpRegisterEntry_:
 class AllreduceOpRegisterEntry(OpRegisterEntry_):
     # TODO: Remove this and handle generic types in OpRegisterEntry_
     def infer_types(self, op, output_names=None):
-        inputs = op.in_edges
+        inputs = op.inputs
         if len(inputs) != 1:
             raise ValueError(f"Op {op.name}: Expected 1 input, got {len(inputs)}")
         elif not isinstance(inputs[0].type, TupleType):
@@ -102,7 +102,7 @@ class AllreduceOpRegisterEntry(OpRegisterEntry_):
 class BroadcastScatterOpRegisterEntry(OpRegisterEntry_):
     # TODO: Remove this and handle generic types in OpRegisterEntry_
     def infer_types(self, op, output_names=None):
-        inputs = op.in_edges
+        inputs = op.inputs
         devices = op.attributes["devices"]
         if output_names is not None and len(output_names) != 1:
             raise ValueError(
@@ -157,7 +157,7 @@ class PmapOpRegisterEntry(OpRegisterEntry_):
 
 class SelectOpRegisterEntry(OpRegisterEntry_):
     def infer_types(self, op, output_names=None):
-        inputs = op.in_edges
+        inputs = op.inputs
         dim = op.attributes["dim"]
         output_value = Value(output_names[0], copy.deepcopy(inputs[0].type.types[dim]))
         op.add_out_edge(output_value)
@@ -165,7 +165,7 @@ class SelectOpRegisterEntry(OpRegisterEntry_):
 
 class SendOpRegisterEntry(OpRegisterEntry_):
     def infer_types(self, op, output_names=None):
-        inputs = op.in_edges
+        inputs = op.inputs
         assert len(inputs) == 1 and isinstance(inputs[0].type, Tensor)
         input_type = inputs[0].type
         device = op.attributes["device"]
@@ -176,7 +176,7 @@ class SendOpRegisterEntry(OpRegisterEntry_):
 
 class SplitOpRegisterEntry(OpRegisterEntry_):
     def infer_types(self, op, output_names=None):
-        inputs = op.in_edges
+        inputs = op.inputs
         num_splits = op.attributes["num_splits"]
         output_types = []
         for i in range(num_splits):

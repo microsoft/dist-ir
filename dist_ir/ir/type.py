@@ -86,6 +86,7 @@ class TupleType(Type):
         # Override __init__ because it doesn't make sense for a tuple to have a
         # device. Devices are stored in each tuple element.
         object.__setattr__(self, "types", types)  # Can't assign to frozen field
+        assert isinstance(types, tuple) and all(isinstance(t, Type) for t in types)
         assert self.device is None
 
     def __repr__(self):

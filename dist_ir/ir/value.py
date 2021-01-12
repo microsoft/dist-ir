@@ -7,7 +7,7 @@ from .type import Type
 class Value:
     """A DistIR value. While values have names, DistIR makes no attempt to ensure
     value names are unique in a function. Therefore Value equality is object
-    equality.
+    equality. (TODO correct terminology for this?)
     """
 
     name: str

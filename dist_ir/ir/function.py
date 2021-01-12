@@ -44,12 +44,6 @@ class Function:
         # Check that ops don't use values from the future
         self._verify_ops_in_topological_order()
 
-        # Putting this import at the top level causes an import loop
-        from ..executor.shape_inference import infer_shapes
-
-        # TODO bring this back after refactor
-        # infer_shapes(self)
-
     def _verify_ops_in_topological_order(self):
         seen = set()
         for inp in self.inputs:

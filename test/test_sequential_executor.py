@@ -5,7 +5,6 @@ import torch
 from dist_ir.ir import Device, FunctionMaker, cpprint
 from dist_ir.ir.type import Float, Tensor, TupleType
 from dist_ir.executor import SequentialExecutor
-from dist_ir.executor.shape_inference import infer_shapes
 
 
 class Helper:

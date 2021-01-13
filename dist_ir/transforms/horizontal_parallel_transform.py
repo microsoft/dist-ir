@@ -1,10 +1,10 @@
-from ..ir.module import Module
+from ..ir.function import FunctionMaker
 
 import copy
 
 
 class HorizontalParallelTransform:
-    """Partitions a module using horizontal parallelism.
+    """Partitions a function using horizontal parallelism.
 
     Attributes:
       op_names: The names of ops captured by the transform.
@@ -19,64 +19,69 @@ class HorizontalParallelTransform:
         self._reduction_params = reduction_params
         self._devices = devices
 
-    def apply(self, module):
-        """Applies the transformation to the given module and returns the transformed module."""
-        transformed_module = Module()
-        submodule = module.get_submodule(self._op_names)
+    def apply(self, function, verify_fn=None):
+        """Applies the transformation to the given function and returns the transformed function."""
+        transformed_function = FunctionMaker()
+        subfunction = function.get_subfunction(self._op_names)
+        if verify_fn is not None:
+            if not verify_fn(subfunction):
+                return None
 
         # Either scatter or broadcast each input value depending on what the user
         # has requested.
         # TODO: Add explicit Send ops if the source device is not one oGf the
         #       destination devices.
-        input_values = module.get_inputs()
-        pmap_input_values = []
         value_map = {}
-        for input_value in input_values:
-            # TODO: Remove deepcopy of type?
-            v = transformed_module.add_input_value(
-                input_value.name, copy.deepcopy(input_value.type)
+
+        for input_value in function.inputs:
+            value_map[input_value] = transformed_function.add_input_value(
+                input_value.name, input_value.type
             )
-            value_map[v.name] = v
-            if input_value.name in self._param_dims:
-                vs = transformed_module.add_op(
-                    "Scatter",
-                    name=f"Scatter/{v.name}",
-                    inputs=[v],
-                    attributes={
-                        "devices": self._devices,
-                        "dim": self._param_dims[input_value.name],
-                    },
-                    output_names=[f"{v.name}s"],
-                )
-            else:
-                vs = transformed_module.add_op(
-                    "Broadcast",
-                    name=f"Broadcast/{v.name}",
-                    inputs=[v],
-                    attributes={"devices": self._devices},
-                    output_names=[f"{v.name}s"],
-                )
-            pmap_input_values.append(vs)
 
         added_pmap = False
-        for op_name, op in module.get_ops().items():
-            if submodule.is_op(op_name):
-                # Only add the Pmap op the first time we encounter a submodule op.
-                if added_pmap:
+        for op in function.ops:
+            if op in subfunction.ops:
+                # Only add the Pmap op the first time we encounter a subfunction op.
+                # Wait for all subfunction inputs to be added to the transformed module before
+                # adding the Pmap op.
+                if added_pmap or not all(v in value_map for v in subfunction.inputs):
                     continue
 
-                # Add the Pmap operator to the transformed module. The Pmap operator will
-                # encapsulate the original module.
-                output_values = submodule.get_outputs()
+                pmap_input_values = []
+                for input_value in subfunction.inputs:
+                    v = value_map[input_value]
+                    if input_value in self._param_dims:
+                        vs = transformed_function.add_op(
+                            "Scatter",
+                            name=f"Scatter/{v.name}",
+                            inputs=[v],
+                            attributes={
+                                "devices": self._devices,
+                                "dim": self._param_dims[input_value],
+                            },
+                            output_names=[f"{v.name}s"],
+                        )
+                    else:
+                        vs = transformed_function.add_op(
+                            "Broadcast",
+                            name=f"Broadcast/{v.name}",
+                            inputs=[v],
+                            attributes={"devices": self._devices},
+                            output_names=[f"{v.name}s"],
+                        )
+                    pmap_input_values.append(vs)
+
+                # Add the Pmap operator to the transformed function. The Pmap operator will
+                # encapsulate the original function.
                 pmap_output_names = []
-                for i, output_value in enumerate(output_values):
+                for i, output_value in enumerate(subfunction.outputs):
                     pmap_output_name = f"{output_value.name}is"
                     pmap_output_names.append(pmap_output_name)
-                pmap_output_values = transformed_module.add_op(
+                pmap_output_values = transformed_function.add_op(
                     "Pmap",
                     inputs=pmap_input_values,
                     attributes={"devices": self._devices},
-                    submodules=[submodule],
+                    subfunctions=[subfunction],
                     output_names=pmap_output_names,
                 )
 
@@ -86,21 +91,19 @@ class HorizontalParallelTransform:
                 # Add reduction operators to collect output values from each device.
                 # TODO: Add explicit Send ops if the destination device is not one of the
                 #       source devices.
-                for i, output_value in enumerate(output_values):
-                    reduction_op_type = self._reduction_params[output_value.name][
-                        "op_type"
-                    ]
+                for i, output_value in enumerate(subfunction.outputs):
+                    reduction_op_type = self._reduction_params[output_value]["op_type"]
                     if reduction_op_type == "Allreduce":
-                        pmap_output = transformed_module.add_op(
+                        pmap_output = transformed_function.add_op(
                             "Allreduce",
                             name=f"Allreduce/{output_value.name}",
                             inputs=[pmap_output_values[i]],
                             output_names=[f"{output_value.name}s"],
                         )
                     elif reduction_op_type == "Gather":
-                        dim = self._reduction_params[output_value.name]["dim"]
-                        device = self._reduction_params[output_value.name]["device"]
-                        pmap_output = transformed_module.add_op(
+                        dim = self._reduction_params[output_value]["dim"]
+                        device = self._reduction_params[output_value]["device"]
+                        pmap_output = transformed_function.add_op(
                             "Gather",
                             name=f"Gather/{output_value.name}",
                             inputs=[pmap_output_values[i]],
@@ -112,25 +115,22 @@ class HorizontalParallelTransform:
                             f"Unknown reduction op type {reduction_op_type} for "
                             f"output value {output_value}"
                         )
-                    value_map[output_value.name] = pmap_output
+                    value_map[output_value] = pmap_output
                 added_pmap = True
             else:
-                inputs = []
-                for input in op.get_in_edges():
-                    inputs.append(value_map[input.name])
-                output_names = [output.name for output in op.get_out_edges()]
+                inputs = [value_map[v] for v in op.inputs]
+                output_names = [v.name for v in op.outputs]
 
-                outputs = transformed_module.add_op(
+                outputs = transformed_function.add_op(
                     op.op_type,
                     name=op.name,
                     inputs=inputs,
-                    attributes=copy.deepcopy(op._attributes),
-                    submodules=copy.deepcopy(op._submodules),
+                    attributes=op.attributes,
+                    subfunctions=op.subfunctions,
                     output_names=output_names,
                 )
                 if not isinstance(outputs, tuple):
                     outputs = (outputs,)
                 for output in outputs:
-                    value_map[output.name] = output
-        transformed_module.finalize()
-        return transformed_module
+                    value_map[output] = output
+        return transformed_function.finalize()

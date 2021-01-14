@@ -69,6 +69,10 @@ def split(op, inputs):
     return np.split(inputs[0], num_splits, axis=dim)
 
 
+def transpose(op, inputs):
+    return inputs[0].T
+
+
 NumPyRegister = {
     "Add": add,
     "Allreduce": allreduce,
@@ -84,4 +88,5 @@ NumPyRegister = {
     "Select": select,
     "Send": identity,
     "Split": split,
+    "Transpose": transpose,
 }

@@ -7,14 +7,14 @@ class HorizontalParallelTransform:
     """Partitions a function using horizontal parallelism.
 
     Attributes:
-      op_names: The names of ops captured by the transform.
+      ops: The ops affected by the transform.
       batch_dims: A map from input value name to partition dimension.
       reduction_params: A map from output value name to a map of reduction op params.
       devices: The devices over which to partition the model.
     """
 
-    def __init__(self, op_names, param_dims, reduction_params, devices):
-        self._op_names = op_names
+    def __init__(self, ops, param_dims, reduction_params, devices):
+        self._ops = ops
         self._param_dims = param_dims
         self._reduction_params = reduction_params
         self._devices = devices
@@ -22,7 +22,7 @@ class HorizontalParallelTransform:
     def apply(self, function, verify_fn=None):
         """Applies the transformation to the given function and returns the transformed function."""
         transformed_function = FunctionMaker()
-        subfunction = function.get_subfunction(self._op_names)
+        subfunction = function.get_subfunction(self._ops)
         if verify_fn is not None:
             if not verify_fn(subfunction):
                 return None

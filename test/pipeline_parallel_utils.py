@@ -39,10 +39,10 @@ def construct_function_and_partition_map():
     function = function.finalize()
 
     stages = [
-        function.get_subfunction(("MatMul0",), name="f0"),
-        function.get_subfunction(("MatMul1", "Loss"), name="f1"),
-        function.get_subfunction(("LossGrad", "MatMul1Grad"), name="b1"),
-        function.get_subfunction(("MatMul0Grad",), name="b0"),
+        function.get_subfunction([function.ops[0]], name="f0"),
+        function.get_subfunction(function.ops[1:3], name="f1"),
+        function.get_subfunction(function.ops[3:5], name="b1"),
+        function.get_subfunction([function.ops[5]], name="b0"),
     ]
 
     partition_map = OrderedDict(

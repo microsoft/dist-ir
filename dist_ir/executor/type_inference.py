@@ -127,6 +127,14 @@ def _matmul_grad_prop_fn(op, x, y, z):
     return (x, y)
 
 
+def _reshape_prop_fn(op, x, y):
+    if not (
+        isinstance(x, Tensor) and isinstance(y, Tensor) and isinstance(y.dtype, Int)
+    ):
+        _raise_type_error(op, x)
+    raise NotImplementedError()
+
+
 def _scatter_prop_fn(op, x):
     if not isinstance(x, Tensor):
         _raise_type_error(op, x)
@@ -187,10 +195,19 @@ def _split_prop_fn(op, x):
 
 
 def _transpose_prop_fn(op, x):
-    # TODO: Support transpose of tensors with > 2 dimensions
-    if not (isinstance(x, Tensor) and len(x.shape) == 2):
+    if not (
+        isinstance(x, Tensor)
+        and (
+            len(x.shape) == 2
+            or ("perm" in op.attributes and len(op.attributes["perm"]) == len(x.shape))
+        )
+    ):
         _raise_type_error(op, x)
-    return Tensor(dtype=x.dtype, shape=x.shape[::-1], device=x.device)
+    if len(x.shape) == 2:
+        new_shape = x.shape[::-1]
+    else:
+        new_shape = [x.shape[i] for i in op.attributes["perm"]]
+    return Tensor(dtype=x.dtype, shape=new_shape, device=x.device)
 
 
 TypePropRegister = {
@@ -204,6 +221,7 @@ TypePropRegister = {
     "LossGrad": _elementwise_tensor_op_prop_fn,
     "MatMul": _matmul_prop_fn,
     "MatMulGrad": _matmul_grad_prop_fn,
+    "Reshape": _reshape_prop_fn,
     "Scatter": _scatter_prop_fn,
     "Select": _select_prop_fn,
     "Send": _send_prop_fn,

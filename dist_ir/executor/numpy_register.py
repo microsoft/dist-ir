@@ -54,6 +54,10 @@ def relu(op, inputs):
     return np.maximum(inputs[0], 0)
 
 
+def reshape(op, inputs):
+    return np.reshape(inputs[0], inputs[1])
+
+
 def select(op, inputs):
     dim = op.attributes["dim"]
     return inputs[0][dim]
@@ -70,6 +74,8 @@ def split(op, inputs):
 
 
 def transpose(op, inputs):
+    if "perm" in op.attributes:
+        return np.transpose(inputs[0], op.attributes["perm"])
     return inputs[0].T
 
 
@@ -84,6 +90,7 @@ NumPyRegister = {
     "MatMul": matmul,
     "MatMulGrad": matmul_grad,
     "Relu": relu,
+    "Reshape": reshape,
     "Scatter": split,
     "Select": select,
     "Send": identity,

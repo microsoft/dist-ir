@@ -21,6 +21,18 @@ def attention_numpy(n, h, d, Q, K, V, W_Q, W_K, W_V, W_O):
     return y2
 
 
+def megatron_attention_numpy(n, h, d, Q, K, V, W_Q, W_K, W_V, W_O):
+    qs = [np.matmul(Q, W_Q[:, i * d : (i + 1) * d]) for i in range(h)]
+    ks = [np.matmul(K, W_K[:, i * d : (i + 1) * d]) for i in range(h)]
+    vs = [np.matmul(V, W_V[:, i * d : (i + 1) * d]) for i in range(h)]
+
+    y1s = [np.matmul(np.matmul(qs[i], ks[i].T), vs[i]) for i in range(h)]
+    y2s = [np.matmul(y1s[i], W_O[i * d : (i + 1) * d]) for i in range(h)]
+
+    # Allreduce
+    return np.sum(y2s, axis=0)
+
+
 def test_attention():
     n = 64
     d = 64
@@ -113,3 +125,20 @@ def test_attention():
         orig_res[function.outputs[0]],
         attention_numpy(n, h, d, _Q, _K, _V, _W_Q, _W_K, _W_V, _W_O),
     )
+
+
+def test_megatron():
+    n = 64
+    h = 8
+    d = 64
+    d_model = h * d
+    Q = np.random.normal(size=(n, d_model))
+    K = np.random.normal(size=(n, d_model))
+    V = np.random.normal(size=(n, d_model))
+    W_Q = np.random.normal(size=(d_model, d_model))
+    W_K = np.random.normal(size=(d_model, d_model))
+    W_V = np.random.normal(size=(d_model, d_model))
+    W_O = np.random.normal(size=(d_model, d_model))
+    x = attention_numpy(n, h, d, Q, K, V, W_Q, W_K, W_V, W_O)
+    y = megatron_attention_numpy(n, h, d, Q, K, V, W_Q, W_K, W_V, W_O)
+    np.testing.assert_array_almost_equal(x, y)

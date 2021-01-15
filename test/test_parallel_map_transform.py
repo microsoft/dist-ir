@@ -2,7 +2,7 @@ import numpy as np
 
 from dist_ir.ir import Device, FunctionMaker
 from dist_ir.ir.type import Float, Tensor
-from dist_ir.transforms import DataParallelTransform
+from dist_ir.transforms import ParallelMapTransform
 from dist_ir.executor import SequentialExecutor
 
 
@@ -16,8 +16,9 @@ def test_single_variable_partition():
     b = function.add_input_value("b", Tensor(Float(), (4, 4)))
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
     function = function.finalize()
-    transform = DataParallelTransform(
-        batch_dims={function.inputs[0]: 0},
+    transform = ParallelMapTransform(
+        ops=function.ops,
+        input_dims={function.inputs[0]: 0},
         reduction_params={
             function.outputs[0]: {"op_type": "Gather", "dim": 0, "device": d0}
         },
@@ -78,8 +79,9 @@ def test_double_variable_partition():
     x = function.add_op("MatMul", "MatMul", inputs=[a, b], output_names=["x"])
     y = function.add_op("Add", "Add", inputs=[x, c], output_names=["y"])
     function = function.finalize()
-    transform = DataParallelTransform(
-        batch_dims={function.inputs[0]: 0, function.inputs[2]: 0},
+    transform = ParallelMapTransform(
+        ops=function.ops,
+        input_dims={function.inputs[0]: 0, function.inputs[2]: 0},
         reduction_params={
             function.outputs[0]: {"op_type": "Gather", "dim": 0, "device": d0}
         },
@@ -166,8 +168,9 @@ def test_mnist():
         "MatMulGrad", "MatMul0Grad", inputs=[x, wA, da], output_names=["dx", "dwA"]
     )
     function = function.finalize()
-    transform = DataParallelTransform(
-        batch_dims={function.inputs[0]: 0, function.inputs[1]: 0},
+    transform = ParallelMapTransform(
+        ops=function.ops,
+        input_dims={function.inputs[0]: 0, function.inputs[1]: 0},
         reduction_params={
             function.outputs[0]: {"op_type": "Gather", "dim": 0, "device": d0},
             function.outputs[1]: {"op_type": "Allreduce"},

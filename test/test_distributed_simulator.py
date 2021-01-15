@@ -5,7 +5,7 @@ from dist_ir.ir.type import Tensor
 from dist_ir.executor.cost_inference import CostModel
 from dist_ir.executor.type_inference import infer_types
 from dist_ir.executor import DistributedSimulator
-from dist_ir.transforms import DataParallelTransform
+from dist_ir.transforms import ParallelMapTransform
 
 
 def test_single_device():
@@ -44,8 +44,9 @@ def test_data_parallel():
     y = function.add_op("MatMul", "MatMul1", inputs=[x, c], output_names=["y"])
     function = function.finalize()
     function = infer_types(function, [a, b, c])
-    transform = DataParallelTransform(
-        batch_dims={function.inputs[0]: 0},
+    transform = ParallelMapTransform(
+        ops=function.ops,
+        input_dims={function.inputs[0]: 0},
         reduction_params={
             function.outputs[0]: {"op_type": "Gather", "dim": 0, "device": d0}
         },
@@ -88,8 +89,9 @@ def test_chrome_trace():
     cost_model = CostModel(topology, device_speeds)
     simulator = DistributedSimulator(cost_model)
 
-    transform = DataParallelTransform(
-        batch_dims={function.inputs[0]: 0},
+    transform = ParallelMapTransform(
+        ops=function.ops,
+        input_dims={function.inputs[0]: 0},
         reduction_params={
             function.outputs[0]: {"op_type": "Gather", "dim": 0, "device": d0}
         },

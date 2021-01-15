@@ -24,7 +24,8 @@ def matmul(wA: Tensor[(F, H), 0], x: Tensor[(B, F), 0]):
 
 First, run a data-parallel transform on it:
 
-```python
+```
+Python
 def matmul_dp(wA: Tensor[(F, H), 0], x: Tensor[(B, F), 0]):
     xs: Tuple[Tensor[(B/N, F), 1], Tensor[(B/N, F), 2]] = scatter(x, dim=0, devices=[1, 2])
     wAs: Tuple[Tensor[(F, H), 1], Tensor[(F, H), 2]] = broadcast(x, devices=[1, 2])
@@ -154,8 +155,7 @@ Easy to write smaller simpler transforms and compose them
 
 ## DeviceMap implementation proposal
 
-```
-Python
+```python
 @dataclass(frozen=True)
 class DeviceMap(Type):
     
@@ -182,16 +182,14 @@ full list of `Device`s the enclosing `pmap` is bound to, and therefore we can su
 This can be extended to `pmap` subfunctions of arbitrary depth.
 
 As an example, suppose we have the following `DeviceMap`:
-```
-Python
+```python
 {
     1: [1, 3],
     2: [2, 4]
 }
 ```
 We first apply a data parallel transform, passing an empty `Device` key list. This produces the following function:
-```
-Python
+```python
 def matmul(wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 0], x: Tensor[(B, F), 0]):
     device_map: DeviceMap = {1: [1, 3], 2: [2, 4]}
     xs_dp: Tuple[Tensor[(B/2, F), 1], Tensor[(B/2, F), 2]] = scatter(x, dim=0, device_keys=[])
@@ -210,8 +208,7 @@ def matmul(wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 0], x: Tensor[(B, F), 0]):
     return y
 ```
 Next we apply a horizontal parallel transform passing a `Device` key list of `[d]`, which gives us this function:
-```
-Python
+```python
 def matmul(wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 0], x: Tensor[(B, F), 0]):
     device_map: DeviceMap = {1: [1, 3], 2: [2, 4]}
     xs_dp: Tuple[Tensor[(B/2, F), ?], Tensor[(B/2, F), ?]] = scatter(x, dim=0, device_keys=[])

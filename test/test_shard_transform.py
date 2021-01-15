@@ -2,7 +2,11 @@ import numpy as np
 
 from dist_ir.ir import Device, FunctionMaker
 from dist_ir.ir.type import Float, Tensor
+<<<<<<< HEAD:test/test_shard_transform.py
 from dist_ir.transforms import shard_transform
+=======
+from dist_ir.transforms import ParallelMapTransform
+>>>>>>> c8288ea... Consolidate data parallel and horizontal parallel transforms:test/test_parallel_map_transform.py
 from dist_ir.executor import SequentialExecutor
 
 
@@ -16,8 +20,12 @@ def test_single_variable_data_parallel():
     b = function.add_input_value("b", Tensor(Float(), (4, 4)))
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
     function = function.finalize()
+<<<<<<< HEAD:test/test_shard_transform.py
     transformed_function = shard_transform(
         function=function,
+=======
+    transform = ParallelMapTransform(
+>>>>>>> c8288ea... Consolidate data parallel and horizontal parallel transforms:test/test_parallel_map_transform.py
         ops=function.ops,
         input_dims={function.inputs[0]: 0},
         reduction_params={
@@ -79,8 +87,12 @@ def test_double_variable_data_parallel():
     x = function.add_op("MatMul", "MatMul", inputs=[a, b], output_names=["x"])
     y = function.add_op("Add", "Add", inputs=[x, c], output_names=["y"])
     function = function.finalize()
+<<<<<<< HEAD:test/test_shard_transform.py
     transformed_function = shard_transform(
         function=function,
+=======
+    transform = ParallelMapTransform(
+>>>>>>> c8288ea... Consolidate data parallel and horizontal parallel transforms:test/test_parallel_map_transform.py
         ops=function.ops,
         input_dims={function.inputs[0]: 0, function.inputs[2]: 0},
         reduction_params={
@@ -319,8 +331,12 @@ def test_mnist_data_parallel():
         "MatMulGrad", "MatMul0Grad", inputs=[x, wA, da], output_names=["dx", "dwA"]
     )
     function = function.finalize()
+<<<<<<< HEAD:test/test_shard_transform.py
     transformed_function = shard_transform(
         function=function,
+=======
+    transform = ParallelMapTransform(
+>>>>>>> c8288ea... Consolidate data parallel and horizontal parallel transforms:test/test_parallel_map_transform.py
         ops=function.ops,
         input_dims={function.inputs[0]: 0, function.inputs[1]: 0},
         reduction_params={

@@ -1,21 +1,33 @@
 from ..ir.function import FunctionMaker
+from ..ir import Device
 
 import copy
 
 
-class HorizontalParallelTransform:
-    """Partitions a function using horizontal parallelism.
+class ParallelMapTransform:
+    """Maps a function across devices using a parallel map (pmap) operator.
+
+    The specifies which input values to partition between each device as well as the
+    dimension to partition for each input. The specified input values are
+    scattered between each device, while the remaining input values are broadcasted.
+    Data parallelism is achieved by partitioning the input data along the batch
+    dimension and replicating the weights. Horizontal parallelism is achieved by
+    partitioning the weights and replicating the input data. The specified function will
+    be wrapped as a subfunction of a Pmap operator. The outputs of the Pmap operator will
+    be aggregated using the user-specified reduction functions. The user can optionally
+    submit a verification function which ensures the specified subfunction is valid
+    before applying the transform.
 
     Attributes:
-      ops: The ops affected by the transform.
-      batch_dims: A map from input value name to partition dimension.
-      reduction_params: A map from output value name to a map of reduction op params.
-      devices: The devices over which to partition the model.
+      ops: The list of ops that span the subfunction to map across devices.
+      input_dims: A map from input value to partition dimension.
+      reduction_params: A map from output value to a map of reduction op params.
+      devices: The devices over which to map the model.
     """
 
-    def __init__(self, ops, param_dims, reduction_params, devices):
+    def __init__(self, ops, input_dims, reduction_params, devices):
         self._ops = ops
-        self._param_dims = param_dims
+        self._input_dims = input_dims
         self._reduction_params = reduction_params
         self._devices = devices
 
@@ -24,7 +36,7 @@ class HorizontalParallelTransform:
         transformed_function = FunctionMaker()
         subfunction = function.get_subfunction(self._ops)
         if verify_fn is not None:
-            if not verify_fn(subfunction):
+            if not verify_fn(subfunction, self._input_dims, self._reduction_params):
                 return None
 
         # Either scatter or broadcast each input value depending on what the user
@@ -50,14 +62,14 @@ class HorizontalParallelTransform:
                 pmap_input_values = []
                 for input_value in subfunction.inputs:
                     v = value_map[input_value]
-                    if input_value in self._param_dims:
+                    if input_value in self._input_dims:
                         vs = transformed_function.add_op(
                             "Scatter",
                             name=f"Scatter/{v.name}",
                             inputs=[v],
                             attributes={
                                 "devices": self._devices,
-                                "dim": self._param_dims[input_value],
+                                "dim": self._input_dims[input_value],
                             },
                             output_names=[f"{v.name}s"],
                         )
@@ -80,7 +92,10 @@ class HorizontalParallelTransform:
                 pmap_output_values = transformed_function.add_op(
                     "Pmap",
                     inputs=pmap_input_values,
-                    attributes={"devices": self._devices},
+                    attributes={
+                        "devices": self._devices,
+                        "device_var": Device.get_new_device_variable("gpu"),
+                    },
                     subfunctions=[subfunction],
                     output_names=pmap_output_names,
                 )
@@ -133,4 +148,5 @@ class HorizontalParallelTransform:
                     outputs = (outputs,)
                 for output in outputs:
                     value_map[output] = output
+
         return transformed_function.finalize()

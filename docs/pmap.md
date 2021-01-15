@@ -174,7 +174,6 @@ the device tree. These keys will be stored as attributes on the `Broadcast` and 
 
 The full explicit `Device` list will be resolved at simulation time. When the simulator reaches a `Scatter` or `Broadcast` op, it will index into the
 `DeviceMap` using the op's `Device` key list to determine the list of output devices over which to distribute the input value.
-An empty key list indicates that the top-level `DeviceMap` dictionary keys should be used as the list of output devices.
 Note that we can infer the list of devices over which the `pmap` consumer op is bound to based on this list of output devices. 
 
 If a key in the `Broadcast`/`Scatter` key list is a `Device` variable, then we know the op is within a `pmap` context. In this case we would know the
@@ -184,17 +183,19 @@ This can be extended to `pmap` subfunctions of arbitrary depth.
 As an example, suppose we have the following `DeviceMap`:
 ```python
 {
-    1: [1, 3],
-    2: [2, 4]
+    0: {
+        1: [1, 3],
+        2: [2, 4]
+    }
 }
 ```
 We first apply a data parallel transform, passing an empty `Device` key list. This produces the following function:
 ```python
 def matmul(wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 0], x: Tensor[(B, F), 0]):
     device_map: DeviceMap = {1: [1, 3], 2: [2, 4]}
-    xs_dp: Tuple[Tensor[(B/2, F), 1], Tensor[(B/2, F), 2]] = scatter(x, dim=0, device_keys=[])
-    wAs_dp: Tuple[Tensor[(F, H), 1], Tensor[(F, H), 2]] = broadcast(wA, device_keys=[])
-    wBs_dp: Tuple[Tensor[(H, C), 1], Tensor[(H, C), 2]] = broadcast(wB, device_keys=[])
+    xs_dp: Tuple[Tensor[(B/2, F), 1], Tensor[(B/2, F), 2]] = scatter(x, dim=0, device_keys=[0])
+    wAs_dp: Tuple[Tensor[(F, H), 1], Tensor[(F, H), 2]] = broadcast(wA, device_keys=[0])
+    wBs_dp: Tuple[Tensor[(H, C), 1], Tensor[(H, C), 2]] = broadcast(wB, device_keys=[0])
     ys_dp: Tuple[Tensor[(B/2, C), 1], Tensor[(B/2, C), 2]] = pmap(
         lambda d:
         lambda (xi: Tensor[(B/2, F), d], wAi: Tensor[(F, H), d], wBi: Tensor[(H, C), d]): {
@@ -211,9 +212,9 @@ Next we apply a horizontal parallel transform passing a `Device` key list of `[d
 ```python
 def matmul(wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 0], x: Tensor[(B, F), 0]):
     device_map: DeviceMap = {1: [1, 3], 2: [2, 4]}
-    xs_dp: Tuple[Tensor[(B/2, F), ?], Tensor[(B/2, F), ?]] = scatter(x, dim=0, device_keys=[])
-    wAs_dp: Tuple[Tensor[(F, H), ?], Tensor[(F, H), ?]] = broadcast(wA, device_keys=[])
-    wBs_dp: Tuple[Tensor[(H, C), ?], Tensor[(H, C), ?]] = broadcast(wB, device_keys=[])
+    xs_dp: Tuple[Tensor[(B/2, F), ?], Tensor[(B/2, F), ?]] = scatter(x, dim=0, device_keys=[0])
+    wAs_dp: Tuple[Tensor[(F, H), ?], Tensor[(F, H), ?]] = broadcast(wA, device_keys=[0])
+    wBs_dp: Tuple[Tensor[(H, C), ?], Tensor[(H, C), ?]] = broadcast(wB, device_keys=[0])
     ys_dp: Tuple[Tensor[(B/2, C), ?], Tensor[(B/2, C), ?]] = pmap(
         lambda d:
         lambda (xi: Tensor[(B/N, F), d], wAi: Tensor[(F, H), d], wBi: Tensor[(H, C), d]): {

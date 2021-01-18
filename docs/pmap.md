@@ -167,14 +167,17 @@ class DeviceMap(Type):
 
 The `DeviceMap` type serves as a wrapper over a Python dict with `Device` keys and either another `DeviceMap` or a list of `Device`s as values.
 This enables representation of `Device` trees with arbitrary depth, where internal nodes are `DeviceMap`s and leaf nodes are the final list of `Device`s.
-We add a `DeviceMap` value as an input to the function, initialized with the actual `Device` tree.
 
-When we apply a transform to the graph, we specify a list of `Device` keys into the `DeviceMap`, with each key corresponding to a successive depth in
-the device tree. These keys will be stored as attributes on the `Broadcast` and `Scatter` ops. The keys can either be explicit `Device`s or `Device` variables.
+We also introduce two additional ops: 1) `GenerateDeviceMap` and 2) `DeviceMapLookup`. The `GenerateDeviceMap` op takes in a list of `Device` keys and 
+returns a `DeviceMap` value. The `DeviceMapLookup` op takes in a `DeviceMap` and a list of `Device` keys and inserts a `DeviceMapLookup` op.
+Each `Device` key input corresponds to a successive depth in the `DeviceMap` device tree. These inputs can either be explicit `Device`s or `Device` variables.
 
-The full explicit `Device` list will be resolved at simulation time. When the simulator reaches a `Scatter` or `Broadcast` op, it will index into the
-`DeviceMap` using the op's `Device` key list to determine the list of output devices over which to distribute the input value.
-Note that we can infer the list of devices over which the `pmap` consumer op is bound to based on this list of output devices. 
+When we apply a `ParallelMapTransform` to the graph, we provide as input a `DeviceMap` value as well as a list of `Device` keys into the `DeviceMap`.
+We use these inputs to insert a `DeviceMapLookup` op, the output of which will be provided to the `Broadcast` and `Scatter` ops as inputs.
+
+The full explicit `Device` list will be resolved at simulation time. When the simulator reaches a `DeviceMapLookup` op, it will index into the DeviceMap using
+the `Device` key list to determine the list of output devices over which to distribute the input value. Note that we can infer the list of devices over which
+the pmap consumer op is bound to based on this list of output devices.
 
 If a key in the `Broadcast`/`Scatter` key list is a `Device` variable, then we know the op is within a `pmap` context. In this case we would know the
 full list of `Device`s the enclosing `pmap` is bound to, and therefore we can substitute the `Device` variable key with these bound devices.
@@ -189,13 +192,14 @@ As an example, suppose we have the following `DeviceMap`:
     }
 }
 ```
-We first apply a data parallel transform, passing an empty `Device` key list. This produces the following function:
+We first apply a data parallel transform, passing a `Device` key list of `[0]`. This produces the following function:
 ```python
 def matmul(wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 0], x: Tensor[(B, F), 0]):
-    device_map: DeviceMap = {1: [1, 3], 2: [2, 4]}
-    xs_dp: Tuple[Tensor[(B/2, F), 1], Tensor[(B/2, F), 2]] = scatter(x, dim=0, device_keys=[0])
-    wAs_dp: Tuple[Tensor[(F, H), 1], Tensor[(F, H), 2]] = broadcast(wA, device_keys=[0])
-    wBs_dp: Tuple[Tensor[(H, C), 1], Tensor[(H, C), 2]] = broadcast(wB, device_keys=[0])
+    device_map: DeviceMap = GenerateDeviceMap({1: [1, 3], 2: [2, 4]})
+    device_list_dp: List[Device] = DeviceMapLookup(device_map, [0])
+    xs_dp: Tuple[Tensor[(B/2, F), 1], Tensor[(B/2, F), 2]] = scatter(x, dim=0, device_list_dp)
+    wAs_dp: Tuple[Tensor[(F, H), 1], Tensor[(F, H), 2]] = broadcast(wA, device_list_dp)
+    wBs_dp: Tuple[Tensor[(H, C), 1], Tensor[(H, C), 2]] = broadcast(wB, device_list_dp)
     ys_dp: Tuple[Tensor[(B/2, C), 1], Tensor[(B/2, C), 2]] = pmap(
         lambda d:
         lambda (xi: Tensor[(B/2, F), d], wAi: Tensor[(F, H), d], wBi: Tensor[(H, C), d]): {
@@ -208,19 +212,21 @@ def matmul(wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 0], x: Tensor[(B, F), 0]):
     y: Tensor[(B, C), 0] = gather(ys_dp, dim=0, to_device=0)
     return y
 ```
-Next we apply a horizontal parallel transform passing a `Device` key list of `[d]`, which gives us this function:
+Next we apply a horizontal parallel transform passing a `Device` key list of `[0, d]`, which gives us this function:
 ```python
 def matmul(wA: Tensor[(F, H), 0], wB: Tensor[(H, C), 0], x: Tensor[(B, F), 0]):
-    device_map: DeviceMap = {1: [1, 3], 2: [2, 4]}
+    device_map: DeviceMap = GenerateDeviceMap({1: [1, 3], 2: [2, 4]})
+    device_list_dp: List[Device] = DeviceMapLookup(device_map, [0])
     xs_dp: Tuple[Tensor[(B/2, F), ?], Tensor[(B/2, F), ?]] = scatter(x, dim=0, device_keys=[0])
     wAs_dp: Tuple[Tensor[(F, H), ?], Tensor[(F, H), ?]] = broadcast(wA, device_keys=[0])
     wBs_dp: Tuple[Tensor[(H, C), ?], Tensor[(H, C), ?]] = broadcast(wB, device_keys=[0])
     ys_dp: Tuple[Tensor[(B/2, C), ?], Tensor[(B/2, C), ?]] = pmap(
         lambda d:
         lambda (xi: Tensor[(B/N, F), d], wAi: Tensor[(F, H), d], wBi: Tensor[(H, C), d]): {
-            xs_hp: Tuple[Tensor[(B/2, F), ?], Tensor[(B/2, F), ?]] = broadcast(x, device_keys=[d])
-            wAs_hp: Tuple[Tensor[(F, H/2), ?], Tensor[(F, H/2), ?]] = scatter(wA, dim=1, device_keys=[d])
-            wBs_hp: Tuple[Tensor[(H/2, C), ?], Tensor[(H/2, C), ?]] = scatter(wB, dim=0, device_keys=[d])
+            device_list_hp: List[Device] = DeviceMapLookup(device_map, [0, d])
+            xs_hp: Tuple[Tensor[(B/2, F), ?], Tensor[(B/2, F), ?]] = broadcast(x, device_list_hp)
+            wAs_hp: Tuple[Tensor[(F, H/2), ?], Tensor[(F, H/2), ?]] = scatter(wA, dim=1, device_list_hp)
+            wBs_hp: Tuple[Tensor[(H/2, C), ?], Tensor[(H/2, C), ?]] = scatter(wB, dim=0, device_list_hp)
             ys_hp: Tuple[Tensor[(B/2, C), ?], Tensor[(B/2, C), ?]] = pmap(
                 lambda dd:
                 lambda (xi: Tensor[(B/2, F), dd], wAi: Tensor[(F, H/2), dd], wBi: Tensor[(H/2, C), dd]): {

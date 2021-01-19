@@ -4,7 +4,7 @@ from ..ir import Device
 import copy
 
 
-def apply_shard_transform(
+def shard_transform(
     function, ops, input_dims, reduction_params, devices, verify_fn=None
 ):
     """Maps a function across devices using a parallel map (pmap) operator.

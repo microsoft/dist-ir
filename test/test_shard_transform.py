@@ -2,7 +2,7 @@ import numpy as np
 
 from dist_ir.ir import Device, FunctionMaker
 from dist_ir.ir.type import Float, Tensor
-from dist_ir.transforms import apply_shard_transform
+from dist_ir.transforms import shard_transform
 from dist_ir.executor import SequentialExecutor
 
 
@@ -16,7 +16,7 @@ def test_single_variable_data_parallel():
     b = function.add_input_value("b", Tensor(Float(), (4, 4)))
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
     function = function.finalize()
-    transformed_function = apply_shard_transform(
+    transformed_function = shard_transform(
         function=function,
         ops=function.ops,
         input_dims={function.inputs[0]: 0},
@@ -79,7 +79,7 @@ def test_double_variable_data_parallel():
     x = function.add_op("MatMul", "MatMul", inputs=[a, b], output_names=["x"])
     y = function.add_op("Add", "Add", inputs=[x, c], output_names=["y"])
     function = function.finalize()
-    transformed_function = apply_shard_transform(
+    transformed_function = shard_transform(
         function=function,
         ops=function.ops,
         input_dims={function.inputs[0]: 0, function.inputs[2]: 0},
@@ -155,7 +155,7 @@ def test_single_variable_horizontal_parallel():
     a = function.add_op("MatMul", "MatMul0", inputs=[x, wA], output_names=["a"])
     y = function.add_op("MatMul", "MatMul1", inputs=[a, wB], output_names=["y"])
     function = function.finalize()
-    transformed_function = apply_shard_transform(
+    transformed_function = shard_transform(
         function=function,
         ops=[function.ops[0]],
         input_dims={function.inputs[1]: 1},
@@ -232,7 +232,7 @@ def test_double_variable_horizontal_parallel():
     y = function.add_op("MatMul", "MatMul1", inputs=[a, wB], output_names=["y"])
     function = function.finalize()
 
-    transformed_function = apply_shard_transform(
+    transformed_function = shard_transform(
         function=function,
         ops=function.ops,
         input_dims={function.inputs[1]: 1, function.inputs[2]: 0},
@@ -319,7 +319,7 @@ def test_mnist_data_parallel():
         "MatMulGrad", "MatMul0Grad", inputs=[x, wA, da], output_names=["dx", "dwA"]
     )
     function = function.finalize()
-    transformed_function = apply_shard_transform(
+    transformed_function = shard_transform(
         function=function,
         ops=function.ops,
         input_dims={function.inputs[0]: 0, function.inputs[1]: 0},

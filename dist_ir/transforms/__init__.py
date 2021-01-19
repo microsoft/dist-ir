@@ -1,4 +1,4 @@
-from .parallel_map_transform import ParallelMapTransform
+from .shard_transform import apply_shard_transform
 from .pipeline_parallel_transform import PipelineParallelTransform
 from .fifo_scheduler import FIFOScheduler
 from .pipedream_scheduler import PipeDreamScheduler

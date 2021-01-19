@@ -92,7 +92,6 @@ class Function:
         self, ops: List[Op], deepcopy: bool = False, name: Optional[str] = None
     ) -> Function:
         """Returns a Function comprised of the specified subset of ops."""
-        # TODO: Verify that ops is in topological order?
         subfunction = FunctionMaker(name)
         value_map = {}
         outputs = []

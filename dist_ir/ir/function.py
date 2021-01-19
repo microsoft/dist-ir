@@ -89,15 +89,10 @@ class Function:
         return value in self.outputs
 
     def get_subfunction(
-        self, op_names: Tuple[str], deepcopy: bool = False, name: Optional[str] = None
+        self, ops: List[Op], deepcopy: bool = False, name: Optional[str] = None
     ) -> Function:
         """Returns a Function comprised of the specified subset of ops."""
         subfunction = FunctionMaker(name)
-        op_names_set = set(op_names)
-        ops = []
-        for op in self.ops:
-            if op.name in op_names_set:
-                ops.append(op)
         value_map = {}
         outputs = []
         for op in ops:

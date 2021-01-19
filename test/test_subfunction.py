@@ -22,19 +22,19 @@ def test_subfunction():
         )
     function = function.finalize()
 
-    subfunction = function.get_subfunction(("Add0", "Add1", "Add2"))
+    subfunction = function.get_subfunction(function.ops[:3])
     subfunction_inputs = subfunction.inputs
     subfunction_outputs = subfunction.outputs
     assert [v.name for v in subfunction_inputs] == ["x0", "x1", "x2", "x3"]
     assert [v.name for v in subfunction_outputs] == ["a2"]
 
-    subfunction = function.get_subfunction(("Add3", "Add4", "Add5"))
+    subfunction = function.get_subfunction(function.ops[3:6])
     subfunction_inputs = subfunction.inputs
     subfunction_outputs = subfunction.outputs
     assert [v.name for v in subfunction_inputs] == ["a2", "x4", "x5", "x6"]
     assert [v.name for v in subfunction_outputs] == ["a5"]
 
-    subfunction = function.get_subfunction(("Add6", "Add7", "Add8"))
+    subfunction = function.get_subfunction(function.ops[6:])
     subfunction_inputs = subfunction.inputs
     subfunction_outputs = subfunction.outputs
     assert [v.name for v in subfunction_inputs] == ["a5", "x7", "x8", "x9"]

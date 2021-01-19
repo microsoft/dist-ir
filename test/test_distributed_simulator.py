@@ -5,7 +5,7 @@ from dist_ir.ir.type import Tensor
 from dist_ir.executor.cost_inference import CostModel
 from dist_ir.executor.type_inference import infer_types
 from dist_ir.executor import DistributedSimulator
-from dist_ir.transforms import DataParallelTransform
+from dist_ir.transforms import shard_transform
 
 
 def test_single_device():
@@ -44,14 +44,15 @@ def test_data_parallel():
     y = function.add_op("MatMul", "MatMul1", inputs=[x, c], output_names=["y"])
     function = function.finalize()
     function = infer_types(function, [a, b, c])
-    transform = DataParallelTransform(
-        batch_dims={function.inputs[0]: 0},
+    transformed_function = shard_transform(
+        function=function,
+        ops=function.ops,
+        input_dims={function.inputs[0]: 0},
         reduction_params={
             function.outputs[0]: {"op_type": "Gather", "dim": 0, "device": d0}
         },
         devices=[d0, d1],
     )
-    transformed_function = transform.apply(function)
     transformed_function = infer_types(
         transformed_function, transformed_function.inputs
     )
@@ -88,14 +89,15 @@ def test_chrome_trace():
     cost_model = CostModel(topology, device_speeds)
     simulator = DistributedSimulator(cost_model)
 
-    transform = DataParallelTransform(
-        batch_dims={function.inputs[0]: 0},
+    transformed_function = shard_transform(
+        function=function,
+        ops=function.ops,
+        input_dims={function.inputs[0]: 0},
         reduction_params={
             function.outputs[0]: {"op_type": "Gather", "dim": 0, "device": d0}
         },
         devices=[d0, d1],
     )
-    transformed_function = transform.apply(function)
     transformed_function = infer_types(
         transformed_function, transformed_function.inputs
     )

@@ -140,7 +140,15 @@ def _(op: Op, ctx):
             )
         )
         # TODO: Also print out the list of devices this pmaps over
-        d = str(op.attributes["device_var"].device_id)
+        if isinstance(op.attributes["device_var"], str):
+            d = op.attributes["device_var"]
+        elif isinstance(op.attributes["device_var"], Device):
+            d = str(op.attributes["device_var"].device_id)
+        else:
+            raise ValueError(
+                f'op.attributes["device_var"] has '
+                f'unknown type {type(op.attributes["device_var"])}'
+            )
         pmap_args = nest(
             ctx.indent,
             concat(

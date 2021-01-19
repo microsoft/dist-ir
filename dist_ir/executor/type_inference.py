@@ -186,6 +186,13 @@ def _split_prop_fn(op, x):
     )
 
 
+def _transpose_prop_fn(op, x):
+    # TODO: Support transpose of tensors with > 2 dimensions
+    if not (isinstance(x, Tensor) and len(x.shape) == 2):
+        _raise_type_error(op, x)
+    return Tensor(dtype=x.dtype, shape=x.shape[::-1], device=x.device)
+
+
 TypePropRegister = {
     "Add": _elementwise_tensor_op_prop_fn,
     # "Allgather": TODO,
@@ -201,6 +208,7 @@ TypePropRegister = {
     "Select": _select_prop_fn,
     "Send": _send_prop_fn,
     "Split": _split_prop_fn,
+    "Transpose": _transpose_prop_fn,
 }
 
 # Handling pmap specially for now since it needs to return a typed subfunction

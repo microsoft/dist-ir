@@ -32,4 +32,5 @@ OpRegister = {
     "SoftmaxCrossEntropy": OpRegisterEntry(num_inputs=2, num_outputs=2),
     "SoftmaxCrossEntropyGrad": OpRegisterEntry(num_inputs=3, num_outputs=1),
     "Split": OpRegisterEntry(num_inputs=1, num_outputs=1),
+    "Transpose": OpRegisterEntry(num_inputs=1, num_outputs=1),
 }

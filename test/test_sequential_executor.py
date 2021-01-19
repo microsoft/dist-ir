@@ -182,7 +182,10 @@ def test_pmap_on_executor():
     zis = function.add_op(
         "Pmap",
         inputs=[xs],
-        attributes={"devices": [d0, d1]},
+        attributes={
+            "devices": [d0, d1],
+            "device_var": Device.get_new_device_variable("gpu"),
+        },
         subfunctions=[subfunction],
         output_names=["zis"],
     )
@@ -205,7 +208,10 @@ def test_pmap_on_executor():
     zis = function.add_op(
         "Pmap",
         inputs=[xs, ys],
-        attributes={"devices": [d0, d1]},
+        attributes={
+            "devices": [d0, d1],
+            "device_var": Device.get_new_device_variable("gpu"),
+        },
         subfunctions=[subfunction],
         output_names=["zis"],
     )
@@ -229,7 +235,10 @@ def test_pmap_on_executor():
     (wis, zis) = function.add_op(
         "Pmap",
         inputs=[xs, ys],
-        attributes={"devices": [d0, d1]},
+        attributes={
+            "devices": [d0, d1],
+            "device_var": Device.get_new_device_variable("gpu"),
+        },
         subfunctions=[subfunction],
         output_names=["wis", "zis"],
     )
@@ -255,7 +264,10 @@ def test_pmap_on_executor():
     (wis, zis) = function.add_op(
         "Pmap",
         inputs=[xs, ys],
-        attributes={"devices": [d0]},
+        attributes={
+            "devices": [d0],
+            "device_var": Device.get_new_device_variable("gpu"),
+        },
         subfunctions=[subfunction],
         output_names=["wis", "zis"],
     )
@@ -302,7 +314,10 @@ def test_pmap_dp():
     zis = function.add_op(
         "Pmap",
         inputs=[xs, wAs, wBs],
-        attributes={"devices": [d0, d1]},
+        attributes={
+            "devices": [d0, d1],
+            "device_var": Device.get_new_device_variable("gpu"),
+        },
         subfunctions=[subfunction],
         output_names=["zis"],
     )

@@ -36,21 +36,29 @@ class Op:
             if self.op_type not in OpRegister:
                 raise ValueError(f"Invalid op type {self.op_type}")
             # Check that we got the right number of inputs
-            assert len(self.inputs) == OpRegister[self.op_type].num_inputs
+            num_input_types = OpRegister[self.op_type].num_inputs
+            if len(self.inputs) != num_input_types:
+                raise ValueError(
+                    f"Op {self.name} ({self.op_type}) has {len(self.inputs)} inputs; "
+                    f"{num_input_types} expected"
+                )
             # Number of outputs is given by OpRegister
             num_outputs = OpRegister[self.op_type].num_outputs
 
         # Create the correct number of output values with appropriate types
         if output_names is None:
             output_names = [f"{self.name}_out_{i}" for i in range(num_outputs)]
-        else:
-            assert len(output_names) == num_outputs
+        elif len(output_names) != num_outputs:
+            raise ValueError(
+                f"Op {self.name} ({self.op_type}) has {len(output_names)} outputs; "
+                f"{num_outputs} expected"
+            )
         if output_types is None:
             output_types = [None for i in range(num_outputs)]
         elif len(output_types) != num_outputs:
             raise ValueError(
-                f"Op {self.name} has {len(output_types)} outputs; "
-                f"num_outputs expected"
+                f"Op {self.name} ({self.op_type}) has {len(output_types)} outputs; "
+                f"{num_outputs} expected"
             )
         outputs = tuple(
             Value(out_name, out_type)

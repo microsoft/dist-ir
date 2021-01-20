@@ -14,7 +14,6 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      MLIR_VERSION: 20210111.38
       PY_VERSION: 3.8
 
     steps:
@@ -44,7 +43,7 @@ jobs:
       run: |
         pip install pylint pytest black
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-        pip install --upgrade mlir-snapshot==${{ env.MLIR_VERSION }} -f https://github.com/stellaraccident/mlir-py-release/releases
+        pip install --upgrade mlir-snapshot -f https://github.com/stellaraccident/mlir-py-release/releases
 
     - name: Check formatting (black)
       run: black --diff --check .

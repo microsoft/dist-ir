@@ -142,3 +142,93 @@ def test_megatron():
     x = attention_numpy(n, h, d, Q, K, V, W_Q, W_K, W_V, W_O)
     y = megatron_attention_numpy(n, h, d, Q, K, V, W_Q, W_K, W_V, W_O)
     np.testing.assert_array_almost_equal(x, y)
+
+
+def self_attention_before(n, w_1, w_2, x):  # (h, 3h), (h, h), (s, b, h)
+    s, b, h = x.shape
+    x1 = np.matmul(x, w_1)  # (s, b, 3h)
+
+    x2 = np.reshape(x1, (s, b, n, 3 * h // n))
+    q, k, v = np.split(x2, 3, axis=3)  # (s, b, n, h/n)
+
+    q = np.reshape(q, (s, b * n, h // n))
+    q = np.transpose(q, (1, 0, 2))  # (bn, s, h/n)
+    k = np.reshape(k, (s, b * n, h // n))
+    k = np.transpose(k, (1, 2, 0))  # (bn, h/n, s)
+    v = np.reshape(v, (s, b * n, h // n))
+    v = np.transpose(v, (1, 0, 2))  # (bn, s, h/n)
+
+    y1 = np.matmul(q, k)  # (bn, s, s)
+
+    # Ignoring a scale mask, softmax, and dropout here
+
+    y2 = np.matmul(y1, v)  # (bn, s, h/n)
+    # No idea why megatron goes through these layout changes:
+    y2 = np.reshape(y2, (b, n, s, h // n))
+    y2 = np.transpose(y2, (2, 0, 1, 3))  # (s, b, n, h/n)
+    y2 = np.reshape(y2, (s, b, h))
+
+    # RowParallelLinear
+    z = np.matmul(y2, w_2)  # (s, b, h)
+
+    return z
+
+
+def self_attention_after(n, w_1, w_2, x, p=2):  # (h, 3h), (h, h), (s, b, h)
+    s, b, h = x.shape
+
+    w_1s = np.split(w_1, p, axis=1)
+    w_2s = np.split(w_2, p, axis=0)
+    xs = [x for i in range(p)]
+
+    res = []
+    for w_1, w_2, x in zip(w_1s, w_2s, xs):  # (h, 3h/p), (h/p, h), (s, b, h)
+        x1 = np.matmul(x, w_1)  # (s, b, 3h/p)
+
+        # TODO how do we get p for this reshape?
+        x2 = np.reshape(x1, (s, b, n // p, 3 * h // n))
+        q, k, v = np.split(x2, 3, axis=3)  # (s, b, n/p, h/n)
+
+        q = np.reshape(q, (s, b * n // p, h // n))
+        q = np.transpose(q, (1, 0, 2))  # (bn/p, s, h/n)
+        k = np.reshape(k, (s, b * n // p, h // n))
+        k = np.transpose(k, (1, 2, 0))  # (bn/p, h/n, s)
+        v = np.reshape(v, (s, b * n // p, h // n))
+        v = np.transpose(v, (1, 0, 2))  # (bn/p, s, h/n)
+
+        y1 = np.matmul(q, k)  # (bn/p, s, s)
+
+        # Ignoring a scale mask, softmax, and dropout here
+
+        y2 = np.matmul(y1, v)  # (bn/p, s, h/n)
+        # No idea why megatron goes through these layout changes:
+        y2 = np.reshape(y2, (b, n // p, s, h // n))
+        y2 = np.transpose(y2, (2, 0, 1, 3))  # (s, b, n/p, h/n)
+        y2 = np.reshape(y2, (s, b, h // p))
+
+        # RowParallelLinear
+        z = np.matmul(y2, w_2)  # (s, b, h)
+        res.append(z)
+
+    # all-reduce
+    z = sum(res)
+    return z
+
+
+def test_manual_transform_on_self_attention():
+    s = 3  # sequence length
+    b = 4  # batch size
+    n = 2  # num attention heads
+    h = 6  # hidden size
+    p = 2  # num partitions
+
+    x = np.ones((s, b, h))  # model input/output of previous layer
+    w_1 = np.ones((h, 3 * h))
+    w_2 = np.ones((h, h))
+
+    z1 = self_attention_before(n, w_1, w_2, x)
+    print(z1)
+    z2 = self_attention_after(n, w_1, w_2, x)
+    print(z2)
+
+    assert np.allclose(z1, z2)

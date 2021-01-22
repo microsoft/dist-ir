@@ -36,14 +36,24 @@ class Op:
             if self.op_type not in OpRegister:
                 raise ValueError(f"Invalid op type {self.op_type}")
             # Check that we got the right number of inputs
-            num_input_types = OpRegister[self.op_type].num_inputs
-            if len(self.inputs) != num_input_types:
-                raise ValueError(
-                    f"Op {self.name} ({self.op_type}) has {len(self.inputs)} inputs; "
-                    f"{num_input_types} expected"
-                )
+            if not OpRegister[self.op_type].variadic_inputs:
+                num_input_types = OpRegister[self.op_type].num_inputs
+                if len(self.inputs) != num_input_types:
+                    raise ValueError(
+                        f"Op {self.name} ({self.op_type}) has {len(self.inputs)} inputs; "
+                        f"{num_input_types} expected"
+                    )
             # Number of outputs is given by OpRegister
-            num_outputs = OpRegister[self.op_type].num_outputs
+            variadic_outputs = OpRegister[self.op_type].variadic_outputs
+            if variadic_outputs:
+                if output_names is None:
+                    raise ValueError(
+                        f"Op {self.name} ({self.op_type}) has variadic "
+                        f"outputs, so output names must be specified"
+                    )
+                num_outputs = len(output_names)
+            else:
+                num_outputs = OpRegister[self.op_type].num_outputs
 
         # Create the correct number of output values with appropriate types
         if output_names is None:

@@ -232,3 +232,99 @@ def test_manual_transform_on_self_attention():
     print(z2)
 
     assert np.allclose(z1, z2)
+
+
+def test_dist_ir_self_attention():
+    s = 3  # sequence length
+    b = 4  # batch size
+    n = 2  # num attention heads
+    h = 6  # hidden size
+    p = 2  # num partitions
+
+    function = FunctionMaker()
+    x = function.add_input_value("x", Tensor(dtype=Float(), shape=(s, b, h)))
+    w_1 = function.add_input_value("w1", Tensor(dtype=Float(), shape=(h, 3 * h)))
+    w_2 = function.add_input_value("w2", Tensor(dtype=Float(), shape=(h, h)))
+    x2_shape = function.add_input_value("x2_shape", Tensor(dtype=Int(), shape=(4,)))
+    qkv_shape = function.add_input_value("qkv_shape", Tensor(dtype=Int(), shape=(3,)))
+    y2_shape_before_transpose = function.add_input_value(
+        "y2_shape_before_transpose", Tensor(dtype=Int(), shape=(4,))
+    )
+    y2_shape_after_transpose = function.add_input_value(
+        "y2_shape_after_transpose", Tensor(dtype=Int(), shape=(3,))
+    )
+
+    x1 = function.add_op("MatMul", inputs=[x, w_1], output_names=["x1"])
+
+    x2 = function.add_op("Reshape", inputs=[x1, x2_shape], output_names=["x2"])
+    qkv = function.add_op(
+        "Split",
+        inputs=[x2],
+        attributes={"num_splits": 3, "dim": 3},
+        output_names=["qkv"],
+    )
+    q = function.add_op(
+        "Select", inputs=[qkv], attributes={"dim": 0}, output_names=["q"]
+    )
+    k = function.add_op(
+        "Select", inputs=[qkv], attributes={"dim": 1}, output_names=["k"]
+    )
+    v = function.add_op(
+        "Select", inputs=[qkv], attributes={"dim": 2}, output_names=["v"]
+    )
+
+    q = function.add_op("Reshape", inputs=[q, qkv_shape], output_names=["q"])
+    q = function.add_op(
+        "Transpose", inputs=[q], attributes={"perm": (1, 0, 2)}, output_names=["q"]
+    )
+    k = function.add_op("Reshape", inputs=[k, qkv_shape], output_names=["k"])
+    k = function.add_op(
+        "Transpose", inputs=[k], attributes={"perm": (1, 2, 0)}, output_names=["k"]
+    )
+    v = function.add_op("Reshape", inputs=[v, qkv_shape], output_names=["v"])
+    v = function.add_op(
+        "Transpose", inputs=[v], attributes={"perm": (1, 0, 2)}, output_names=["v"]
+    )
+
+    y1 = function.add_op("MatMul", inputs=[q, k], output_names=["y1"])
+    y2 = function.add_op("MatMul", inputs=[y1, v], output_names=["y2"])
+
+    y2 = function.add_op(
+        "Reshape", inputs=[y2, y2_shape_before_transpose], output_names=["y2"]
+    )
+    y2 = function.add_op(
+        "Transpose", inputs=[y2], attributes={"perm": (2, 0, 1, 3)}, output_names=["y2"]
+    )
+    y2 = function.add_op(
+        "Reshape", inputs=[y2, y2_shape_after_transpose], output_names=["y2"]
+    )
+
+    z = function.add_op("MatMul", inputs=[y2, w_2], output_names=["z"])
+
+    function = function.finalize()
+    ex = SequentialExecutor("numpy")
+    _x = np.ones((s, b, h))  # model input/output of previous layer
+    _w_1 = np.ones((h, 3 * h))
+    _w_2 = np.ones((h, h))
+    _x2_shape = [s, b, n, 3 * h // n]
+    _qkv_shape = [s, b * n, h // n]
+    _y2_shape_before_transpose = [b, n, s, h // n]
+    _y2_shape_after_transpose = [s, b, h]
+
+    input_data = {
+        function.inputs[0]: _x,
+        function.inputs[1]: _w_1,
+        function.inputs[2]: _w_2,
+        function.inputs[3]: _x2_shape,
+        function.inputs[4]: _qkv_shape,
+        function.inputs[5]: _y2_shape_before_transpose,
+        function.inputs[6]: _y2_shape_after_transpose,
+    }
+    np.testing.assert_array_almost_equal(
+        ex.compute(function, input_data)[function.outputs[0]],
+        self_attention_before(n, _w_1, _w_2, _x),
+    )
+
+
+if __name__ == "__main__":
+    test_dist_ir_self_attention()

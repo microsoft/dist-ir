@@ -44,12 +44,8 @@ def test_data_parallel():
     y = function.add_op("MatMul", "MatMul1", inputs=[x, c], output_names=["y"])
     function = function.finalize()
     function = infer_types(function, [a, b, c])
-<<<<<<< HEAD
     transformed_function = shard_transform(
         function=function,
-=======
-    transform = ParallelMapTransform(
->>>>>>> c8288ea... Consolidate data parallel and horizontal parallel transforms
         ops=function.ops,
         input_dims={function.inputs[0]: 0},
         reduction_params={

@@ -2,7 +2,7 @@ import numpy as np
 
 from dist_ir.ir import Device, FunctionMaker
 from dist_ir.ir.type import Int, Float, Tensor
-from dist_ir.transforms import ParallelMapTransform
+from dist_ir.transforms import shard_transform
 from dist_ir.executor import SequentialExecutor
 from dist_ir.executor.type_inference import infer_types
 

@@ -241,17 +241,30 @@ def test_dist_ir_self_attention():
     h = 6  # hidden size
     p = 2  # num partitions
 
+    devices = [Device(i, "gpu") for i in range(p + 1)]
+
+    # Original function
     function = FunctionMaker()
-    x = function.add_input_value("x", Tensor(dtype=Float(), shape=(s, b, h)))
-    w_1 = function.add_input_value("w1", Tensor(dtype=Float(), shape=(h, 3 * h)))
-    w_2 = function.add_input_value("w2", Tensor(dtype=Float(), shape=(h, h)))
-    x2_shape = function.add_input_value("x2_shape", Tensor(dtype=Int(), shape=(4,)))
-    qkv_shape = function.add_input_value("qkv_shape", Tensor(dtype=Int(), shape=(3,)))
+    x = function.add_input_value(
+        "x", Tensor(dtype=Float(), shape=(s, b, h), device=devices[0])
+    )
+    w_1 = function.add_input_value(
+        "w1", Tensor(dtype=Float(), shape=(h, 3 * h), device=devices[0])
+    )
+    w_2 = function.add_input_value(
+        "w2", Tensor(dtype=Float(), shape=(h, h), device=devices[0])
+    )
+    x2_shape = function.add_input_value(
+        "x2_shape", Tensor(dtype=Int(), shape=(4,), device=devices[0])
+    )
+    qkv_shape = function.add_input_value(
+        "qkv_shape", Tensor(dtype=Int(), shape=(3,), device=devices[0])
+    )
     y2_shape_before_transpose = function.add_input_value(
-        "y2_shape_before_transpose", Tensor(dtype=Int(), shape=(4,))
+        "y2_shape_before_transpose", Tensor(dtype=Int(), shape=(4,), device=devices[0])
     )
     y2_shape_after_transpose = function.add_input_value(
-        "y2_shape_after_transpose", Tensor(dtype=Int(), shape=(3,))
+        "y2_shape_after_transpose", Tensor(dtype=Int(), shape=(3,), device=devices[0])
     )
 
     x1 = function.add_op("MatMul", inputs=[x, w_1], output_names=["x1"])
@@ -303,7 +316,7 @@ def test_dist_ir_self_attention():
 
     function = function.finalize()
     ex = SequentialExecutor("numpy")
-    _x = np.ones((s, b, h))  # model input/output of previous layer
+    _x = np.ones((s, b, h))
     _w_1 = np.ones((h, 3 * h))
     _w_2 = np.ones((h, h))
     _x2_shape = [s, b, n, 3 * h // n]
@@ -320,11 +333,38 @@ def test_dist_ir_self_attention():
         function.inputs[5]: _y2_shape_before_transpose,
         function.inputs[6]: _y2_shape_after_transpose,
     }
+    res_before = ex.compute(function, input_data)
     np.testing.assert_array_almost_equal(
-        ex.compute(function, input_data)[function.outputs[0]],
+        res_before[function.outputs[0]],
         self_attention_before(n, _w_1, _w_2, _x),
     )
 
+    # Transformed function
+    transformed_function = shard_transform(
+        function=function,
+        ops=function.ops,
+        input_dims={function.inputs[1]: 1, function.inputs[2]: 0},
+        reduction_params={
+            function.outputs[0]: {"op_type": "Allreduce"},
+        },
+        devices=devices[1:],
+    )
 
-if __name__ == "__main__":
-    test_dist_ir_self_attention()
+    _x2_shape = [s, b, n // p, 3 * h // n]
+    _qkv_shape = [s, b * n // p, h // n]
+    _y2_shape_before_transpose = [b, n // p, s, h // n]
+    _y2_shape_after_transpose = [s, b, h // p]
+    input_data = {
+        transformed_function.inputs[0]: _x,
+        transformed_function.inputs[1]: _w_1,
+        transformed_function.inputs[2]: _w_2,
+        transformed_function.inputs[3]: _x2_shape,
+        transformed_function.inputs[4]: _qkv_shape,
+        transformed_function.inputs[5]: _y2_shape_before_transpose,
+        transformed_function.inputs[6]: _y2_shape_after_transpose,
+    }
+
+    res_after = ex.compute(transformed_function, input_data)
+    np.testing.assert_array_almost_equal(
+        res_before[function.outputs[0]], res_after[transformed_function.outputs[0]][0]
+    )

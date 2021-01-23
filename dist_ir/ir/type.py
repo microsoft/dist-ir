@@ -27,28 +27,27 @@ class Type:
 # TODO might want to have f32, i32 etc instead?
 
 
-@singleton
-class Bool(Type):
-    """The boolean type. A singleton class."""
+class Int32(Type):
+    """The 32-bit integer type. A singleton class."""
 
     def __repr__(self):
-        return "Bool"
-
-    @property
-    def size(self):
-        return 1  # TODO accurate?
-
-
-@singleton
-class Int(Type):
-    """The integer type. A singleton class."""
-
-    def __repr__(self):
-        return "Int"
+        return "Int32"
 
     @property
     def size(self):
         return 4
+
+
+@singleton
+class Int64(Type):
+    """The 64-bit integer type. A singleton class."""
+
+    def __repr__(self):
+        return "Int64"
+
+    @property
+    def size(self):
+        return 8
 
 
 @singleton
@@ -61,6 +60,18 @@ class Float(Type):
     @property
     def size(self):
         return 4
+
+
+@singleton
+class Bool(Type):
+    """The boolean type. A singleton class."""
+
+    def __repr__(self):
+        return "Bool"
+
+    @property
+    def size(self):
+        return 1
 
 
 @dataclass(frozen=True)

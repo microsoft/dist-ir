@@ -9,12 +9,13 @@ from dist_ir.executor import infer_types
 
 ONNX_MODEL_PATH = "onnx_models"
 
-model = "bert_tiny_with_cost.onnx"
+model = "bert_tiny_bw.onnx"
 
 
 def main():
     onnx_model_path = Path(__file__).parent / ONNX_MODEL_PATH / model
     function = import_from_onnx(onnx_model_path)
+    cpprint(function)
     function = infer_types(function, function.inputs)
     cpprint(function)
 

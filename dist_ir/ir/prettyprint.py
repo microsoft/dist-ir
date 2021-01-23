@@ -49,7 +49,7 @@ from prettyprinter.utils import intersperse
 
 from .function import Function
 from .value import Value
-from .type import Type, Int, Float, Tensor, TupleType
+from .type import Type, Int32, Int64, Float, Tensor, TupleType
 from .device import Device
 from .op import Op
 

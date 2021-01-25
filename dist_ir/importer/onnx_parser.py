@@ -37,6 +37,48 @@ def get_numpy_dtype_from_onnx_dtype(onnx_dtype):
         raise NotImplementedError(f"onnx_dtype {onnx_dtype}")
 
 
+def parse_attribute(attr):
+    key = attr.name
+    attr_type = attr.type
+    value = None
+    if attr_type == 0:
+        raise ValueError("Undefined attribute type")
+    elif attr_type == 1:
+        assert isinstance(attr.f, float)
+        value = attr.f
+    elif attr_type == 2:
+        assert isinstance(attr.i, int)
+        value = attr.i
+    elif attr_type == 3:
+        value = str(attr.s)
+    elif attr_type == 4:
+        raise NotImplementedError("Tensor attribute")
+    elif attr_type == 5:
+        raise NotImplementedError("Graph attribute")
+    elif attr_type == 11:
+        raise NotImplementedError("Sparse tensor attribute")
+    elif attr_type == 6:
+        value = list(attr.floats)
+        for v in value:
+            assert isinstance(v, float)
+    elif attr_type == 7:
+        value = list(attr.ints)
+        for v in value:
+            assert isinstance(v, int)
+    elif attr_type == 8:
+        value = list(attr.strings)
+        for v in value:
+            assert isinstance(v, str)
+    elif attr_type == 9:
+        raise NotImplementedError("Tensors attribute")
+    elif attr_type == 10:
+        raise NotImplementedError("Graphs attribute")
+    elif attr_type == 12:
+        raise NotImplementedError("Sparse tensors attribute")
+    assert value is not None
+    return key, value
+
+
 def import_from_onnx(onnx_model):
     # TODO: Remove prints?
     # TODO: Support types beyond Tensor
@@ -123,11 +165,13 @@ def import_from_onnx(onnx_model):
             else:
                 raise ValueError(f"Could not find input {value}!")
         output_names = [v for v in node.output if v != ""]
+        attributes = {k: v for k, v in [parse_attribute(a) for a in node.attribute]}
         outputs = dist_ir_function.add_op(
             op_type=node.op_type,
             name=node.name,
             inputs=per_node_inputs,
             output_names=output_names,
+            attributes=attributes,
         )
         # Match node's outputs with the output Values created in op:
         if len(node.output) == 1:

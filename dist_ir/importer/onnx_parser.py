@@ -1,3 +1,6 @@
+from functools import reduce
+from operator import add, mul
+import numpy as np
 import onnx
 
 from ..ir import FunctionMaker, Value
@@ -19,6 +22,21 @@ def get_dist_ir_dtype_from_onnx_dtype(onnx_dtype):
         raise NotImplementedError(f"onnx_dtype {onnx_dtype}")
 
 
+def get_numpy_dtype_from_onnx_dtype(onnx_dtype):
+    if onnx_dtype == 0:
+        raise ValueError("Undefined onnx_dtype")
+    elif onnx_dtype == 1:
+        return np.float32
+    elif onnx_dtype == 6:
+        return np.int32
+    elif onnx_dtype == 7:
+        return np.int64
+    elif onnx_dtype == 9:
+        return np.bool_
+    else:
+        raise NotImplementedError(f"onnx_dtype {onnx_dtype}")
+
+
 def import_from_onnx(onnx_model):
     # TODO: Remove prints?
     # TODO: Support types beyond Tensor
@@ -26,6 +44,7 @@ def import_from_onnx(onnx_model):
     dist_ir_function = FunctionMaker("foo")  # TODO get name?
 
     inputs = {}
+    input_data = {}
     output_src = {}
 
     def add_input(value):
@@ -45,12 +64,31 @@ def import_from_onnx(onnx_model):
             print(f"Skipping adding {value.name}; already an input value")
             return
         assert "TensorProto" in str(type(value))
-        assert hasattr(value, "dims")
-        assert hasattr(value, "data_type")
-        dtype = get_dist_ir_dtype_from_onnx_dtype(value.data_type)
-        typ = Tensor(dtype=dtype, shape=tuple(value.dims))
+        # assert value.HasField("dims")
+        # assert value.HasField("data_type")
+        dist_ir_dtype = get_dist_ir_dtype_from_onnx_dtype(value.data_type)
+        numpy_dtype = get_numpy_dtype_from_onnx_dtype(value.data_type)
+        typ = Tensor(dtype=dist_ir_dtype, shape=tuple(value.dims))
+        if len(value.float_data) > 0:
+            assert numpy_dtype == np.float32
+            data = np.array(value.float_data, dtype=numpy_dtype)
+        elif len(value.int32_data) > 0:
+            assert numpy_dtype == np.int32
+            data = np.array(value.int32_data, dtype=numpy_dtype)
+        elif len(value.int64_data) > 0:
+            assert numpy_dtype == np.int64
+            data = np.array(value.int64_data, dtype=numpy_dtype)
+        else:
+            assert len(value.raw_data) > 0
+            data = np.frombuffer(value.raw_data, dtype=numpy_dtype)
+        if len(value.dims) > 0:
+            assert reduce(mul, value.dims) == len(data)
+        else:
+            assert len(data) == 1
+        data = np.reshape(data, value.dims)
         v = dist_ir_function.add_input_value(value.name, typ)
         inputs[value.name] = v
+        input_data[value.name] = data
 
     """
     for value in onnx_model.graph.value_info:
@@ -107,4 +145,4 @@ def import_from_onnx(onnx_model):
             print(f"Found output {out_name}")
         print()
 
-    return dist_ir_function.finalize()
+    return dist_ir_function.finalize(), input_data

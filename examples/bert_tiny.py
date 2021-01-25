@@ -5,7 +5,7 @@ import dist_ir
 from dist_ir.importer import import_from_onnx
 from dist_ir.ir import cpprint
 from dist_ir.executor import infer_types
-
+from dist_ir.ir.type import Int64, Tensor
 
 ONNX_MODEL_PATH = "onnx_models"
 
@@ -13,10 +13,22 @@ model = "bert_tiny_bw.onnx"
 
 
 def main():
+    batch_size = 64
+    max_seq_len = 512
+    max_pred_per_seq = 1
     onnx_model_path = Path(__file__).parent / ONNX_MODEL_PATH / model
-    function, input_data = import_from_onnx(onnx_model_path)
+    function, input_data = import_from_onnx(onnx_model_path, parse_input_data=False)
     cpprint(function)
-    function = infer_types(function, function.inputs)
+    input_types = [
+        Tensor(dtype=Int64(), shape=(batch_size, max_seq_len)),
+        Tensor(dtype=Int64(), shape=(batch_size, max_seq_len)),
+        Tensor(dtype=Int64(), shape=(batch_size, max_seq_len)),
+        Tensor(dtype=Int64(), shape=(batch_size, max_pred_per_seq)),
+        Tensor(dtype=Int64(), shape=(batch_size, max_pred_per_seq)),
+        Tensor(dtype=Int64(), shape=(batch_size,)),
+    ]
+    input_types += [inp.type for inp in function.inputs[len(input_types) :]]
+    function = infer_types(function, input_types)
     cpprint(function)
 
 

@@ -20,9 +20,9 @@ This module contains a register mapping ops to type propagation functions:
 
 from typing import Dict, List, Tuple
 
-from ..ir import Device, Function, FunctionMaker, Op, Value
-from ..ir.type import Bool, Float, Int, Type, Tensor, TupleType
 from .absint import AbstractInterpreter, AbstractState
+from ..ir import Device, Function, FunctionMaker, Op, Value
+from ..ir.type import Bool, Float, Int32, Int64, Type, Tensor, TupleType
 
 
 def _raise_type_error(op, *args):
@@ -58,8 +58,8 @@ def _cast_prop_fn(op, x):
     proto_dtype = op.attributes["to"]
     dtype = {
         1: Float(),
-        6: Int(),
-        7: Int(),  # TODO distinguish between int32 and int64
+        6: Int32(),
+        7: Int64(),
         9: Bool(),
     }[proto_dtype]
     return Tensor(dtype=dtype, shape=x.shape, device=x.device)
@@ -95,6 +95,12 @@ def _elementwise_tensor_op_prop_fn(op, x, y):
     return x
 
 
+def _identity_prop_fn(op, x):
+    if not isinstance(x, Tensor):
+        _raise_type_error(op, x)
+    return x
+
+
 def _matmul_prop_fn(op, x, y):
     if not (
         isinstance(x, Tensor)
@@ -121,6 +127,17 @@ def _matmul_grad_prop_fn(op, x, y, z):
         _raise_type_error(op, x, y, z)
 
     return (x, y)
+
+
+def _min_prop_fn(op, *inputs):
+    if not (
+        all(isinstance(inp, Tensor) for inp in inputs)
+        and all(inp.dtype == inputs[0].dtype for inp in inputs)
+        and all(inp.shape == inputs[0].shape for inp in inputs)
+        and all(inp.device == inputs[0].device for inp in inputs)
+    ):
+        _raise_type_error(op, inputs)
+    return inputs[0]
 
 
 def _mpi_gather_prop_fn(op, x):
@@ -191,6 +208,12 @@ def _slice_prop_fn(op, x, starts, ends, axes):
     return Tensor(dtype=x.dtype, shape=None, device=x.device)
 
 
+def _shape_prop_fn(op, x):
+    if not (isinstance(x, Tensor) and x.shape is not None):
+        _raise_type_error(op, x)
+    return Tensor(dtype=Int64(), shape=(len(x.shape),), device=x.device)
+
+
 def _split_prop_fn(op, x):
     if not isinstance(x, Tensor):
         _raise_type_error(op, x)
@@ -244,6 +267,40 @@ def _create_semantics(type_prop_register):
     from a register of type propagation functions
     signature -> (input types -> output types)).
     """
+    # Pmap expects 1 or more tuples as input
+    assert isinstance(input_types, tuple) and len(input_types) > 0
+    assert all(isinstance(t, TupleType) for t in input_types)
+    # Check that pmap's arguments all have same length and shapes
+    assert len(set(len(t.types) for t in input_types)) == 1
+    for t in input_types:
+        assert all(isinstance(x, Tensor) for x in t.types)
+        assert len(set(x.shape for x in t.types)) == 1
+        assert len(set(x.dtype for x in t.types)) == 1
+    # Check that pmap's arguments are on distinct devices
+    devices = tuple(x.device for x in input_types[0].types)
+    assert len(set(devices)) == len(devices)
+    # Check that all inputs have same list of devices
+    for t in input_types:
+        assert devices == tuple(x.device for x in t.types)
+
+    # Subfunction's inputs are given by pmap's arguments, but on device d
+    subfn_input_types = [t.types[0] for t in input_types]
+
+    # Recursively call infer_types on subfunction
+    assert len(op.subfunctions) == 1
+    subfunctions = [infer_types(op.subfunctions[0], subfn_input_types)]
+
+    # Pmap's output types are given by subfunction's output types
+    out_types = tuple(
+        TupleType(
+            tuple(
+                Tensor(shape=t.type.shape, dtype=t.type.dtype, device=d)
+                for d in devices
+            )
+        )
+        for t in subfunctions[0].outputs
+    )
+    return out_types, subfunctions
 
     def convert_impl(type_prop_fn):
         def semantics(op: Op, state: AbstractState):
@@ -278,9 +335,10 @@ def _type_function(function: Function, type_map: Dict[Value, Type]) -> Function:
     value_map: Dict[Value, Value] = {}
 
     # Add inputs to new_function
-    for inp in function.inputs:
-        new_inp = new_function.add_input_value(inp.name, type_map[inp])
-        value_map[inp] = new_inp
+    assert len(input_types) == len(function.inputs)
+    for old_inp, typ in zip(function.inputs, input_types):
+        new_inp = new_function.add_input_value(old_inp.name, typ)
+        value_map[old_inp] = new_inp
 
     # Duplicate each op, but with types from typed_env
     for op in function.ops:

@@ -12,7 +12,7 @@ def test_add_valid():
     b = function.add_input_value("b", Tensor(Float(), (4, 4)))
     x = function.add_op("Add", "Add0", inputs=[a, b], output_names=["x"])
     function = function.finalize()
-    typed_function = infer_types(function, [a, b])
+    typed_function = infer_types(function, [a.type, b.type])
     assert typed_function.outputs[0].type.shape == (4, 4)
 
 
@@ -44,7 +44,7 @@ def test_allreduce():
         output_names=["xs"],
     )
     function = Function("foo", (op1,), (xis,), (op1.outputs[0],))
-    function = infer_types(function, [xis])
+    function = infer_types(function, [xis.type])
     xs = function.outputs[0]
 
     assert isinstance(xs.type, TupleType)
@@ -68,7 +68,7 @@ def test_broadcast():
         output_names=["xs"],
     )
     function = function.finalize()
-    function = infer_types(function, [x])
+    function = infer_types(function, [x.type])
     xs = function.outputs[0]
 
     assert isinstance(xs.type, TupleType)
@@ -85,7 +85,7 @@ def test_matmul_valid():
     b = function.add_input_value("b", Tensor(Float(), (4, 2)))
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
     function = function.finalize()
-    function = infer_types(function, [a, b])
+    function = infer_types(function, [a.type, b.type])
     assert function.outputs[0].type.shape == (8, 2)
 
 
@@ -97,7 +97,7 @@ def test_matmul_invalid():
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
     function = function.finalize()
     with pytest.raises(ValueError):
-        function = infer_types(function, [a, b])
+        function = infer_types(function, [a.type, b.type])
 
 
 def test_matmul_grad():
@@ -110,7 +110,7 @@ def test_matmul_grad():
         "MatMulGrad", "MatMulGrad0", inputs=[x, w, l], output_names=["dx", "dw"]
     )
     function = function.finalize()
-    function = infer_types(function, [x, w, l])
+    function = infer_types(function, [x.type, w.type, l.type])
     dx, dw = function.outputs
     assert dx.type.shape == x.type.shape
     assert dw.type.shape == w.type.shape
@@ -164,7 +164,7 @@ def test_pmap():
 
     function = function.finalize()
     cpprint(function)
-    function = infer_types(function, [xs, wAs, wBs])
+    function = infer_types(function, [xs.type, wAs.type, wBs.type])
     cpprint(function)
 
     # TODO: Verify subfunction shapes and devices
@@ -191,7 +191,7 @@ def test_scatter():
         output_names=["xs"],
     )
     function = function.finalize()
-    function = infer_types(function, [x])
+    function = infer_types(function, [x.type])
     xs = function.outputs[0]
 
     assert isinstance(xs.type, TupleType)

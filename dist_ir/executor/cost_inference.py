@@ -19,11 +19,11 @@ class CostModel:
             "Allreduce": self._infer_costs_for_allreduce,
             "Broadcast": self._infer_costs_for_send,
             "Concat": self._infer_costs_for_concat,
-            "Gather": self._infer_costs_for_gather,
             "Loss": self._infer_costs_for_loss,
             "LossGrad": self._infer_costs_for_loss_grad,
             "MatMul": self._infer_costs_for_matmul,
             "MatMulGrad": self._infer_costs_for_matmul_grad,
+            "MPIGather": self._infer_costs_for_mpi_gather,
             "Scatter": self._infer_costs_for_send,
             "Select": self._free_cost_op,
             "Send": self._infer_costs_for_send,
@@ -68,7 +68,7 @@ class CostModel:
             costs[device] = 0
         return costs
 
-    def _infer_costs_for_gather(self, op, inputs, outputs):
+    def _infer_costs_for_mpi_gather(self, op, inputs, outputs):
         costs = {}
         output_devices = utils.get_all_devices(outputs)
         for device in output_devices:

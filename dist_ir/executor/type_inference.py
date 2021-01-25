@@ -77,28 +77,6 @@ def _elementwise_tensor_op_prop_fn(op, x, y):
     return x
 
 
-def _gather_prop_fn(op, x):
-    if not (
-        isinstance(x, TupleType)
-        and all(isinstance(t, Tensor) for t in x.types)
-        and len(set(t.shape for t in x.types)) == 1
-        and len(set(t.dtype for t in x.types)) == 1
-        and len(x.types) > 0
-    ):
-        _raise_type_error(op, x)
-    dim = op.attributes["dim"]
-    device = op.attributes["device"]
-    output_shape = list(x.types[0].shape)
-    for i in range(1, len(x.types)):
-        for j in range(len(x.types[i].shape)):
-            if j == dim:
-                output_shape[j] += x.types[i].shape[j]
-            elif x.types[i].shape[j] != x.types[0].shape[j]:
-                _raise_type_error(op, x)
-    output_shape = tuple(output_shape)
-    return Tensor(dtype=x.types[0].dtype, shape=output_shape, device=device)
-
-
 def _matmul_prop_fn(op, x, y):
     if not (
         isinstance(x, Tensor)
@@ -125,6 +103,28 @@ def _matmul_grad_prop_fn(op, x, y, z):
         _raise_type_error(op, x, y, z)
 
     return (x, y)
+
+
+def _mpi_gather_prop_fn(op, x):
+    if not (
+        isinstance(x, TupleType)
+        and all(isinstance(t, Tensor) for t in x.types)
+        and len(set(t.shape for t in x.types)) == 1
+        and len(set(t.dtype for t in x.types)) == 1
+        and len(x.types) > 0
+    ):
+        _raise_type_error(op, x)
+    dim = op.attributes["dim"]
+    device = op.attributes["device"]
+    output_shape = list(x.types[0].shape)
+    for i in range(1, len(x.types)):
+        for j in range(len(x.types[i].shape)):
+            if j == dim:
+                output_shape[j] += x.types[i].shape[j]
+            elif x.types[i].shape[j] != x.types[0].shape[j]:
+                _raise_type_error(op, x)
+    output_shape = tuple(output_shape)
+    return Tensor(dtype=x.types[0].dtype, shape=output_shape, device=device)
 
 
 def _scatter_prop_fn(op, x):
@@ -199,11 +199,11 @@ TypePropRegister = {
     "Allreduce": _allreduce_prop_fn,
     "Broadcast": _broadcast_prop_fn,
     "Concat": _concat_prop_fn,
-    "Gather": _gather_prop_fn,
     "Loss": _elementwise_tensor_op_prop_fn,
     "LossGrad": _elementwise_tensor_op_prop_fn,
     "MatMul": _matmul_prop_fn,
     "MatMulGrad": _matmul_grad_prop_fn,
+    "MPIGather": _mpi_gather_prop_fn,
     "Scatter": _scatter_prop_fn,
     "Select": _select_prop_fn,
     "Send": _send_prop_fn,

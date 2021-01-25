@@ -14,7 +14,7 @@ model = "bert_tiny_bw.onnx"
 
 def main():
     onnx_model_path = Path(__file__).parent / ONNX_MODEL_PATH / model
-    function = import_from_onnx(onnx_model_path)
+    function, input_data = import_from_onnx(onnx_model_path)
     cpprint(function)
     function = infer_types(function, function.inputs)
     cpprint(function)

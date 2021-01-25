@@ -128,7 +128,7 @@ def shard_transform(
                     dim = reduction_params[output_value]["dim"]
                     device = reduction_params[output_value]["device"]
                     pmap_output = transformed_function.add_op(
-                        "Gather",
+                        "MPIGather",
                         name=f"Gather/{output_value.name}",
                         inputs=[pmap_output_values[i]],
                         attributes={"dim": dim, "device": device},

@@ -18,7 +18,7 @@ def test_single_device():
     b = function.add_input_value("b", Tensor(dtype=Float(), shape=(4, 4), device=d))
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b])
     function = function.finalize()
-    function = infer_types(function, [a, b])
+    function = infer_types(function, [a.type, b.type])
     device_speeds = {"gpu": 1.0e13}
     # TODO shouldn't device_speeds be set in the topology?
     cost_model = CostModel(topology, device_speeds)
@@ -43,7 +43,7 @@ def test_data_parallel():
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
     y = function.add_op("MatMul", "MatMul1", inputs=[x, c], output_names=["y"])
     function = function.finalize()
-    function = infer_types(function, [a, b, c])
+    function = infer_types(function, [a.type, b.type, c.type])
     transformed_function = shard_transform(
         function=function,
         ops=function.ops,
@@ -54,7 +54,7 @@ def test_data_parallel():
         devices=[d0, d1],
     )
     transformed_function = infer_types(
-        transformed_function, transformed_function.inputs
+        transformed_function, [inp.type for inp in transformed_function.inputs]
     )
 
     print(transformed_function)
@@ -83,7 +83,7 @@ def test_chrome_trace():
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
     y = function.add_op("MatMul", "MatMul1", inputs=[x, c], output_names=["y"])
     function = function.finalize()
-    function = infer_types(function, [a, b, c])
+    function = infer_types(function, [a.type, b.type, c.type])
 
     device_speeds = {"gpu": 1.0e13}
     cost_model = CostModel(topology, device_speeds)
@@ -99,7 +99,7 @@ def test_chrome_trace():
         devices=[d0, d1],
     )
     transformed_function = infer_types(
-        transformed_function, transformed_function.inputs
+        transformed_function, [inp.type for inp in transformed_function.inputs]
     )
 
     simulation = simulator.simulate(transformed_function)

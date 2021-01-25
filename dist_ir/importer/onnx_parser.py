@@ -79,7 +79,7 @@ def parse_attribute(attr):
     return key, value
 
 
-def import_from_onnx(onnx_model):
+def import_from_onnx(onnx_model, parse_input_data=True):
     # TODO: Remove prints?
     # TODO: Support types beyond Tensor
     onnx_model = onnx.load(onnx_model)
@@ -109,28 +109,29 @@ def import_from_onnx(onnx_model):
         # assert value.HasField("dims")
         # assert value.HasField("data_type")
         dist_ir_dtype = get_dist_ir_dtype_from_onnx_dtype(value.data_type)
-        numpy_dtype = get_numpy_dtype_from_onnx_dtype(value.data_type)
         typ = Tensor(dtype=dist_ir_dtype, shape=tuple(value.dims))
-        if len(value.float_data) > 0:
-            assert numpy_dtype == np.float32
-            data = np.array(value.float_data, dtype=numpy_dtype)
-        elif len(value.int32_data) > 0:
-            assert numpy_dtype == np.int32
-            data = np.array(value.int32_data, dtype=numpy_dtype)
-        elif len(value.int64_data) > 0:
-            assert numpy_dtype == np.int64
-            data = np.array(value.int64_data, dtype=numpy_dtype)
-        else:
-            assert len(value.raw_data) > 0
-            data = np.frombuffer(value.raw_data, dtype=numpy_dtype)
-        if len(value.dims) > 0:
-            assert reduce(mul, value.dims) == len(data)
-        else:
-            assert len(data) == 1
-        data = np.reshape(data, value.dims)
+        if parse_input_data:
+            numpy_dtype = get_numpy_dtype_from_onnx_dtype(value.data_type)
+            if len(value.float_data) > 0:
+                assert numpy_dtype == np.float32
+                data = np.array(value.float_data, dtype=numpy_dtype)
+            elif len(value.int32_data) > 0:
+                assert numpy_dtype == np.int32
+                data = np.array(value.int32_data, dtype=numpy_dtype)
+            elif len(value.int64_data) > 0:
+                assert numpy_dtype == np.int64
+                data = np.array(value.int64_data, dtype=numpy_dtype)
+            else:
+                assert len(value.raw_data) > 0
+                data = np.frombuffer(value.raw_data, dtype=numpy_dtype)
+            if len(value.dims) > 0:
+                assert reduce(mul, value.dims) == len(data)
+            else:
+                assert len(data) == 1
+            data = np.reshape(data, value.dims)
+            input_data[value.name] = data
         v = dist_ir_function.add_input_value(value.name, typ)
         inputs[value.name] = v
-        input_data[value.name] = data
 
     """
     for value in onnx_model.graph.value_info:

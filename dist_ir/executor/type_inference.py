@@ -15,7 +15,7 @@ Type inference requires a register mapping ops to type propagation functions:
 from typing import Dict, List, Tuple
 
 from ..ir import Device, Function, FunctionMaker, Op, Value
-from ..ir.type import Type, Tensor, TupleType
+from ..ir.type import Bool, Float, Int32, Int64, Type, Tensor, TupleType
 
 
 def _raise_type_error(op, *args):
@@ -45,6 +45,26 @@ def _broadcast_prop_fn(op, x):
     return TupleType(
         tuple(Tensor(dtype=x.dtype, shape=x.shape, device=device) for device in devices)
     )
+
+
+def _cast_prop_fn(op, x):
+    if not isinstance(x, Tensor):
+        _raise_type_error(op, x)
+    dtype = None
+    proto_dtype = op.attributes["to"]
+    if proto_dtype == 0:
+        raise ValueError("Undefined data type")
+    elif proto_dtype == 1:
+        dtype = Float()
+    elif proto_dtype == 6:
+        dtype = Int32()
+    elif proto_dtype == 7:
+        dtype = Int64()
+    elif proto_dtype == 9:
+        dtype = Bool()
+    else:
+        raise NotImplementedError(f"Unsupported data type {proto_dtype}")
+    return Tensor(dtype=dtype, shape=x.shape, device=x.device)
 
 
 def _concat_prop_fn(op, x, y):
@@ -77,6 +97,12 @@ def _elementwise_tensor_op_prop_fn(op, x, y):
     return x
 
 
+def _identity_prop_fn(op, x):
+    if not isinstance(x, Tensor):
+        _raise_type_error(op, x)
+    return x
+
+
 def _matmul_prop_fn(op, x, y):
     if not (
         isinstance(x, Tensor)
@@ -103,6 +129,17 @@ def _matmul_grad_prop_fn(op, x, y, z):
         _raise_type_error(op, x, y, z)
 
     return (x, y)
+
+
+def _min_prop_fn(op, *inputs):
+    if not (
+        all(isinstance(inp, Tensor) for inp in inputs)
+        and all(inp.dtype == inputs[0].dtype for inp in inputs)
+        and all(inp.shape == inputs[0].shape for inp in inputs)
+        and all(inp.device == inputs[0].device for inp in inputs)
+    ):
+        _raise_type_error(op, inputs)
+    return inputs[0]
 
 
 def _mpi_gather_prop_fn(op, x):
@@ -168,6 +205,24 @@ def _send_prop_fn(op, x):
     return Tensor(dtype=x.dtype, shape=x.shape, device=device)
 
 
+def _shape_prop_fn(op, x):
+    if not (isinstance(x, Tensor) and x.shape is not None):
+        _raise_type_error(op, x)
+    return Tensor(dtype=Int64(), shape=(len(x.shape),), device=x.device)
+
+
+def _slice_prop_fn(op, x, y, z, xx=None, xy=None):
+    if not (
+        isinstance(x, Tensor)
+        and isinstance(y, Tensor)
+        and isinstance(z, Tensor)
+        and (xx is None or isinstance(xx, Tensor))
+        and (xy is None or isinstance(xy, Tensor))
+    ):
+        _raise_type_error(op, x, y, z, xx, xy)
+        # TODO: Make y, z, xx, xy constants
+
+
 def _split_prop_fn(op, x):
     if not isinstance(x, Tensor):
         _raise_type_error(op, x)
@@ -198,15 +253,19 @@ TypePropRegister = {
     # "Allgather": TODO,
     "Allreduce": _allreduce_prop_fn,
     "Broadcast": _broadcast_prop_fn,
+    "Cast": _cast_prop_fn,
     "Concat": _concat_prop_fn,
+    "Identity": _identity_prop_fn,
     "Loss": _elementwise_tensor_op_prop_fn,
     "LossGrad": _elementwise_tensor_op_prop_fn,
     "MatMul": _matmul_prop_fn,
     "MatMulGrad": _matmul_grad_prop_fn,
+    "Min": _min_prop_fn,
     "MPIGather": _mpi_gather_prop_fn,
     "Scatter": _scatter_prop_fn,
     "Select": _select_prop_fn,
     "Send": _send_prop_fn,
+    "Shape": _shape_prop_fn,
     "Split": _split_prop_fn,
     "Transpose": _transpose_prop_fn,
 }
@@ -237,14 +296,11 @@ def _pmap_prop_fn(op: Op, input_types: Tuple[Type]):
         assert devices == tuple(x.device for x in t.types)
 
     # Subfunction's inputs are given by pmap's arguments, but on device d
-    subfn_inputs = [
-        Value(v.name, t.types[0])
-        for v, t in zip(op.subfunctions[0].inputs, input_types)
-    ]
+    subfn_input_types = [t.types[0] for t in input_types]
 
     # Recursively call infer_types on subfunction
     assert len(op.subfunctions) == 1
-    subfunctions = [infer_types(op.subfunctions[0], subfn_inputs)]
+    subfunctions = [infer_types(op.subfunctions[0], subfn_input_types)]
 
     # Pmap's output types are given by subfunction's output types
     out_types = tuple(
@@ -259,12 +315,11 @@ def _pmap_prop_fn(op: Op, input_types: Tuple[Type]):
     return out_types, subfunctions
 
 
-def infer_types(function: Function, inputs: List[Value]) -> Function:
-    """Given a function and a list of input values, returns a new function where
+def infer_types(function: Function, input_types: List[Type]) -> Function:
+    """Given a function and a list of input types, returns a new function where
     all values are typed.
 
-    inputs: a list/tuple of Values, of the same length as function.inputs, but
-    the names are irrelevant.
+    input_types: a list/tuple of Types, of the same length as function.inputs.
     """
     new_function = FunctionMaker()
     # A Map from function's values to new_function's (typed) values:
@@ -277,10 +332,9 @@ def infer_types(function: Function, inputs: List[Value]) -> Function:
                 raise ValueError(f"Expected Value {v} to have a shape")
 
     # Add inputs to new_function
-    assert len(inputs) == len(function.inputs)
-    for old_inp, inp in zip(function.inputs, inputs):
-        assert_is_typed(inp)
-        new_inp = new_function.add_input_value(old_inp.name, inp.type)
+    assert len(input_types) == len(function.inputs)
+    for old_inp, typ in zip(function.inputs, input_types):
+        new_inp = new_function.add_input_value(old_inp.name, typ)
         value_map[old_inp] = new_inp
 
     op: Op  # https://stackoverflow.com/q/59102038

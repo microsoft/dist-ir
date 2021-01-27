@@ -7,7 +7,7 @@ from ..ir import FunctionMaker, Value
 from ..ir.type import Bool, Float, Int32, Int64, Tensor
 
 
-def get_dist_ir_dtype_from_onnx_dtype(onnx_dtype):
+def _get_dist_ir_dtype_from_onnx_dtype(onnx_dtype):
     if onnx_dtype == 0:
         raise ValueError("Undefined onnx_dtype")
     elif onnx_dtype == 1:
@@ -22,7 +22,7 @@ def get_dist_ir_dtype_from_onnx_dtype(onnx_dtype):
         raise NotImplementedError(f"onnx_dtype {onnx_dtype}")
 
 
-def get_numpy_dtype_from_onnx_dtype(onnx_dtype):
+def _get_numpy_dtype_from_onnx_dtype(onnx_dtype):
     if onnx_dtype == 0:
         raise ValueError("Undefined onnx_dtype")
     elif onnx_dtype == 1:
@@ -37,7 +37,7 @@ def get_numpy_dtype_from_onnx_dtype(onnx_dtype):
         raise NotImplementedError(f"onnx_dtype {onnx_dtype}")
 
 
-def parse_attribute(attr):
+def _parse_attribute(attr):
     key = attr.name
     attr_type = attr.type
     value = None
@@ -79,6 +79,35 @@ def parse_attribute(attr):
     return key, value
 
 
+def _parse_tensor_proto(tensor_proto):
+    numpy_dtype = _get_numpy_dtype_from_onnx_dtype(tensor_proto.data_type)
+    if len(tensor_proto.float_data) > 0:
+        assert numpy_dtype == np.float32
+        data = np.array(tensor_proto.float_data, dtype=numpy_dtype)
+    elif len(tensor_proto.int32_data) > 0:
+        assert numpy_dtype == np.int32
+        data = np.array(tensor_proto.int32_data, dtype=numpy_dtype)
+    elif len(tensor_proto.int64_data) > 0:
+        assert numpy_dtype == np.int64
+        data = np.array(tensor_proto.int64_data, dtype=numpy_dtype)
+    else:
+        assert len(tensor_proto.raw_data) > 0
+        data = np.frombuffer(tensor_proto.raw_data, dtype=numpy_dtype)
+    if len(tensor_proto.dims) > 0:
+        assert reduce(mul, tensor_proto.dims) == len(data)
+    else:
+        assert len(data) == 1
+    data = np.reshape(data, tensor_proto.dims)
+    return data
+
+
+def parse_tensor_from_file(path):
+    tensor_proto = onnx.TensorProto()
+    with open(path, "rb") as f:
+        tensor_proto.ParseFromString(f.read())
+    return _parse_tensor_proto(tensor_proto)
+
+
 def import_from_onnx(onnx_model, parse_input_data=True):
     # TODO: Remove prints?
     # TODO: Support types beyond Tensor
@@ -96,7 +125,7 @@ def import_from_onnx(onnx_model, parse_input_data=True):
         assert "ValueInfoProto" in str(type(value))
         assert hasattr(value, "type")
         assert hasattr(value.type, "tensor_type")
-        dtype = get_dist_ir_dtype_from_onnx_dtype(value.type.tensor_type.elem_type)
+        dtype = _get_dist_ir_dtype_from_onnx_dtype(value.type.tensor_type.elem_type)
         typ = Tensor(dtype=dtype)
         v = dist_ir_function.add_input_value(value.name, typ)
         inputs[value.name] = v
@@ -106,32 +135,12 @@ def import_from_onnx(onnx_model, parse_input_data=True):
             print(f"Skipping adding {value.name}; already an input value")
             return
         assert "TensorProto" in str(type(value))
-        # assert value.HasField("dims")
-        # assert value.HasField("data_type")
-        dist_ir_dtype = get_dist_ir_dtype_from_onnx_dtype(value.data_type)
+        dist_ir_dtype = _get_dist_ir_dtype_from_onnx_dtype(value.data_type)
         typ = Tensor(dtype=dist_ir_dtype, shape=tuple(value.dims))
-        if parse_input_data:
-            numpy_dtype = get_numpy_dtype_from_onnx_dtype(value.data_type)
-            if len(value.float_data) > 0:
-                assert numpy_dtype == np.float32
-                data = np.array(value.float_data, dtype=numpy_dtype)
-            elif len(value.int32_data) > 0:
-                assert numpy_dtype == np.int32
-                data = np.array(value.int32_data, dtype=numpy_dtype)
-            elif len(value.int64_data) > 0:
-                assert numpy_dtype == np.int64
-                data = np.array(value.int64_data, dtype=numpy_dtype)
-            else:
-                assert len(value.raw_data) > 0
-                data = np.frombuffer(value.raw_data, dtype=numpy_dtype)
-            if len(value.dims) > 0:
-                assert reduce(mul, value.dims) == len(data)
-            else:
-                assert len(data) == 1
-            data = np.reshape(data, value.dims)
-            input_data[value.name] = data
         v = dist_ir_function.add_input_value(value.name, typ)
         inputs[value.name] = v
+        if parse_input_data:
+            input_data[v] = _parse_tensor_proto(value)
 
     """
     for value in onnx_model.graph.value_info:
@@ -166,7 +175,7 @@ def import_from_onnx(onnx_model, parse_input_data=True):
             else:
                 raise ValueError(f"Could not find input {value}!")
         output_names = [v for v in node.output if v != ""]
-        attributes = {k: v for k, v in [parse_attribute(a) for a in node.attribute]}
+        attributes = {k: v for k, v in [_parse_attribute(a) for a in node.attribute]}
         outputs = dist_ir_function.add_op(
             op_type=node.op_type,
             name=node.name,

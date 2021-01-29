@@ -74,7 +74,7 @@ class SequentialExecutor:
             res = self._compute_op(op, inputs)
             for i, out_edge in enumerate(op.outputs):
                 output_data[out_edge] = res[i]
-                consumers[out_edge] = len(function.get_consumers(out_edge))
+                consumers[out_edge] = len(function.consumers[out_edge])
 
             # Garbage collect the fully consumed output tensors.
             to_free = []

@@ -24,10 +24,10 @@ class Function:
     outputs: Tuple[Value]
 
     # Map from Value -> List of Ops that consume it
-    _consumers: Dict[Value, Tuple[Op]] = field(init=False)
+    consumers: Dict[Value, Tuple[Op]] = field(init=False)
 
     def __post_init__(self):
-        """Creates the _consumers map, verifies the function, and performs
+        """Creates the consumers map, verifies the function, and performs
         type inference. This is called automatically at initialization.
         """
         consumers = defaultdict(list)
@@ -39,7 +39,7 @@ class Function:
         for v in consumers:
             consumers[v] = tuple(consumers[v])
         # Can't assign to frozen field:
-        object.__setattr__(self, "_consumers", frozendict(consumers))
+        object.__setattr__(self, "consumers", frozendict(consumers))
 
         # Check that ops don't use values from the future
         self._verify_ops_in_topological_order()
@@ -57,9 +57,6 @@ class Function:
                     )
             for out_edge in op.outputs:
                 seen.add(out_edge)
-
-    def get_consumers(self, value: Value) -> List[Op]:
-        return self._consumers[value]
 
     def __str__(self):
         # TODO can we use the prettyprint output as __str__?
@@ -127,7 +124,7 @@ class Function:
                 # values might have consumers outside the subfunction (external).
                 has_external_output = False
                 if orig_output in self.outputs or any(
-                    [c not in ops for c in self._consumers[orig_output]]
+                    [c not in ops for c in self.consumers[orig_output]]
                 ):
                     outputs.append(subfunction_output)
                 value_map[orig_output] = subfunction_output
@@ -144,6 +141,7 @@ class FunctionMaker:
     inputs: List[Value] = field(default_factory=list)
     outputs: List[Value] = field(default_factory=list)
 
+    # TODO wrong default values for Op
     def add_op(
         self,
         op_type,

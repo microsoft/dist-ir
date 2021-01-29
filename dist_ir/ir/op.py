@@ -20,8 +20,9 @@ class Op:
     # These are not fields, just parameters to init and post_init:
     output_names: InitVar[Tuple[str]] = None
     output_types: InitVar[Tuple[Type]] = None
+    output_values: InitVar[Tuple[Type]] = None
 
-    def __post_init__(self, output_names, output_types):
+    def __post_init__(self, output_names, output_types, output_values):
         if self.op_type == "Pmap":
             # Handle pmap specially
             assert len(self.subfunctions) == 1
@@ -31,7 +32,7 @@ class Op:
             assert len(self.inputs) == len(self.subfunctions[0].inputs)
             # Number of outputs is given by subfunction
             num_outputs = len(self.subfunctions[0].outputs)
-
+            assert output_values is None or len(output_values) == num_outputs
         else:
             if self.op_type not in OpRegister:
                 raise ValueError(f"Invalid op type {self.op_type}")
@@ -55,7 +56,14 @@ class Op:
             else:
                 num_outputs = OpRegister[self.op_type].num_outputs
 
+        if output_values is not None:
+            object.__setattr__(
+                self, "outputs", output_values
+            )  # Can't assign to frozen field
+            return
+
         # Create the correct number of output values with appropriate types
+        # if self.outputs is None:
         if output_names is None:
             output_names = [f"{self.name}_out_{i}" for i in range(num_outputs)]
         elif len(output_names) != num_outputs:

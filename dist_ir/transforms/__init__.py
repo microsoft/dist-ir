@@ -1,3 +1,4 @@
+from .hybrid_transform import hybrid_transform
 from .shard_transform import shard_transform
 from .pipeline_parallel_transform import PipelineParallelTransform
 from .fifo_scheduler import FIFOScheduler

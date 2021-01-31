@@ -129,7 +129,7 @@ MixedImplementations = {
 }
 
 
-def _convert_impls_to_semantics(impls):
+def convert_impls_to_semantics(impls):
     """Converts a dictionary of semantics functions that take in input values
     and spit out output values to one that modifies an abstract state in place.
     """
@@ -138,7 +138,9 @@ def _convert_impls_to_semantics(impls):
         def semantics(op: Op, state: AbstractState):
             # Find the op's inputs in state's environment
             inputs = (state.env[v] for v in op.inputs)
+            # Execute the implementation on the inputs
             outputs = impl_fn(op, *inputs)
+            # Put the outputs back into the state's environment
             if not isinstance(outputs, tuple):
                 outputs = (outputs,)
             for x, val in zip(op.outputs, outputs):
@@ -149,6 +151,4 @@ def _convert_impls_to_semantics(impls):
     return {signature: convert_impl(impl) for signature, impl in impls.items()}
 
 
-MixedInterpreter = AbstractInterpreter(
-    _convert_impls_to_semantics(MixedImplementations)
-)
+MixedInterpreter = AbstractInterpreter(convert_impls_to_semantics(MixedImplementations))

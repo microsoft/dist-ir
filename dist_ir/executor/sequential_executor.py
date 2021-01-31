@@ -1,5 +1,6 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence
 
+from .absint import AbstractInterpreter, convert_impls_to_semantics
 from .backend_register import BackendRegister
 from ..ir import Function, Op, Value
 
@@ -8,8 +9,10 @@ class SequentialExecutor:
     def __init__(self, backend):
         if backend not in BackendRegister:
             raise ValueError(f"Unknown backend {backend}")
-        self._backend = backend
+        semantics = convert_impls_to_semantics(BackendRegister[backend])
+        self.interpreter = AbstractInterpreter(semantics=semantics)
 
+    # TODO pmap in absint
     def _compute_op(self, op: Op, inputs: List[Any]):
         """Executes the given op and returns its outputs."""
         op_type = op.op_type
@@ -38,51 +41,15 @@ class SequentialExecutor:
             output_data = (output_data,)
         return output_data
 
-    def compute(
-        self, function: Function, input_data: Dict[Value, Any]
-    ) -> Dict[Value, Any]:
+    def compute(self, function: Function, inputs: Sequence[Any]) -> Dict[Value, Any]:
         """Executes the function given the specified inputs and returns the final result.
 
         Args:
           function: The function to execute.
-          input_data: A map from input value to data represented in the
-                      specified backend.
+          inputs: A sequence of input data represented in the specified backend.
 
         Returns:
           A map from output value to output data.
         """
-        output_data = {}
-        consumers = {}
-
-        # Execute ops in topological order.
-        for op in function.ops:
-            inputs = []
-            for in_edge in op.inputs:
-                if in_edge in function.inputs:
-                    if in_edge not in input_data:
-                        raise ValueError(
-                            f"Could not find input {in_edge} in input_data"
-                        )
-                    input_value = input_data[in_edge]
-                elif in_edge in output_data:
-                    input_value = output_data[in_edge]
-                    consumers[in_edge] -= 1
-                else:
-                    raise ValueError(f"Invalid input {in_edge} for op {op}")
-                inputs.append(input_value)
-
-            res = self._compute_op(op, inputs)
-            for i, out_edge in enumerate(op.outputs):
-                output_data[out_edge] = res[i]
-                consumers[out_edge] = len(function.consumers[out_edge])
-
-            # Garbage collect the fully consumed output tensors.
-            to_free = []
-            for out_edge in output_data:
-                if consumers[out_edge] == 0 and not out_edge in function.outputs:
-                    to_free.append(out_edge)
-            for out_edge in to_free:
-                del output_data[out_edge]
-
-        # Return the outputs.
-        return output_data
+        state = self.interpreter.interpret(function, inputs)
+        return tuple(state.env[v] for v in function.outputs)

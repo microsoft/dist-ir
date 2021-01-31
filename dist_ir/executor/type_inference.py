@@ -1,12 +1,18 @@
 """
-A type inference module that converts an untyped DistIR Function into one where
-every Value is typed with shape and dtype information, given input types or
-example inputs.
+This is the type propagation abstract domain for the abstract interpreter.
+Interpreting a DistIR Function using this domain essentially results in type
+propagation/inference for the function, assuming inputs are given appropriate
+types (from the ir.type module). The resulting abstract state's environment
+maps every Value to a type with shape and dtype information, given input types
+or example inputs.
 
-Type inference requires a register mapping ops to type propagation functions:
+This module contains a register mapping ops to type propagation functions:
 - This is a function foo(op, x1, x2, .., xN), where op is an N-ary Op, and x1 to
     xN are Types of the inputs.
-- The function should check that the inputs have the expected types.
+- The function doesn't need to check the python types of the inputs
+    (e.g. Tensor) as that is given in the register and is checked by the
+    abstract interpreter, but it should check that inputs have the expected
+    shapes/dtypes.
 - The function should return the type of the output/a tuple of types of the
     outputs.
 (When we say types we also mean shape and device information.)
@@ -15,7 +21,8 @@ Type inference requires a register mapping ops to type propagation functions:
 from typing import Dict, List, Tuple
 
 from ..ir import Device, Function, FunctionMaker, Op, Value
-from ..ir.type import Type, Tensor, TupleType
+from ..ir.type import Bool, Float, Int, Type, Tensor, TupleType
+from .absint import AbstractInterpreter, AbstractState
 
 
 def _raise_type_error(op, *args):
@@ -45,6 +52,17 @@ def _broadcast_prop_fn(op, x):
     return TupleType(
         tuple(Tensor(dtype=x.dtype, shape=x.shape, device=device) for device in devices)
     )
+
+
+def _cast_prop_fn(op, x):
+    proto_dtype = op.attributes["to"]
+    dtype = {
+        1: Float(),
+        6: Int(),
+        7: Int(),  # TODO distinguish between int32 and int64
+        9: Bool(),
+    }[proto_dtype]
+    return Tensor(dtype=dtype, shape=x.shape, device=x.device)
 
 
 def _concat_prop_fn(op, x, y):
@@ -168,6 +186,11 @@ def _send_prop_fn(op, x):
     return Tensor(dtype=x.dtype, shape=x.shape, device=device)
 
 
+def _slice_prop_fn(op, x, starts, ends, axes):
+    # We don't know the shape of the output, so:
+    return Tensor(dtype=x.dtype, shape=None, device=x.device)
+
+
 def _split_prop_fn(op, x):
     if not isinstance(x, Tensor):
         _raise_type_error(op, x)
@@ -194,22 +217,54 @@ def _transpose_prop_fn(op, x):
 
 
 TypePropRegister = {
-    "Add": _elementwise_tensor_op_prop_fn,
-    # "Allgather": TODO,
-    "Allreduce": _allreduce_prop_fn,
-    "Broadcast": _broadcast_prop_fn,
-    "Concat": _concat_prop_fn,
-    "Gather": _gather_prop_fn,
-    "Loss": _elementwise_tensor_op_prop_fn,
-    "LossGrad": _elementwise_tensor_op_prop_fn,
-    "MatMul": _matmul_prop_fn,
-    "MatMulGrad": _matmul_grad_prop_fn,
-    "Scatter": _scatter_prop_fn,
-    "Select": _select_prop_fn,
-    "Send": _send_prop_fn,
-    "Split": _split_prop_fn,
-    "Transpose": _transpose_prop_fn,
+    ("Add", (Tensor, Tensor)): _elementwise_tensor_op_prop_fn,
+    ("Allreduce", (TupleType)): _allreduce_prop_fn,
+    ("Broadcast", (Tensor,)): _broadcast_prop_fn,
+    ("Cast", (Tensor,)): _cast_prop_fn,
+    ("Concat", (TupleType)): _concat_prop_fn,
+    ("Gather", (TupleType)): _gather_prop_fn,
+    # ("Loss", (Tensor, Tensor)): TODO
+    # ("LossGrad", (Tensor, Tensor)): TODO
+    ("MatMul", (Tensor, Tensor)): _matmul_prop_fn,
+    ("MatMulGrad", (Tensor, Tensor, Tensor)): _matmul_grad_prop_fn,
+    # ("Min", (Tensor, Tensor)): TODO
+    ("Scatter", (Tensor,)): _scatter_prop_fn,
+    ("Select", (Tensor,)): _select_prop_fn,
+    ("Send", (Tensor,)): _send_prop_fn,
+    ("Split", (Tensor,)): _split_prop_fn,
+    # ("Shape", (Tensor,)): TODO
+    ("Slice", (Tensor, Tensor, Tensor, Tensor)): _slice_prop_fn,
+    ("Transpose", (Tensor,)): _transpose_prop_fn,
 }
+
+
+def _create_semantics(type_prop_register):
+    """Creates a semantics for AbstractInterpreter
+    (signature -> (state modifiers))
+    from a register of type propagation functions
+    signature -> (input types -> output types)).
+    """
+
+    def convert_impl(type_prop_fn):
+        def semantics(op: Op, state: AbstractState):
+            # Find the op's inputs in state's environment
+            inputs = tuple(state.env[v] for v in op.inputs)
+
+            # Run the type propagation function
+            outputs = type_prop_fn(op, *inputs)
+
+            if not isinstance(outputs, tuple):
+                outputs = (outputs,)
+            for x, val in zip(op.outputs, outputs):
+                state.env[x] = val
+
+        return semantics
+
+    return {
+        signature: convert_impl(type_prop_fn)
+        for signature, type_prop_fn in type_prop_register.items()
+    }
+
 
 # Handling pmap specially for now since it needs to return a typed subfunction
 
@@ -259,6 +314,47 @@ def _pmap_prop_fn(op: Op, input_types: Tuple[Type]):
     return out_types, subfunctions
 
 
+TypeInferrer = AbstractInterpreter(semantics=_create_semantics(TypePropRegister))
+
+
+def _type_function(function: Function, type_map: Dict[Value, Type]) -> Function:
+    """Create a typed version of function, using the types given in type map."""
+    new_function = FunctionMaker()
+    # A Map from function's values to new_function's (typed) values:
+    value_map: Dict[Value, Value] = {}
+
+    # Add inputs to new_function
+    for inp in function.inputs:
+        new_inp = new_function.add_input_value(inp.name, type_map[inp])
+        value_map[inp] = new_inp
+
+    # Duplicate each op, but with types from typed_env
+    for op in function.ops:
+        # Invariant: inputs of op are already typed (as ops are toposorted)
+        typed_inputs = tuple(value_map[inp] for inp in op.inputs)
+
+        # Recursively convert the subfunctions:
+        subfunctions = tuple(_type_function(fn, type_map) for fn in op.subfunctions)
+
+        new_op = Op(
+            op_type=op.op_type,
+            name=op.name,
+            inputs=typed_inputs,
+            attributes=op.attributes,
+            subfunctions=subfunctions,
+            output_names=tuple(v.name for v in op.outputs),
+            # Look up output types from type_map
+            output_types=tuple(type_map[v] for v in op.outputs),
+        )
+        new_function.ops.append(new_op)
+
+        # Add op's outputs to value_map
+        for old_out, out in zip(op.outputs, new_op.outputs):
+            value_map[old_out] = out
+
+    return new_function.finalize()
+
+
 def infer_types(function: Function, inputs: List[Value]) -> Function:
     """Given a function and a list of input values, returns a new function where
     all values are typed.
@@ -266,9 +362,6 @@ def infer_types(function: Function, inputs: List[Value]) -> Function:
     inputs: a list/tuple of Values, of the same length as function.inputs, but
     the names are irrelevant.
     """
-    new_function = FunctionMaker()
-    # A Map from function's values to new_function's (typed) values:
-    value_map: Dict[Value, Value] = {}
 
     def assert_is_typed(v: Value):
         assert v.type is not None
@@ -276,43 +369,12 @@ def infer_types(function: Function, inputs: List[Value]) -> Function:
             if v.type.shape is None:
                 raise ValueError(f"Expected Value {v} to have a shape")
 
-    # Add inputs to new_function
     assert len(inputs) == len(function.inputs)
-    for old_inp, inp in zip(function.inputs, inputs):
+    for inp in inputs:
         assert_is_typed(inp)
-        new_inp = new_function.add_input_value(old_inp.name, inp.type)
-        value_map[old_inp] = new_inp
 
-    op: Op  # https://stackoverflow.com/q/59102038
-    for op in function.ops:
-        # Invariant: inputs of op are already typed (as ops are toposorted)
-        typed_inputs = tuple(value_map[inp] for inp in op.inputs)
-        input_types = tuple(v.type for v in typed_inputs)
+    # Use the type inference AbstractInterpreter to propagate types
+    state = TypeInferrer.interpret(function, (v.type for v in inputs))
+    type_map = state.env
 
-        # Infer types of outputs and create output values
-        if op.op_type == "Pmap":
-            out_types, subfunctions = _pmap_prop_fn(op, input_types)
-        else:
-            out_types = TypePropRegister[op.op_type](op, *input_types)
-            if not isinstance(out_types, tuple):
-                assert isinstance(out_types, Type)
-                out_types = (out_types,)
-            subfunctions = []
-
-        new_op = Op(
-            op.op_type,
-            op.name,
-            typed_inputs,
-            op.attributes,
-            subfunctions,
-            tuple(v.name for v in op.outputs),
-            out_types,
-        )
-        new_function.ops.append(new_op)
-
-        # Add op's outputs to value_map
-        for old_out, out in zip(op.outputs, new_op.outputs):
-            assert_is_typed(out)
-            value_map[old_out] = out
-
-    return new_function.finalize()
+    return _type_function(function, type_map)

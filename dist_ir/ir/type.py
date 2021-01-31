@@ -28,6 +28,18 @@ class Type:
 
 
 @singleton
+class Bool(Type):
+    """The boolean type. A singleton class."""
+
+    def __repr__(self):
+        return "Bool"
+
+    @property
+    def size(self):
+        return 1  # TODO accurate?
+
+
+@singleton
 class Int(Type):
     """The integer type. A singleton class."""
 

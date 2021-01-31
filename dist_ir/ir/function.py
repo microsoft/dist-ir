@@ -169,7 +169,7 @@ class FunctionMaker:
             name=name,
             inputs=None if inputs is None else tuple(inputs),
             attributes=None if attributes is None else frozendict(attributes),
-            subfunctions=None if subfunctions is None else tuple(subfunctions),
+            subfunctions=() if subfunctions is None else tuple(subfunctions),
             output_names=None if output_names is None else tuple(output_names),
         )
         self.ops.append(op)

@@ -1,49 +1,62 @@
-from . import utils
-
 import numpy as np
+
+from . import utils
+from ..ir.type import Tensor, TupleType
 
 BYTES_IN_GB = 8.0e9
 
 
 class CostModel:
-    """A cost model -- mapping from op type to cost functions. These cost
-    functions expect as input the TODO and output a map from devices to runtime.
+    """A cost model -- shape-based analytical cost functions for each op type.
+
+    These cost functions expect as input the type of each input value and output
+    a map from devices to runtime.
     (TODO temporary memory)
+
+    Cost functions don't need to check types or devices of inputs, these are
+    checked by type prop functions.
     """
+
+    # TODO instead of passing the op, should we pass the attributes as kwargs?
 
     def __init__(self, topology, device_speeds):
         self._topology = topology
+        # TODO shouldn't device speeds be part of the topology?
         self._device_speeds = device_speeds
-        self._op_register = {
-            "Add": self._infer_costs_for_add,
-            "Allreduce": self._infer_costs_for_allreduce,
-            "Broadcast": self._infer_costs_for_send,
-            "Concat": self._infer_costs_for_concat,
-            "Gather": self._infer_costs_for_gather,
-            "Loss": self._infer_costs_for_loss,
-            "LossGrad": self._infer_costs_for_loss_grad,
-            "MatMul": self._infer_costs_for_matmul,
-            "MatMulGrad": self._infer_costs_for_matmul_grad,
-            "Scatter": self._infer_costs_for_send,
-            "Select": self._free_cost_op,
-            "Send": self._infer_costs_for_send,
-            "Split": self._free_cost_op,
+
+        def notImplemented():
+            raise NotImplementedError
+
+        self.cost_functions = {
+            ("Add", (Tensor, Tensor)): self._add_cost_fn,
+            ("Allreduce", (TupleType)): self._allreduce_cost_fn,
+            ("Broadcast", (Tensor,)): notImplemented,
+            ("Cast", (Tensor,)): self._cast_cost_fn,
+            ("Concat", (TupleType)): self._concat_cost_fn,
+            ("Gather", (TupleType)): self._gather_cost_fn,
+            ("Loss", (Tensor, Tensor)): self._loss_cost_fn,
+            ("LossGrad", (Tensor, Tensor)): self._loss_grad_cost_fn,
+            ("MatMul", (Tensor, Tensor)): self._matmul_cost_fn,
+            ("MatMulGrad", (Tensor, Tensor, Tensor)): self._matmul_grad_cost_fn,
+            ("Min", (Tensor, Tensor)): self._min_cost_fn,
+            ("Scatter", (Tensor,)): notImplemented,
+            ("Select", (Tensor,)): notImplemented,
+            ("Send", (Tensor,)): self._send_cost_fn,
+            ("Split", (Tensor,)): notImplemented,
+            ("Shape", (Tensor,)): self._shape_cost_fn,
+            ("Slice", (Tensor, Tensor, Tensor, Tensor)): self._slice_cost_fn,
         }
 
-    def _infer_costs_for_add(self, op, inputs, outputs):
-        device = inputs[0].type.device
-        # TODO: Verify all input and output devices are the same?
+    def _add_cost_fn(self, op, x, y):
         # TODO: Check this cost computation
-        a_matrix_shape = inputs[0].type.shape
-        flops = a_matrix_shape[0] * a_matrix_shape[1]
+        flops = x.size()
         # TODO: Use a better way of computing runtime from FLOPs
-        runtime = flops / self._device_speeds[device.device_type]
-        return {device: runtime}
+        runtime = flops / self._device_speeds[x.device.device_type]
+        return {x.device: runtime}
 
-    def _infer_costs_for_allreduce(self, op, inputs, outputs):
-        costs = {}
-        input_size = inputs[0].type.types[0].size()
-        devices = list(utils.get_all_devices(outputs))
+    def _allreduce_cost_fn(self, op, xs):
+        input_size = xs.types[0].size()
+        devices = list(utils.get_all_devices(xs))
         num_devices = len(devices)
         per_device_data = 2 * input_size * (num_devices - 1) / num_devices
         per_device_data_gb = per_device_data / BYTES_IN_GB
@@ -55,92 +68,73 @@ class CostModel:
                 )
         average_bandwidth = np.mean(all_bandwidths)
         cost = per_device_data_gb / average_bandwidth
-        for device in devices:
-            costs[device] = cost
 
-        return costs
+        return {device: cost for device in devices}
 
-    def _infer_costs_for_concat(self, op, inputs, outputs):
-        costs = {}
-        input_devices = utils.get_all_devices(inputs)
-        for device in input_devices:
-            # TODO: Compute cost properly
-            costs[device] = 0
-        return costs
+    def _cast_cost_fn(self, op, x):
+        return {x.device: x.size()}
 
-    def _infer_costs_for_gather(self, op, inputs, outputs):
-        costs = {}
-        output_devices = utils.get_all_devices(outputs)
-        for device in output_devices:
-            # TODO: Compute cost properly
-            costs[device] = 0
+    def _concat_cost_fn(self, op, xs):
+        # TODO: Compute cost properly
+        devices = utils.get_all_devices(xs)
+        return {device: 0 for device in devices}
 
-        return costs
+    def _gather_cost_fn(self, op, xs):
+        # TODO: Compute cost properly
+        devices = utils.get_all_devices(xs)
+        return {device: 0 for device in devices}
 
-    def _infer_costs_for_loss(self, op, inputs, outputs):
-        costs = {}
-        input_devices = utils.get_all_devices(inputs)
-        for device in input_devices:
-            # TODO: Compute cost properly
-            costs[device] = 0
-        return costs
+    def _loss_cost_fn(self, op, x, y):
+        # TODO: Compute cost properly
+        return {x.device: 0}
 
-    def _infer_costs_for_loss_grad(self, op, inputs, outputs):
-        costs = {}
-        input_devices = utils.get_all_devices(inputs)
-        for device in input_devices:
-            # TODO: Compute cost properly
-            costs[device] = 0
-        return costs
+    def _loss_grad_cost_fn(self, op, x, y):
+        # TODO: Compute cost properly
+        return {x.device: 0}
 
-    def _infer_costs_for_matmul(self, op, inputs, outputs):
-        device = inputs[0].type.device
-        # TODO: Verify all input and output devices are the same?
+    def _matmul_cost_fn(self, op, x, y):
+        # TODO integrate device speed
+        return {x.device: 2 * x.shape[0] * x.shape[1] * y.shape[1]}
+
+    def _matmul_cost_fn(self, op, x, y):
         # TODO: Check this cost computation
-        a_matrix_shape = inputs[0].type.shape
-        b_matrix_shape = inputs[1].type.shape
-        flops = 2 * a_matrix_shape[1] * a_matrix_shape[0] * b_matrix_shape[1]
+        flops = 2 * x.shape[0] * x.shape[1] * y.shape[1]
         # TODO: Use a better way of computing runtime from FLOPs
-        runtime = flops / self._device_speeds[device.device_type]
-        return {device: runtime}
+        runtime = flops / self._device_speeds[x.device.device_type]
+        return {x.device: runtime}
 
-    def _infer_costs_for_matmul_grad(self, op, inputs, outputs):
-        costs = self._infer_costs_for_matmul(op, [inputs[0], inputs[1]], [outputs[0]])
-        # TODO: Replace with more accurate estimate.
-        for device in costs:
-            costs[device] *= 2
-        return costs
+    def _matmul_grad_cost_fn(self, op, x, y, dz):
+        # TODO: Check this cost computation
+        # dx = dz * y.T, dy = x.T * dz
+        xT = Tensor(dtype=x.dtype, shape=(x.shape[1], x.shape[0]), device=x.device)
+        yT = Tensor(dtype=x.dtype, shape=(x.shape[1], x.shape[0]), device=x.device)
+        costs1 = self._matmul_cost_fn(self, op, dz, yT)
+        costs2 = self._matmul_cost_fn(self, op, xT, dz)
+        return {x.device: costs1[x.device] + costs2[x.device]}
 
-    def _infer_costs_for_send(self, op, inputs, outputs):
+    def _min_cost_fn(self, op, x, y):
+        return {x.device: x.size()}
+
+    def _send_cost_fn(self, op, x):
         costs = {}
-        input_device = inputs[0].type.device
+        input_device = x.device
+        # TODO send is synchronous; input device should do same work too
         costs[input_device] = 0
-        input_size = inputs[0].type.size() * inputs[0].type.dtype.size
+        input_size = x.size() * x.dtype.size
         input_size_gb = input_size / BYTES_IN_GB
-        output_devices = utils.get_all_devices(outputs)
-        for output_device in output_devices:
-            bandwidth = self._topology.get_bandwidth(input_device, output_device)
-            transfer_time = input_size_gb / bandwidth
-            # NOTE: This assumes all tensors can be sent concurrently
-            # TODO: Do we need to model the link capacity?
-            costs[input_device] = max(costs[input_device], transfer_time)
-            if output_device != input_device:
-                costs[output_device] = transfer_time
+        output_device = op.attributes["device"]
+        bandwidth = self._topology.get_bandwidth(input_device, output_device)
+        transfer_time = input_size_gb / bandwidth
+        # NOTE: This assumes all tensors can be sent concurrently
+        # TODO: Do we need to model the link capacity?
+        costs[input_device] = max(costs[input_device], transfer_time)
+        if output_device != input_device:
+            costs[output_device] = transfer_time
 
         return costs
 
-    def _free_cost_op(self, op, inputs, outputs):
-        costs = {}
-        input_devices = utils.get_all_devices(inputs)
-        output_devices = utils.get_all_devices(outputs)
-        if input_devices | output_devices is None:
-            return costs
-        for device in input_devices | output_devices:
-            costs[device] = 0.0
-        return costs
+    def _shape_cost_fn(self, op, x):
+        return {x.device: 1}  # TODO 1 clock cycle? 1 flop?
 
-    def infer_costs(self, op):
-        inputs = op.inputs
-        outputs = op.outputs
-
-        return self._op_register[op.op_type](op, inputs, outputs)
+    def _slice_cost_fn(self, op, x, starts, ends, axes):
+        return {x.device: 1}  # TODO is this accurate?

@@ -1,44 +1,45 @@
-from copy import deepcopy
-from collections import defaultdict
-from dataclasses import dataclass, field
 from typing import Any, Dict, Sequence
-import json
 
 from ..ir import Function, Op, Value
 from ..ir.type import Tensor
-from . import utils
 
 
-@dataclass
 class AbstractState:
     """An abstract state. env is an environment, i.e. a mapping from Value
     objects to abstract values.
     """
 
-    env: Dict[Value, Any] = field(default_factory=dict)
+    def __init__(self, function: Function, inputs: Sequence[Any]):
+        self.env: Dict[Value, Any] = dict(zip(function.inputs, inputs))
+        self.function = function
 
 
 class AbstractInterpreter:
-    """Given an abstract domain (abstract values and abstract implementation of
-    all ops), this class provides methods to abstractly interpret a DistIR
-    function on abstract values.
+    def __init__(self, AbstractState=AbstractState, semantics=None):
+        """An abstract interpreter: Given an abstract domain
+        (abstract values and abstract implementation of all ops),
+        this class provides methods to abstractly interpret a DistIR function on
+        abstract values.
 
-    The result of the interpretation will be the abstract values output by the
-    function, along with the final abstract state (which can be used to build,
-    e.g., a trace).
-    """
+        `AbstractState`: subclass of absint.AbstractState to be used as abstract
+        state.
 
-    def __init__(self, semantics=None):
-        # (OpType, tuple of input types) -> Python function
-        # Each function gets the Op and the abstract state as input
-        # and modifies the state in-place to reflect the execution of the op
+        `semantics`: Mapping from (OpType, tuple of input types) -> Python function.
+        Each function gets the Op and the abstract state as input and modifies
+        the state in-place to reflect the execution of the op.
+        """
+        self.AbstractState = AbstractState
         self.semantics = {} if semantics is None else semantics
 
         # TODO some kind of type hierarchy for function call dispatch
 
     def interpret(self, function: Function, inputs: Sequence[Any]):
-        # TODO allow creating a subclass of AbstractState instead
-        state = AbstractState(dict(zip(function.inputs, inputs)))
+        """
+        The result of the interpretation will be the final abstract state.
+        From this, the abstract values output by the function can be extracted,
+        but the state can also be used to build, e.g., a trace.
+        """
+        state = self.AbstractState(function, inputs)
 
         # Execute ops in topological order:
         for op in function.ops:
@@ -52,10 +53,6 @@ class AbstractInterpreter:
 
         return state
 
-
-# TODO for the simulator: create a subclass of AbstractState
-# Then add cost functions to the semantics, which manipulate fields like trace
-# of the AbstractState
 
 # The rest of this is file shows how to instantiate AbstractInterpreter to
 # perform mixed concrete evaluation/type propagation
@@ -90,6 +87,13 @@ def _min_concrete(op, x, y):
     return np.minimum(x, y)
 
 
+def _matmul_abstract(op, x, y):
+    if not (x.dtype == y.dtype and x.device == y.device and x.shape[1] == y.shape[0]):
+        raise Exception
+        # _raise_type_error(op, x, y)
+    return Tensor(dtype=x.dtype, shape=(x.shape[0], y.shape[1]), device=x.device)
+
+
 def _slice_concrete(op, x, starts, ends, axes):
     # TODO handle the other cases, e.g. negative indices
     slices = {axis: slice(s, e) for (s, e, axis) in zip(starts, ends, axes)}
@@ -112,9 +116,11 @@ def _slice_abstract(op, x, starts, ends, axes):
     return Tensor(dtype=x.dtype, shape=None, device=x.device)
 
 
+# TODO support variadic ops
 MixedImplementations = {
     ("Cast", (np.ndarray,)): _cast_concrete,
     ("Min", (np.ndarray, np.ndarray)): _min_concrete,
+    ("MatMul", (Tensor, Tensor)): _matmul_abstract,
     ("Shape", (np.ndarray,)): _shape_concrete,
     ("Shape", (Tensor,)): _shape_abstract_to_concrete,
     ("Slice", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): _slice_concrete,
@@ -137,7 +143,6 @@ def _convert_impls_to_semantics(impls):
                 outputs = (outputs,)
             for x, val in zip(op.outputs, outputs):
                 state.env[x] = val
-            return
 
         return semantics
 

@@ -1,19 +1,29 @@
 from copy import deepcopy
 from collections import defaultdict
+from dataclasses import dataclass, field
 import json
+from typing import Any, Dict, Sequence
 
-from ..ir import Function
+from ..ir import Function, Device, Op
 from . import utils
+from .absint import (
+    AbstractState,
+    AbstractInterpreter,
+    MixedImplementations,
+)
 
 SECONDS_TO_MICROSECONDS = 1e6
 
+# TODO rename: distributed simulator -> simulator
 
-class DistributedSimulatorState:
-    def __init__(self):
-        self.timestamps = defaultdict(lambda: 0.0)
-        self.consumers = defaultdict(lambda: 0)
-        self.peak_memory = defaultdict(lambda: 0.0)
-        self.live_memory = defaultdict(lambda: 0.0)
+
+class DistributedSimulatorState(AbstractState):
+    def __init__(self, function: Function, inputs: Sequence[Any]):
+        AbstractState.__init__(self, function, inputs)
+        self.timestamps = defaultdict(float)
+        self.peak_memory = defaultdict(float)
+        self.live_memory = defaultdict(float)
+        self.consumers = defaultdict(int)
         self.trace = []
 
     def add_trace_event(self, op_name, device, start_time, duration):
@@ -39,94 +49,90 @@ class DistributedSimulatorState:
             json.dump(_trace, fout, indent=0)
 
 
-class DistributedSimulator:
-    def __init__(self, cost_model):
-        self._cost_model = cost_model
+def _simulate_op(state: DistributedSimulatorState, op: Op, costs: Dict[Device, float]):
+    # Synchronize all input and output devices for this op.
+    input_devices = utils.get_all_devices(op.inputs)
+    output_devices = utils.get_all_devices(op.outputs)
+    input_and_output_devices = input_devices.union(output_devices)
+    if len(input_and_output_devices) > 1:
+        max_timestamp = max(
+            [state.timestamps[device] for device in input_and_output_devices]
+        )
+        for device in input_and_output_devices:
+            state.timestamps[device] = max_timestamp
 
-    def _simulate(self, function: Function, state: DistributedSimulatorState):
+    # Update the trace and timestamps
+    for device in costs:
+        state.add_trace_event(
+            op.name,
+            device,
+            state.timestamps[device],
+            costs[device],
+        )
+        state.timestamps[device] += costs[device]
 
-        for op in function.ops:
-            in_edges = op.inputs
-            out_edges = op.outputs
+    # Update the live memory.
+    for out_edge in op.outputs:
+        state.consumers[out_edge] = len(state.function.consumers[out_edge])
+        # Output value could live on multiple devices (e.g. scatter) so
+        # update memory on all devices:
+        output_devices = out_edge.type.get_all_devices()
+        for output_device in output_devices:
+            state.live_memory[output_device] += out_edge.type.size()
+    # TODO: Can we optimize this using a priority queue?
+    for value in state.consumers:
+        # TODO are we missing a decrement of state.consumers[value] somewhere?
+        if state.consumers[value] == 0 and all(
+            value != v for v in state.function.inputs
+        ):
+            devices = value.type.get_all_devices()
+            for device in devices:
+                state.live_memory[device] -= value.type.size()
 
-            # Synchronize all input and output devices for this op.
-            input_devices = utils.get_all_devices(in_edges)
-            output_devices = utils.get_all_devices(out_edges)
-            input_and_output_devices = input_devices.union(output_devices)
-            if len(input_and_output_devices) > 1:
-                max_timestamp = max(
-                    [state.timestamps[device] for device in input_and_output_devices]
-                )
-                for device in input_and_output_devices:
-                    state.timestamps[device] = max_timestamp
+    # Update the peak memory.
+    for device in state.live_memory:
+        state.peak_memory[device] = max(
+            state.peak_memory[device], state.live_memory[device]
+        )
 
-            # Compute the costs for the op.
-            if op.op_type == "Pmap":
-                # For Pmap ops we use a fresh state object and update the enclosing
-                # function state using the Pmap state.
-                subfunction = op.subfunctions[0]
-                subfunction_state = DistributedSimulatorState()
-                self._simulate(subfunction, subfunction_state)
-                device_vars = subfunction_state.timestamps.keys()
-                assert len(device_vars) == 1
-                # TODO what happens when pmaps are nested?
-                bound_devices = op.attributes["devices"]
-                # Add subfunction's trace to trace of all participating devices
-                for device in bound_devices:
-                    for event in subfunction_state.trace:
-                        # Need to add pmap's starting timestamp to event
-                        # since subfunction_state started at time 0
-                        start_time = event["ts"] + state.timestamps[device]
-                        state.add_trace_event(
-                            event["name"], device, start_time, event["dur"]
-                        )
-                for device_var in device_vars:
-                    for bound_device in bound_devices:
-                        state.timestamps[bound_device] += subfunction_state.timestamps[
-                            device_var
-                        ]
-                        state.live_memory[
-                            bound_device
-                        ] += subfunction_state.live_memory[device_var]
-                        state.peak_memory[
-                            bound_device
-                        ] += subfunction_state.peak_memory[device_var]
-                        # TODO: Update consumers?
-            else:
-                costs = self._cost_model.infer_costs(op)
-                for device in costs:
-                    state.add_trace_event(
-                        op.name,
-                        device,
-                        state.timestamps[device],
-                        costs[device],
-                    )
-                    state.timestamps[device] += costs[device]
 
-            # Update the live memory.
-            for out_edge in out_edges:
-                state.consumers[out_edge] = len(function.get_consumers(out_edge))
-                # Output value could live on multiple devices (e.g. scatter) so
-                # update memory on all devices:
-                output_devices = out_edge.type.get_all_devices()
-                for output_device in output_devices:
-                    state.live_memory[output_device] += out_edge.type.size()
-            # TODO: Can we optimize this using a priority queue?
-            for value in state.consumers:
-                if state.consumers[value] == 0 and all(
-                    value != v for v in function.inputs
-                ):
-                    devices = value.type.get_all_devices()
-                    for device in devices:
-                        state.live_memory[device] -= value.type.size()
+def _create_semantics(cost_functions, implementations):
+    """Creates a semantics (dictionary mapping op signatures to abstract state
+    modifiers) given a dictionary of cost functions (input values -> costs) and
+    a dictionary of implementations (input values -> output values).
+    """
 
-            # Update the peak memory.
-            for device in state.live_memory:
-                state.peak_memory[device] = max(
-                    state.peak_memory[device], state.live_memory[device]
-                )
+    def convert_impl(impl_fn, cost_fn):
+        def semantics(op: Op, state: DistributedSimulatorState):
+            # Find the op's inputs in state's environment
+            inputs = tuple(state.env[v] for v in op.inputs)
 
-    def simulate(self, function):
-        state = DistributedSimulatorState()
-        self._simulate(function, state)
-        return state
+            # Run the abstract/concrete implementation
+            outputs = impl_fn(op, *inputs)
+
+            # Run the cost function
+            costs = cost_fn(op, *inputs)
+
+            if not isinstance(outputs, tuple):
+                outputs = (outputs,)
+            for x, val in zip(op.outputs, outputs):
+                state.env[x] = val
+
+            _simulate_op(state, op, costs)
+
+        return semantics
+
+    signatures = set(cost_functions.keys()).intersection(implementations.keys())
+
+    return {f: convert_impl(implementations[f], cost_functions[f]) for f in signatures}
+
+
+# All these cost functions assume they are getting the type of each input value
+# TODO instead of passing the op, should we pass the attributes as kwargs?
+
+
+def Simulator(cost_model):
+    return AbstractInterpreter(
+        DistributedSimulatorState,
+        _create_semantics(cost_model.cost_functions, MixedImplementations),
+    )

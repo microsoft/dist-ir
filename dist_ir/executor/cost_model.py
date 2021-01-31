@@ -29,11 +29,11 @@ class CostModel:
 
         self.cost_functions = {
             ("Add", (Tensor, Tensor)): self._add_cost_fn,
-            ("Allreduce", (TupleType)): self._allreduce_cost_fn,
+            ("Allreduce", (TupleType,)): self._allreduce_cost_fn,
             ("Broadcast", (Tensor,)): notImplemented,
             ("Cast", (Tensor,)): self._cast_cost_fn,
-            ("Concat", (TupleType)): self._concat_cost_fn,
-            ("Gather", (TupleType)): self._gather_cost_fn,
+            ("Concat", (TupleType,)): self._concat_cost_fn,
+            ("Gather", (TupleType,)): self._gather_cost_fn,
             ("Loss", (Tensor, Tensor)): self._loss_cost_fn,
             ("LossGrad", (Tensor, Tensor)): self._loss_grad_cost_fn,
             ("MatMul", (Tensor, Tensor)): self._matmul_cost_fn,
@@ -107,7 +107,7 @@ class CostModel:
         # TODO: Check this cost computation
         # dx = dz * y.T, dy = x.T * dz
         xT = Tensor(dtype=x.dtype, shape=(x.shape[1], x.shape[0]), device=x.device)
-        yT = Tensor(dtype=x.dtype, shape=(x.shape[1], x.shape[0]), device=x.device)
+        yT = Tensor(dtype=y.dtype, shape=(y.shape[1], y.shape[0]), device=y.device)
         costs1 = self._matmul_cost_fn(self, op, dz, yT)
         costs2 = self._matmul_cost_fn(self, op, xT, dz)
         return {x.device: costs1[x.device] + costs2[x.device]}

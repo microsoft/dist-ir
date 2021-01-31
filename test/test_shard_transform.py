@@ -1,6 +1,6 @@
 import numpy as np
 
-from dist_ir.ir import Device, FunctionMaker
+from dist_ir.ir import cpprint, Device, FunctionMaker
 from dist_ir.ir.type import Float, Tensor
 from dist_ir.transforms import shard_transform
 from dist_ir.executor import SequentialExecutor
@@ -29,42 +29,31 @@ def test_single_variable_data_parallel():
     print("-" * 88)
     print("Original function")
     print("-" * 88)
-    print(function)
+    cpprint(function)
     print()
     print("-" * 88)
     print("Transformed function")
     print("-" * 88)
-    print(transformed_function)
+    cpprint(transformed_function)
 
     ex = SequentialExecutor("numpy")
     _a = np.ones((4, 4))
     _b = np.ones((4, 4))
-    orig_res = ex.compute(function, {function.inputs[0]: _a, function.inputs[1]: _b})
+    orig_res = ex.compute(function, [_a, _b])
 
-    transformed_res = ex.compute(
-        transformed_function,
-        {transformed_function.inputs[0]: _a, transformed_function.inputs[1]: _b},
-    )
+    transformed_res = ex.compute(transformed_function, [_a, _b])
 
     print("-" * 88)
     print("Original function results")
     print("-" * 88)
-    for k, v in orig_res.items():
-        print(k)
-        print(v)
-        print()
+    print(orig_res)
     print()
     print("-" * 88)
     print("Transformed function results")
     print("-" * 88)
-    for k, v in transformed_res.items():
-        print(k)
-        print(v)
-        print()
+    print(transformed_res)
 
-    np.testing.assert_array_almost_equal(
-        orig_res[function.outputs[0]], transformed_res[transformed_function.outputs[0]]
-    )
+    np.testing.assert_array_almost_equal(orig_res[0], transformed_res[0])
 
 
 def test_double_variable_data_parallel():
@@ -92,50 +81,32 @@ def test_double_variable_data_parallel():
     print("-" * 88)
     print("Original function")
     print("-" * 88)
-    print(function)
+    cpprint(function)
     print()
     print("-" * 88)
     print("Transformed function")
     print("-" * 88)
-    print(transformed_function)
+    cpprint(transformed_function)
 
     ex = SequentialExecutor("numpy")
     _a = np.ones((4, 4))
     _b = np.ones((4, 4))
     _c = np.ones((4, 4))
-    orig_res = ex.compute(
-        function,
-        {function.inputs[0]: _a, function.inputs[1]: _b, function.inputs[2]: _c},
-    )
+    orig_res = ex.compute(function, [_a, _b, _c])
 
-    transformed_res = ex.compute(
-        transformed_function,
-        {
-            transformed_function.inputs[0]: _a,
-            transformed_function.inputs[1]: _b,
-            transformed_function.inputs[2]: _c,
-        },
-    )
+    transformed_res = ex.compute(transformed_function, [_a, _b, _c])
 
     print("-" * 88)
     print("Original function results")
     print("-" * 88)
-    for k, v in orig_res.items():
-        print(k)
-        print(v)
-        print()
+    print(orig_res)
     print()
     print("-" * 88)
     print("Transformed function results")
     print("-" * 88)
-    for k, v in transformed_res.items():
-        print(k)
-        print(v)
-        print()
+    print()
 
-    np.testing.assert_array_almost_equal(
-        orig_res[function.outputs[0]], transformed_res[transformed_function.outputs[0]]
-    )
+    np.testing.assert_array_almost_equal(orig_res[0], transformed_res[0])
 
 
 def test_single_variable_horizontal_parallel():
@@ -168,50 +139,32 @@ def test_single_variable_horizontal_parallel():
     print("-" * 88)
     print("Original function")
     print("-" * 88)
-    print(function)
+    cpprint(function)
     print()
     print("-" * 88)
     print("Transformed function")
     print("-" * 88)
-    print(transformed_function)
+    cpprint(transformed_function)
 
     ex = SequentialExecutor("numpy")
     _x = np.random.normal(size=(batch_size, input_dim))
     _wA = np.random.normal(size=(input_dim, hidden_dim))
     _wB = np.random.normal(size=(hidden_dim, output_dim))
-    orig_res = ex.compute(
-        function,
-        {function.inputs[0]: _x, function.inputs[1]: _wA, function.inputs[2]: _wB},
-    )
+    orig_res = ex.compute(function, [_x, _wA, _wB])
 
-    transformed_res = ex.compute(
-        transformed_function,
-        {
-            transformed_function.inputs[0]: _x,
-            transformed_function.inputs[1]: _wA,
-            transformed_function.inputs[2]: _wB,
-        },
-    )
+    transformed_res = ex.compute(transformed_function, [_x, _wA, _wB])
 
     print("-" * 88)
     print("Original function results")
     print("-" * 88)
-    for k, v in orig_res.items():
-        print(k)
-        print(v)
-        print()
+    print(orig_res)
     print()
     print("-" * 88)
     print("Transformed function results")
     print("-" * 88)
-    for k, v in transformed_res.items():
-        print(k)
-        print(v)
-        print()
+    print()
 
-    np.testing.assert_array_almost_equal(
-        orig_res[function.outputs[0]], transformed_res[transformed_function.outputs[0]]
-    )
+    np.testing.assert_array_almost_equal(orig_res[0], transformed_res[0])
 
 
 def test_double_variable_horizontal_parallel():
@@ -243,50 +196,31 @@ def test_double_variable_horizontal_parallel():
     print("-" * 88)
     print("Original function")
     print("-" * 88)
-    print(function)
+    cpprint(function)
     print()
     print("-" * 88)
     print("Transformed function")
     print("-" * 88)
-    print(transformed_function)
+    cpprint(transformed_function)
 
     ex = SequentialExecutor("numpy")
     _x = np.random.normal(size=(batch_size, input_dim))
     _wA = np.random.normal(size=(input_dim, hidden_dim))
     _wB = np.random.normal(size=(hidden_dim, output_dim))
-    orig_res = ex.compute(
-        function,
-        {function.inputs[0]: _x, function.inputs[1]: _wA, function.inputs[2]: _wB},
-    )
-    transformed_res = ex.compute(
-        transformed_function,
-        {
-            transformed_function.inputs[0]: _x,
-            transformed_function.inputs[1]: _wA,
-            transformed_function.inputs[2]: _wB,
-        },
-    )
+    orig_res = ex.compute(function, [_x, _wA, _wB])
+    transformed_res = ex.compute(transformed_function, [_x, _wA, _wB])
 
     print("-" * 88)
     print("Original function results")
     print("-" * 88)
-    for k, v in orig_res.items():
-        print(k)
-        print(v)
-        print()
+    print(orig_res)
     print()
     print("-" * 88)
     print("Transformed function results")
     print("-" * 88)
-    for k, v in transformed_res.items():
-        print(k)
-        print(v)
-        print()
+    print()
 
-    np.testing.assert_array_almost_equal(
-        orig_res[function.outputs[0]],
-        transformed_res[transformed_function.outputs[0]][0],
-    )
+    np.testing.assert_array_almost_equal(orig_res[0], transformed_res[0])
 
 
 def test_mnist_data_parallel():
@@ -335,66 +269,31 @@ def test_mnist_data_parallel():
     print("-" * 88)
     print("Original function")
     print("-" * 88)
-    print(function)
+    cpprint(function)
     print()
     print("-" * 88)
     print("Transformed function")
     print("-" * 88)
-    print(transformed_function)
+    cpprint(transformed_function)
 
     ex = SequentialExecutor("numpy")
     _x = np.arange(batch_size * 4).reshape((batch_size, 4))
     _z = np.ones((batch_size, 1))
     _wA = np.ones((4, 2))
     _wB = np.ones((2, 1))
-    orig_res = ex.compute(
-        function,
-        {
-            function.inputs[0]: _x,
-            function.inputs[1]: _z,
-            function.inputs[2]: _wA,
-            function.inputs[3]: _wB,
-        },
-    )
+    orig_res = ex.compute(function, [_x, _z, _wA, _wB])
 
-    transformed_res = ex.compute(
-        transformed_function,
-        {
-            transformed_function.inputs[0]: _x,
-            transformed_function.inputs[1]: _z,
-            transformed_function.inputs[2]: _wA,
-            transformed_function.inputs[3]: _wB,
-        },
-    )
+    transformed_res = ex.compute(transformed_function, [_x, _z, _wA, _wB])
 
     print("-" * 88)
     print("Original function results")
     print("-" * 88)
-    for k, v in orig_res.items():
-        print(k)
-        print(v)
-        print()
+    print(orig_res)
     print()
     print("-" * 88)
     print("Transformed function results")
     print("-" * 88)
-    for k, v in transformed_res.items():
-        print(k)
-        print(v)
-        print()
+    print()
 
-    np.testing.assert_array_almost_equal(
-        orig_res[function.outputs[0]], transformed_res[transformed_function.outputs[0]]
-    )
-    np.testing.assert_array_almost_equal(
-        orig_res[function.outputs[1]],
-        transformed_res[transformed_function.outputs[1]][0],
-    )
-    np.testing.assert_array_almost_equal(
-        orig_res[function.outputs[2]],
-        transformed_res[transformed_function.outputs[2]],
-    )
-    np.testing.assert_array_almost_equal(
-        orig_res[function.outputs[3]],
-        transformed_res[transformed_function.outputs[3]][0],
-    )
+    for a, b in zip(orig_res, transformed_res):
+        np.testing.assert_array_almost_equal(a, b)

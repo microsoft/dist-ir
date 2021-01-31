@@ -218,11 +218,11 @@ def _transpose_prop_fn(op, x):
 
 TypePropRegister = {
     ("Add", (Tensor, Tensor)): _elementwise_tensor_op_prop_fn,
-    ("Allreduce", (TupleType)): _allreduce_prop_fn,
+    ("Allreduce", (TupleType,)): _allreduce_prop_fn,
     ("Broadcast", (Tensor,)): _broadcast_prop_fn,
     ("Cast", (Tensor,)): _cast_prop_fn,
-    ("Concat", (TupleType)): _concat_prop_fn,
-    ("Gather", (TupleType)): _gather_prop_fn,
+    ("Concat", (TupleType,)): _concat_prop_fn,
+    ("Gather", (TupleType,)): _gather_prop_fn,
     # ("Loss", (Tensor, Tensor)): TODO
     # ("LossGrad", (Tensor, Tensor)): TODO
     ("MatMul", (Tensor, Tensor)): _matmul_prop_fn,

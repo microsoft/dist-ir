@@ -108,7 +108,7 @@ NumPyRegister = {
     ("Min", (np.ndarray, np.ndarray)): lambda op, x, y: np.minimum(x, y),
     ("Relu", (np.ndarray,)): relu,
     ("Scatter", (np.ndarray,)): split,
-    ("Select", (np.ndarray,)): select,
+    ("Select", (list,)): select,
     ("Send", (np.ndarray,)): identity,
     ("Split", (np.ndarray,)): split,
     ("Shape", (np.ndarray,)): lambda op, x: np.array(x.shape, dtype=np.int64),

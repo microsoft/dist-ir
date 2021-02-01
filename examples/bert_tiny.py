@@ -20,8 +20,11 @@ np.random.seed(0)
 
 def main():
     batch_size = 64
+    training_mode = True
+    learning_rate = 1.0e-2
     onnx_model_path = Path(__file__).parent / ONNX_MODEL_PATH / model
     function, input_data = import_from_onnx(onnx_model_path, parse_input_data=True)
+    # TODO: Cache function and input data
     cpprint(function)
 
     samples = defaultdict(list)
@@ -36,10 +39,17 @@ def main():
         for j in range(NUM_FEATURES_PER_SAMPLE):
             samples[j].append(parse_tensor_from_file(sample_input_paths[j]))
     inputs = [np.stack(samples[j], axis=0) for j in range(NUM_FEATURES_PER_SAMPLE)]
+    input_value_order = [0, 2, 4, 3, 5, 1]
     for i, inp in enumerate(inputs):
-        input_data[function.inputs[i]] = inp
+        j = input_value_order[i]
+        input_data[function.inputs[j]] = inp
+        print(function.inputs[j].name, inp.shape)
     input_types = [Tensor(dtype=Int64(), shape=tuple(inp.shape)) for inp in inputs]
     input_types += [inp.type for inp in function.inputs[len(input_types) :]]
+    assert function.inputs[6].name == "Learning_Rate"
+    assert function.inputs[7].name == "training_mode"
+    input_data[function.inputs[6]] = learning_rate
+    input_data[function.inputs[7]] = training_mode
     """
     function = infer_types(function, input_types, input_data)
     cpprint(function)

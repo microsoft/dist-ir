@@ -40,7 +40,38 @@ def concat(op, xs):
     return np.concatenate(xs, axis=dim)
 
 
-def gather(op, xs):
+def div(op, inputs):
+    return inputs[0] / inputs[1]
+
+
+def dropout(op, inputs):
+    x, ratio, training_mode = inputs
+    if training_mode:
+        scale = 1.0 / (1.0 - ratio)
+        mask = np.random.randint(0, 2, size=x.shape)
+        x = scale * mask * x
+        assert x.shape == inputs[0].shape
+        return x, mask
+    else:
+        return x
+
+
+def expand(op, inputs):
+    return inputs[0] * np.ones(inputs[1])
+
+
+def fast_gelu(op, inputs):
+    # https://github.com/hendrycks/GELUs
+    x = inputs[0]
+    return 1.0 / (1.0 + np.exp(-1.702 * x))
+
+
+def gather(op, inputs):
+    axis = op.attributes["axis"]
+    return np.take(inputs[0], inputs[1].astype(np.int64), axis=axis)
+
+
+def mpi_gather(op, inputs):
     dim = op.attributes["dim"]
     return np.concatenate(xs, axis=dim)
 
@@ -49,7 +80,17 @@ def identity(op, x):
     return x
 
 
-def loss(op, x, y):
+def layer_norm(op, inputs):
+    eps = 1e-5
+    x, scale, beta = inputs
+    mean = np.mean(x)
+    std = np.std(x)
+    x = (x - mean) / (pow(std, 2) + eps) * scale + beta
+    assert x.shape == inputs[0].shape
+    return x, mean, std
+
+
+def loss(op, inputs):
     N = op.attributes["N"]
     return np.square(x - y) / N
 
@@ -71,7 +112,27 @@ def relu(op, x):
     return np.maximum(x, 0)
 
 
-def select(op, xs):
+def min_(op, inputs):
+    return np.minimum(*inputs)
+
+
+def mul(op, inputs):
+    return inputs[0] * inputs[1]
+
+
+def relu(op, inputs):
+    return np.maximum(inputs[0], 0)
+
+
+def reshape(op, inputs):
+    new_shape = np.copy(inputs[1])
+    for i in range(len(new_shape)):
+        if new_shape[i] == 0:
+            new_shape[i] = inputs[0].shape[i]
+    return np.reshape(inputs[0], new_shape)
+
+
+def select(op, inputs):
     dim = op.attributes["dim"]
     return xs[dim]
 
@@ -83,7 +144,24 @@ def slice_conc(op, x, starts, ends, axes):
     return x[slices]
 
 
-def split(op, x):
+def shape(op, inputs):
+    return np.array(inputs[0].shape)
+
+
+def slice_(op, inputs):
+    x, starts, ends, axes = inputs
+    slices = {axis: slice(s, e) for (s, e, axis) in zip(starts, ends, axes)}
+    slices = tuple(slices.get(d, slice(None)) for d in range(x.ndim))
+    return x[slices]
+
+
+def softmax(op, inputs):
+    axis = op.attributes["axis"]
+    exp = np.exp(inputs[0])
+    return exp / np.sum(exp, axis=axis, keepdims=True)
+
+
+def split(op, inputs):
     dim = op.attributes["dim"]
     if op.op_type == "Split":
         num_splits = op.attributes["num_splits"]
@@ -96,7 +174,21 @@ def split(op, x):
 
 
 def transpose(op, x):
-    return x.T
+    perm = op.attributes["perm"]
+    return np.transpose(x, perm)
+
+
+def sub(op, inputs):
+    return inputs[0] - inputs[1]
+
+
+def unsqueeze(op, inputs):
+    x = inputs[0]
+    axes = op.attributes["axes"]
+    # TODO: Does this need to be in reverse order?
+    for i in axes:
+        x = np.expand_dims(x, axis=i)
+    return x
 
 
 NumPyRegister = {
@@ -121,3 +213,39 @@ NumPyRegister = {
     ("Slice", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): slice_conc,
     ("Transpose", (np.ndarray,)): transpose,
 }
+
+"""
+NumPyRegister = {
+    "Add": add,
+    "Allreduce": allreduce,
+    "Broadcast": broadcast,
+    "Cast": cast,
+    "Concat": concat,
+    "Div": div,
+    "Dropout": dropout,
+    "Expand": expand,
+    "FastGelu": fast_gelu,
+    "Gather": gather,
+    "Identity": identity,
+    "LayerNormalization": layer_norm,
+    "Loss": loss,
+    "LossGrad": loss_grad,
+    "MatMul": matmul,
+    "MatMulGrad": matmul_grad,
+    "Min": min_,
+    "MPIGather": mpi_gather,
+    "Mul": mul,
+    "Relu": relu,
+    "Reshape": reshape,
+    "Scatter": split,
+    "Select": select,
+    "Send": identity,
+    "Shape": shape,
+    "Slice": slice_,
+    "Softmax": softmax,
+    "Split": split,
+    "Sub": sub,
+    "Transpose": transpose,
+    "Unsqueeze": unsqueeze,
+}
+"""

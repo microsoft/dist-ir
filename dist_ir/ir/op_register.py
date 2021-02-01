@@ -47,6 +47,7 @@ OpRegister = {
     "MPIGather": OpRegisterEntry(num_inputs=1, num_outputs=1),
     "Mul": OpRegisterEntry(num_inputs=2, num_outputs=1),
     "Opt": OpRegisterEntry(num_inputs=2, num_outputs=1),
+    "ReduceAllL2": OpRegisterEntry(variadic_inputs=True, num_outputs=1),
     "ReduceSum": OpRegisterEntry(num_inputs=1, num_outputs=1),
     "ReduceSumTraining": OpRegisterEntry(num_inputs=2, num_outputs=1),
     "Relu": OpRegisterEntry(num_inputs=1, num_outputs=1),

@@ -1,6 +1,8 @@
 import numpy as np
 
 from dist_ir.executor import absint
+from dist_ir.executor.numpy_register import NumPyRegister
+from dist_ir.executor.distributed_simulator import MixedImplementations
 from dist_ir.importer import mlir_parser
 from dist_ir.ir import cpprint
 from dist_ir.ir.type import Tensor
@@ -34,6 +36,12 @@ def test_shape_slice():
     [fn] = mlir_parser.parse_mlir_str(shape_slice_fn)
     cpprint(fn)
 
+    mixed_interpreter = absint.AbstractInterpreter(
+        semantics=absint.convert_impls_to_semantics(
+            {**NumPyRegister, **MixedImplementations}
+        )
+    )
+
     # First, execute concretely
     conc_inputs = [
         np.arange(8 * 6, dtype=np.float32).reshape(8, 6),
@@ -42,7 +50,7 @@ def test_shape_slice():
         np.array([0, 0], dtype=np.int64),
         np.array([0, 1], dtype=np.int64),
     ]
-    state = absint.MixedInterpreter.interpret(fn, conc_inputs)
+    state = mixed_interpreter.interpret(fn, conc_inputs)
     np.testing.assert_almost_equal(
         state.env[fn.outputs[0]], np.arange(6, dtype=np.float32).reshape(1, 6)
     )
@@ -56,7 +64,7 @@ def test_shape_slice():
         np.array([0, 0], dtype=np.int64),
         np.array([0, 1], dtype=np.int64),
     ]
-    state = absint.MixedInterpreter.interpret(fn, abs_inputs)
+    state = mixed_interpreter.interpret(fn, abs_inputs)
     np.testing.assert_almost_equal(
         state.env[fn.outputs[0]], np.arange(6, dtype=np.float32).reshape(1, 6)
     )
@@ -70,5 +78,5 @@ def test_shape_slice():
         np.array([0, 0], dtype=np.int64),
         np.array([0, 1], dtype=np.int64),
     ]
-    state = absint.MixedInterpreter.interpret(fn, abs_inputs)
+    state = mixed_interpreter.interpret(fn, abs_inputs)
     assert state.env[fn.outputs[0]] == Tensor(shape=(1, 6))

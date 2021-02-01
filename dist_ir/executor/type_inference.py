@@ -314,7 +314,9 @@ def _pmap_prop_fn(op: Op, input_types: Tuple[Type]):
     return out_types, subfunctions
 
 
-TypeInferrer = AbstractInterpreter(semantics=_create_semantics(TypePropRegister))
+TypeInferrer = AbstractInterpreter(
+    semantics=_create_semantics(TypePropRegister), Tuple=lambda t: TupleType(tuple(t))
+)
 
 
 def _type_function(function: Function, type_map: Dict[Value, Type]) -> Function:

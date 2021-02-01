@@ -23,8 +23,7 @@ class SequentialExecutor:
             results = []
             for inps in inputs:
                 # Execute subfunction with appropriate inputs
-                inp_data = {k: v for k, v in zip(op.subfunctions[0].inputs, inps)}
-                outs = self.compute(op.subfunctions[0], inp_data)
+                outs = self.compute(op.subfunctions[0], inps)
                 # Match output names to output data using the function output order.
                 ordered_outs = [outs[e] for e in op.subfunctions[0].outputs]
                 results.append(ordered_outs)

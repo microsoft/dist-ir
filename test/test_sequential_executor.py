@@ -190,9 +190,9 @@ def test_pmap_on_executor():
     function = function.finalize()
 
     cpprint(function)
-    res = ex.compute(function, {xs: (_x_0, _x_1)})
-    assert np.array_equal(res[zis][0], _x_0 + _x_0)
-    assert np.array_equal(res[zis][1], _x_1 + _x_1)
+    (res,) = ex.compute(function, [(_x_0, _x_1)])
+    assert np.array_equal(res[0], _x_0 + _x_0)
+    assert np.array_equal(res[1], _x_1 + _x_1)
 
     # A pmap with 2 inputs and 1 output
     function = FunctionMaker()
@@ -216,9 +216,9 @@ def test_pmap_on_executor():
     function = function.finalize()
 
     cpprint(function)
-    res = ex.compute(function, {xs: (_x_0, _x_1), ys: (_y_0, _y_1)})
-    assert np.array_equal(res[zis][0], np.matmul(_x_0, _y_0))
-    assert np.array_equal(res[zis][1], np.matmul(_x_1, _y_1))
+    (res,) = ex.compute(function, [(_x_0, _x_1), (_y_0, _y_1)])
+    assert np.array_equal(res[0], np.matmul(_x_0, _y_0))
+    assert np.array_equal(res[1], np.matmul(_x_1, _y_1))
 
     # A pmap with 2 inputs and 2 outputs
     function = FunctionMaker()
@@ -240,14 +240,15 @@ def test_pmap_on_executor():
         subfunctions=[subfunction],
         output_names=["wis", "zis"],
     )
+    function.set_outputs([wis, zis])
     function = function.finalize()
 
     cpprint(function)
-    res = ex.compute(function, {xs: (_x_0, _x_1), ys: (_y_0, _y_1)})
-    assert np.array_equal(res[wis][0], _x_0 + _x_0)
-    assert np.array_equal(res[wis][1], _x_1 + _x_1)
-    assert np.array_equal(res[zis][0], np.matmul(_x_0, _y_0))
-    assert np.array_equal(res[zis][1], np.matmul(_x_1, _y_1))
+    (res_wis, res_zis) = ex.compute(function, [(_x_0, _x_1), (_y_0, _y_1)])
+    assert np.array_equal(res_wis[0], _x_0 + _x_0)
+    assert np.array_equal(res_wis[1], _x_1 + _x_1)
+    assert np.array_equal(res_zis[0], np.matmul(_x_0, _y_0))
+    assert np.array_equal(res_zis[1], np.matmul(_x_1, _y_1))
 
     # A pmap with a single device
     function = FunctionMaker()
@@ -272,9 +273,9 @@ def test_pmap_on_executor():
     function = function.finalize()
 
     cpprint(function)
-    res = ex.compute(function, {xs: (_x_0,), ys: (_y_0,)})
-    assert np.array_equal(res[wis][0], _x_0 + _x_0)
-    assert np.array_equal(res[zis][0], np.matmul(_x_0, _y_0))
+    (res_wis, res_zis) = ex.compute(function, [(_x_0,), (_y_0,)])
+    assert np.array_equal(res_wis[0], _x_0 + _x_0)
+    assert np.array_equal(res_zis[0], np.matmul(_x_0, _y_0))
 
 
 def test_pmap_dp():
@@ -327,9 +328,6 @@ def test_pmap_dp():
     x_0, x_1 = _x[:8], _x[8:]
     _wA = np.ones((4, 2))
     _wB = np.ones((2, 1))
-    res = ex.compute(
-        function,
-        {xs: (x_0, x_1), wAs: (_wA, _wA), wBs: (_wB, _wB)},
-    )
-    assert np.array_equal(res[zis][0], np.matmul(np.matmul(x_0, _wA), _wB))
-    assert np.array_equal(res[zis][1], np.matmul(np.matmul(x_1, _wA), _wB))
+    (res,) = ex.compute(function, [(x_0, x_1), (_wA, _wA), (_wB, _wB)])
+    assert np.array_equal(res[0], np.matmul(np.matmul(x_0, _wA), _wB))
+    assert np.array_equal(res[1], np.matmul(np.matmul(x_1, _wA), _wB))

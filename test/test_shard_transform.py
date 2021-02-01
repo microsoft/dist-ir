@@ -104,6 +104,7 @@ def test_double_variable_data_parallel():
     print("-" * 88)
     print("Transformed function results")
     print("-" * 88)
+    print(transformed_res)
     print()
 
     np.testing.assert_array_almost_equal(orig_res[0], transformed_res[0])
@@ -162,6 +163,7 @@ def test_single_variable_horizontal_parallel():
     print("-" * 88)
     print("Transformed function results")
     print("-" * 88)
+    print(transformed_res)
     print()
 
     np.testing.assert_array_almost_equal(orig_res[0], transformed_res[0])
@@ -218,9 +220,10 @@ def test_double_variable_horizontal_parallel():
     print("-" * 88)
     print("Transformed function results")
     print("-" * 88)
+    print(transformed_res)
     print()
 
-    np.testing.assert_array_almost_equal(orig_res[0], transformed_res[0])
+    np.testing.assert_array_almost_equal(orig_res[0], transformed_res[0][0])
 
 
 def test_mnist_data_parallel():
@@ -293,7 +296,10 @@ def test_mnist_data_parallel():
     print("-" * 88)
     print("Transformed function results")
     print("-" * 88)
+    print(transformed_res)
     print()
 
-    for a, b in zip(orig_res, transformed_res):
-        np.testing.assert_array_almost_equal(a, b)
+    np.testing.assert_array_almost_equal(orig_res[0], transformed_res[0])
+    np.testing.assert_array_almost_equal(orig_res[1], transformed_res[1][0])
+    np.testing.assert_array_almost_equal(orig_res[2], transformed_res[2])
+    np.testing.assert_array_almost_equal(orig_res[3], transformed_res[3][0])

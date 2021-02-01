@@ -119,8 +119,9 @@ def convert_impls_to_semantics(impls):
             # Execute the implementation on the inputs
             outputs = impl_fn(op, *inputs)
             # Put the outputs back into the state's environment
-            if not isinstance(outputs, tuple):
+            if len(op.outputs) == 1:
                 outputs = (outputs,)
+            assert len(outputs) == len(op.outputs)
             for x, val in zip(op.outputs, outputs):
                 state.env[x] = val
 

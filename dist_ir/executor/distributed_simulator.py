@@ -49,16 +49,22 @@ class DistributedSimulatorState(AbstractState):
             json.dump(_trace, fout, indent=0)
 
 
-def _simulate_op(state: DistributedSimulatorState, op: Op, costs: Dict[Device, float]):
+def _simulate_op(
+    state: DistributedSimulatorState,
+    op: Op,
+    costs: Dict[Device, float],
+    inputs: Tuple[Any],
+    outputs: Tuple[Any],
+):
     # Synchronize all input and output devices for this op.
-    input_devices = utils.get_all_devices(op.inputs)
-    output_devices = utils.get_all_devices(op.outputs)
-    input_and_output_devices = input_devices.union(output_devices)
-    if len(input_and_output_devices) > 1:
-        max_timestamp = max(
-            [state.timestamps[device] for device in input_and_output_devices]
-        )
-        for device in input_and_output_devices:
+    # TODO need to do something more robust here
+    devices = set()
+    for v in inputs + outputs:
+        if isinstance(v, Type):
+            devices.update(v.get_all_devices())
+    if len(devices) > 1:
+        max_timestamp = max([state.timestamps[device] for device in devices])
+        for device in devices:
             state.timestamps[device] = max_timestamp
 
     # Update the trace and timestamps
@@ -85,8 +91,8 @@ def _simulate_op(state: DistributedSimulatorState, op: Op, costs: Dict[Device, f
         if state.consumers[value] == 0 and all(
             value != v for v in state.function.inputs
         ):
-            devices = value.type.get_all_devices()
-            for device in devices:
+            value_devices = value.type.get_all_devices()
+            for device in value_devices:
                 state.live_memory[device] -= value.type.size()
 
     # Update the peak memory.
@@ -118,7 +124,7 @@ def _create_semantics(cost_functions, implementations):
             for x, val in zip(op.outputs, outputs):
                 state.env[x] = val
 
-            _simulate_op(state, op, costs)
+            _simulate_op(state, op, costs, inputs, outputs)
 
         return semantics
 

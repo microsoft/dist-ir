@@ -24,13 +24,13 @@ class CostModel:
         # TODO shouldn't device speeds be part of the topology?
         self._device_speeds = device_speeds
 
-        def notImplemented():
+        def notImplemented(*args):
             raise NotImplementedError
 
         self.cost_functions = {
             ("Add", (Tensor, Tensor)): self._add_cost_fn,
             ("Allreduce", (TupleType,)): self._allreduce_cost_fn,
-            ("Broadcast", (Tensor,)): notImplemented,
+            ("Broadcast", (Tensor,)): self._broadcast_cost_fn,
             ("Cast", (Tensor,)): self._cast_cost_fn,
             ("Concat", (TupleType,)): self._concat_cost_fn,
             ("Gather", (TupleType,)): self._gather_cost_fn,
@@ -39,7 +39,7 @@ class CostModel:
             ("MatMul", (Tensor, Tensor)): self._matmul_cost_fn,
             ("MatMulGrad", (Tensor, Tensor, Tensor)): self._matmul_grad_cost_fn,
             ("Min", (Tensor, Tensor)): self._min_cost_fn,
-            ("Scatter", (Tensor,)): notImplemented,
+            ("Scatter", (Tensor,)): self._scatter_cost_fn,
             ("Select", (Tensor,)): notImplemented,
             ("Send", (Tensor,)): self._send_cost_fn,
             ("Split", (Tensor,)): notImplemented,
@@ -56,7 +56,7 @@ class CostModel:
 
     def _allreduce_cost_fn(self, op, xs):
         input_size = xs.types[0].size()
-        devices = list(utils.get_all_devices(xs))
+        devices = list(xs.get_all_devices())
         num_devices = len(devices)
         per_device_data = 2 * input_size * (num_devices - 1) / num_devices
         per_device_data_gb = per_device_data / BYTES_IN_GB
@@ -71,17 +71,21 @@ class CostModel:
 
         return {device: cost for device in devices}
 
+    def _broadcast_cost_fn(self, op, x):
+        cost = x.size()
+        return {d: cost for d in op.attributes["devices"]}
+
     def _cast_cost_fn(self, op, x):
         return {x.device: x.size()}
 
     def _concat_cost_fn(self, op, xs):
         # TODO: Compute cost properly
-        devices = utils.get_all_devices(xs)
+        devices = xs.get_all_devices()
         return {device: 0 for device in devices}
 
     def _gather_cost_fn(self, op, xs):
         # TODO: Compute cost properly
-        devices = utils.get_all_devices(xs)
+        devices = xs.get_all_devices()
         return {device: 0 for device in devices}
 
     def _loss_cost_fn(self, op, x, y):
@@ -114,6 +118,10 @@ class CostModel:
 
     def _min_cost_fn(self, op, x, y):
         return {x.device: x.size()}
+
+    def _scatter_cost_fn(self, op, x):
+        cost = x.size()
+        return {d: cost for d in op.attributes["devices"]}
 
     def _send_cost_fn(self, op, x):
         costs = {}

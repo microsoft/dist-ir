@@ -8,11 +8,11 @@ def add(op, x, y):
 def allreduce(op, xs):
     # TODO: Add attribute for reduction operator
     sum_ = np.sum(xs, axis=0)
-    return [sum_ for i in range(len(xs))]
+    return tuple(sum_ for i in range(len(xs)))
 
 
 def broadcast(op, x):
-    return [x for _ in range(len(op.attributes["devices"]))]
+    return tuple(x for _ in range(len(op.attributes["devices"])))
 
 
 def cast(op, x):
@@ -24,6 +24,11 @@ def cast(op, x):
         9: np.bool,
     }[proto_dtype]
     return x.astype(dtype)
+
+
+def concat2(op, x, y):
+    dim = op.attributes["dim"]
+    return np.concatenate((x, y), axis=dim)
 
 
 def concat(op, xs):
@@ -87,7 +92,7 @@ def split(op, x):
     else:
         raise NotImplementedError(op.op_type)
 
-    return np.split(x, num_splits, axis=dim)
+    return tuple(y for y in np.split(x, num_splits, axis=dim))
 
 
 def transpose(op, x):
@@ -100,6 +105,7 @@ NumPyRegister = {
     ("Broadcast", (np.ndarray,)): broadcast,
     ("Cast", (np.ndarray,)): cast,
     ("Concat", (tuple,)): concat,
+    ("Concat", (np.ndarray, np.ndarray)): concat2,
     ("Gather", (tuple,)): gather,
     ("Loss", (np.ndarray, np.ndarray)): loss,
     ("LossGrad", (np.ndarray, np.ndarray)): loss_grad,
@@ -108,7 +114,7 @@ NumPyRegister = {
     ("Min", (np.ndarray, np.ndarray)): lambda op, x, y: np.minimum(x, y),
     ("Relu", (np.ndarray,)): relu,
     ("Scatter", (np.ndarray,)): split,
-    ("Select", (list,)): select,
+    ("Select", (tuple,)): select,
     ("Send", (np.ndarray,)): identity,
     ("Split", (np.ndarray,)): split,
     ("Shape", (np.ndarray,)): lambda op, x: np.array(x.shape, dtype=np.int64),

@@ -71,7 +71,7 @@ def select(op, xs):
     return xs[dim]
 
 
-def slice(op, x, starts, ends, axes):
+def slice_conc(op, x, starts, ends, axes):
     # TODO handle the other cases, e.g. negative indices
     slices = {axis: slice(s, e) for (s, e, axis) in zip(starts, ends, axes)}
     slices = tuple(slices.get(d, slice(None)) for d in range(x.ndim))
@@ -112,6 +112,6 @@ NumPyRegister = {
     ("Send", (np.ndarray,)): identity,
     ("Split", (np.ndarray,)): split,
     ("Shape", (np.ndarray,)): lambda op, x: np.array(x.shape, dtype=np.int64),
-    ("Slice", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): slice,
+    ("Slice", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): slice_conc,
     ("Transpose", (np.ndarray,)): transpose,
 }

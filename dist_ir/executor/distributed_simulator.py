@@ -1,16 +1,16 @@
 from copy import deepcopy
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dist_ir.executor.type_inference import TypePropRegister
 import json
-from typing import Any, Dict, Sequence
+from typing import Any, Dict, Sequence, Tuple
+
+import numpy as np
 
 from ..ir import Function, Device, Op
+from ..ir.type import Type, Tensor
 from . import utils
-from .absint import (
-    AbstractState,
-    AbstractInterpreter,
-    MixedImplementations,
-)
+from .absint import AbstractState, AbstractInterpreter
+from .numpy_register import NumPyRegister
 
 SECONDS_TO_MICROSECONDS = 1e6
 
@@ -131,8 +131,44 @@ def _create_semantics(cost_functions, implementations):
 # TODO instead of passing the op, should we pass the attributes as kwargs?
 
 
+# Some "mixed" abstract/concrete implementations of ops that are needed for
+# more precise simulation:
+# TODO what's the right place for these?
+
+
+def _shape_abstract_to_concrete(op, x: Tensor):
+    return np.array(x.shape, dtype=np.int64)
+
+
+def _matmul_abstract(op, x, y):
+    if not (x.dtype == y.dtype and x.device == y.device and x.shape[1] == y.shape[0]):
+        raise Exception
+        # _raise_type_error(op, x, y)
+    return Tensor(dtype=x.dtype, shape=(x.shape[0], y.shape[1]), device=x.device)
+
+
+def _slice_abstract_exact(op, x, starts, ends, axes):
+    """The case when we know the slice indices concretely but x is abstract."""
+    # TODO handle the other cases, e.g. negative indices
+    slices = {axis: slice(s, e) for (s, e, axis) in zip(starts, ends, axes)}
+    slices = tuple(slices.get(d, slice(None)) for d in range(len(x.shape)))
+    # Create a fake tensor and slice it because I'm lazy to work out the new shape
+    y = np.zeros(x.shape)
+    return Tensor(dtype=x.dtype, shape=y[slices].shape, device=x.device)
+
+
+MixedImplementations = {
+    ("MatMul", (Tensor, Tensor)): _matmul_abstract,
+    ("Shape", (Tensor,)): _shape_abstract_to_concrete,
+    ("Slice", (Tensor, np.ndarray, np.ndarray, np.ndarray)): _slice_abstract_exact,
+}
+
+
 def Simulator(cost_model):
     return AbstractInterpreter(
         DistributedSimulatorState,
-        _create_semantics(cost_model.cost_functions, MixedImplementations),
+        _create_semantics(
+            cost_model.cost_functions,
+            {**NumPyRegister, **MixedImplementations, **TypePropRegister},
+        ),
     )

@@ -1,7 +1,7 @@
 from typing import Any, Dict, Sequence
 
 from ..ir import Function, Op, Value
-from ..ir.type import Tensor
+from ..ir.type import TupleType
 
 
 class AbstractState:
@@ -44,10 +44,19 @@ class AbstractInterpreter:
 
         # Find the op's inputs in state's environment
         inputs = tuple(state.env[v] for v in op.inputs)
+        # Figure out if inputs are of type tuple or TupleType
+        # (so that output can be made consistent)
+        # TODO just use tuples instead of TupleType?
+        assert isinstance(inputs[0], (tuple, TupleType))
+        tuple_constructor = type(inputs[0])
         # Check that all the inputs to map over have the same length
         assert len(set(len(t) for t in inputs)) == 1
         # Zip the inputs so that we map over each corresponding value
         inputs = zip(*inputs)
+
+        # Change state's function pointer to subfunction (TODO necessary?)
+        function = state.function
+        state.function = op.subfunctions[0]
 
         # Iterate over the inputs
         results = []
@@ -60,10 +69,12 @@ class AbstractInterpreter:
             # TODO do we need to remove subfunction's values from env?
 
         # Unzip the results
-        results = tuple(self.Tuple(types) for types in zip(*results))
+        results = tuple(tuple_constructor(types) for types in zip(*results))
         # Put the results back into the state's environment
         for x, val in zip(op.outputs, results):
             state.env[x] = val
+
+        state.function = function
 
         return state
 
@@ -96,49 +107,6 @@ class AbstractInterpreter:
         return state
 
 
-# The rest of this is file shows how to instantiate AbstractInterpreter to
-# perform mixed concrete evaluation/type propagation
-# TODO move this to another file instead
-
-import numpy as np
-
-# Each function gets the Op and input abstract values as input
-# Each function returns a tuple of output abstract values
-
-
-def _shape_abstract_to_concrete(op, x: Tensor):
-    return np.array(x.shape, dtype=np.int64)
-
-
-def _matmul_abstract(op, x, y):
-    if not (x.dtype == y.dtype and x.device == y.device and x.shape[1] == y.shape[0]):
-        raise Exception
-        # _raise_type_error(op, x, y)
-    return Tensor(dtype=x.dtype, shape=(x.shape[0], y.shape[1]), device=x.device)
-
-
-def _slice_abstract_exact(op, x, starts, ends, axes):
-    """The case when we know the slice indices concretely but x is abstract."""
-    # TODO handle the other cases, e.g. negative indices
-    slices = {axis: slice(s, e) for (s, e, axis) in zip(starts, ends, axes)}
-    slices = tuple(slices.get(d, slice(None)) for d in range(len(x.shape)))
-    # Create a fake tensor and slice it because I'm lazy to work out the new shape
-    y = np.zeros(x.shape)
-    return Tensor(dtype=x.dtype, shape=y[slices].shape, device=x.device)
-
-
-# TODO support variadic ops
-MixedImplementations = {
-    # ("Cast", (np.ndarray,)): _cast_concrete,
-    # ("Min", (np.ndarray, np.ndarray)): _min_concrete,
-    ("MatMul", (Tensor, Tensor)): _matmul_abstract,
-    # ("Shape", (np.ndarray,)): _shape_concrete,
-    ("Shape", (Tensor,)): _shape_abstract_to_concrete,
-    # ("Slice", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): _slice_concrete,
-    ("Slice", (Tensor, np.ndarray, np.ndarray, np.ndarray)): _slice_abstract_exact,
-}
-
-
 def convert_impls_to_semantics(impls):
     """Converts a dictionary of semantics functions that take in input values
     and spit out output values to one that modifies an abstract state in place.
@@ -159,6 +127,3 @@ def convert_impls_to_semantics(impls):
         return semantics
 
     return {signature: convert_impl(impl) for signature, impl in impls.items()}
-
-
-MixedInterpreter = AbstractInterpreter(convert_impls_to_semantics(MixedImplementations))

@@ -1,5 +1,4 @@
-from dist_ir.ir import FunctionMaker
-from dist_ir.ir import Topology
+from dist_ir.ir import cpprint, FunctionMaker, Topology
 from dist_ir.ir.type import Float
 from dist_ir.ir.type import Tensor
 from dist_ir.executor.cost_model import CostModel
@@ -56,7 +55,7 @@ def test_data_parallel():
         transformed_function, transformed_function.inputs
     )
 
-    print(transformed_function)
+    cpprint(transformed_function)
     device_speeds = {"gpu": 1.0e13}
     simulator = Simulator(CostModel(topology, device_speeds))
     simulator_state = simulator.interpret(

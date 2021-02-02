@@ -12,11 +12,14 @@ OpRegister = {
     "Allreduce": OpRegisterEntry(num_inputs=1, num_outputs=1),
     "Broadcast": OpRegisterEntry(num_inputs=1, num_outputs=1),
     "BroadcastGradientArgs": OpRegisterEntry(num_inputs=2, num_outputs=2),
+    "Cast": OpRegisterEntry(num_inputs=1, num_outputs=1),
     "Concat": OpRegisterEntry(num_inputs=2, num_outputs=1),
     "Gather": OpRegisterEntry(num_inputs=1, num_outputs=1),
     "Gemm": OpRegisterEntry(num_inputs=3, num_outputs=1),
     "Loss": OpRegisterEntry(num_inputs=2, num_outputs=1),
     "LossGrad": OpRegisterEntry(num_inputs=2, num_outputs=1),
+    # TODO support variadic number of inputs
+    "Min": OpRegisterEntry(num_inputs=2, num_outputs=1),
     "MatMul": OpRegisterEntry(num_inputs=2, num_outputs=1),
     "MatMulGrad": OpRegisterEntry(num_inputs=3, num_outputs=2),
     "ReduceSumTraining": OpRegisterEntry(num_inputs=2, num_outputs=1),
@@ -29,6 +32,8 @@ OpRegister = {
     "Send": OpRegisterEntry(num_inputs=1, num_outputs=1),
     "SGDOptimizer": OpRegisterEntry(num_inputs=3, num_outputs=2),
     "Shape": OpRegisterEntry(num_inputs=1, num_outputs=1),
+    # TODO allow optional inputs for things like slice
+    "Slice": OpRegisterEntry(num_inputs=4, num_outputs=1),
     "SoftmaxCrossEntropy": OpRegisterEntry(num_inputs=2, num_outputs=2),
     "SoftmaxCrossEntropyGrad": OpRegisterEntry(num_inputs=3, num_outputs=1),
     "Split": OpRegisterEntry(num_inputs=1, num_outputs=1),

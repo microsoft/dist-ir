@@ -71,7 +71,7 @@ class PipelineParallelTransform:
             # Forward the input value(s) if the destination device(s) are not
             # the same as the source device.
             input_device = input_value.type.device
-            consumer_ops = function.get_consumers(input_value)
+            consumer_ops = function.consumers[input_value]
             consumer_stages = utils.get_stages_from_ops(
                 self._op_to_stage_map, consumer_ops
             )
@@ -233,7 +233,7 @@ class PipelineParallelTransform:
                             # This output is an intermediate stage output, which means we need to
                             # forward the output to the next stage if the next stage is located on
                             # a different device.
-                            consumer_ops = function.get_consumers(orig_output)
+                            consumer_ops = function.consumers[orig_output]
                             consumer_stages = utils.get_stages_from_ops(
                                 self._op_to_stage_map, consumer_ops
                             )

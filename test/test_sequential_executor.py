@@ -1,3 +1,5 @@
+from collections import OrderedDict
+
 import numpy as np
 import pytest
 import torch
@@ -25,11 +27,7 @@ class Helper:
             c = torch.randn(size=(4, 4))
         else:
             raise ValueError(f"Unknown backend {self.backend}")
-        self.input_data = {
-            self.a: a,
-            self.b: b,
-            self.c: c,
-        }
+        self.input_data = OrderedDict(((self.a, a), (self.b, b), (self.c, c)))
         print(f"Backend: {self.backend}")
 
 
@@ -41,9 +39,9 @@ def backend(request):
 def test_single_add(backend):
     h = Helper(backend)
     res = h.function.add_op("Add", "Add_0", inputs=[h.a, h.b])
+    h.function.set_outputs([res])
     h.function = h.function.finalize()
-    output_data = h.executor.compute(h.function, h.input_data)
-    result = output_data[res]
+    (result,) = h.executor.compute(h.function, h.input_data.values())
     if h.backend == "numpy":
         assert np.array_equal(result, np.add(h.input_data[h.a], h.input_data[h.b]))
     elif h.backend == "torch":
@@ -54,9 +52,9 @@ def test_double_add(backend):
     h = Helper(backend)
     x = h.function.add_op("Add", "Add_0", inputs=[h.a, h.b])
     res = h.function.add_op("Add", "Add_1", inputs=[h.c, x])
+    h.function.set_outputs([res])
     h.function = h.function.finalize()
-    output_data = h.executor.compute(h.function, h.input_data)
-    result = output_data[res]
+    (result,) = h.executor.compute(h.function, h.input_data.values())
     if h.backend == "numpy":
         assert np.array_equal(
             result,
@@ -75,9 +73,9 @@ def test_double_add_inverted(backend):
     h = Helper(backend)
     x = h.function.add_op("Add", "Add_0", inputs=[h.a, h.b])
     res = h.function.add_op("Add", "Add_1", inputs=[x, h.c])
+    h.function.set_outputs([res])
     h.function = h.function.finalize()
-    output_data = h.executor.compute(h.function, h.input_data)
-    result = output_data[res]
+    (result,) = h.executor.compute(h.function, h.input_data.values())
     if h.backend == "numpy":
         assert np.array_equal(
             result,
@@ -95,9 +93,9 @@ def test_double_add_inverted(backend):
 def test_single_matmul(backend):
     h = Helper(backend)
     res = h.function.add_op("MatMul", "MatMul_0", inputs=[h.a, h.b])
+    h.function.set_outputs([res])
     h.function = h.function.finalize()
-    output_data = h.executor.compute(h.function, h.input_data)
-    result = output_data[res]
+    (result,) = h.executor.compute(h.function, h.input_data.values())
     if h.backend == "numpy":
         assert np.array_equal(result, np.matmul(h.input_data[h.a], h.input_data[h.b]))
     elif h.backend == "torch":
@@ -108,9 +106,9 @@ def test_double_matmul(backend):
     h = Helper(backend)
     x = h.function.add_op("MatMul", "MatMul_0", inputs=[h.a, h.b])
     res = h.function.add_op("MatMul", "MatMul_1", inputs=[h.c, x])
+    h.function.set_outputs([res])
     h.function = h.function.finalize()
-    output_data = h.executor.compute(h.function, h.input_data)
-    result = output_data[res]
+    (result,) = h.executor.compute(h.function, h.input_data.values())
     if h.backend == "numpy":
         assert np.array_equal(
             result,
@@ -131,9 +129,9 @@ def test_double_matmul_inverted(backend):
     h = Helper(backend)
     x = h.function.add_op("MatMul", "MatMul_0", inputs=[h.a, h.b])
     res = h.function.add_op("MatMul", "MatMul_1", inputs=[x, h.c])
+    h.function.set_outputs([res])
     h.function = h.function.finalize()
-    output_data = h.executor.compute(h.function, h.input_data)
-    result = output_data[res]
+    (result,) = h.executor.compute(h.function, h.input_data.values())
     if h.backend == "numpy":
         assert np.array_equal(
             result,
@@ -192,9 +190,9 @@ def test_pmap_on_executor():
     function = function.finalize()
 
     cpprint(function)
-    res = ex.compute(function, {xs: (_x_0, _x_1)})
-    assert np.array_equal(res[zis][0], _x_0 + _x_0)
-    assert np.array_equal(res[zis][1], _x_1 + _x_1)
+    (res,) = ex.compute(function, [(_x_0, _x_1)])
+    assert np.array_equal(res[0], _x_0 + _x_0)
+    assert np.array_equal(res[1], _x_1 + _x_1)
 
     # A pmap with 2 inputs and 1 output
     function = FunctionMaker()
@@ -218,9 +216,9 @@ def test_pmap_on_executor():
     function = function.finalize()
 
     cpprint(function)
-    res = ex.compute(function, {xs: (_x_0, _x_1), ys: (_y_0, _y_1)})
-    assert np.array_equal(res[zis][0], np.matmul(_x_0, _y_0))
-    assert np.array_equal(res[zis][1], np.matmul(_x_1, _y_1))
+    (res,) = ex.compute(function, [(_x_0, _x_1), (_y_0, _y_1)])
+    assert np.array_equal(res[0], np.matmul(_x_0, _y_0))
+    assert np.array_equal(res[1], np.matmul(_x_1, _y_1))
 
     # A pmap with 2 inputs and 2 outputs
     function = FunctionMaker()
@@ -242,14 +240,15 @@ def test_pmap_on_executor():
         subfunctions=[subfunction],
         output_names=["wis", "zis"],
     )
+    function.set_outputs([wis, zis])
     function = function.finalize()
 
     cpprint(function)
-    res = ex.compute(function, {xs: (_x_0, _x_1), ys: (_y_0, _y_1)})
-    assert np.array_equal(res[wis][0], _x_0 + _x_0)
-    assert np.array_equal(res[wis][1], _x_1 + _x_1)
-    assert np.array_equal(res[zis][0], np.matmul(_x_0, _y_0))
-    assert np.array_equal(res[zis][1], np.matmul(_x_1, _y_1))
+    (res_wis, res_zis) = ex.compute(function, [(_x_0, _x_1), (_y_0, _y_1)])
+    assert np.array_equal(res_wis[0], _x_0 + _x_0)
+    assert np.array_equal(res_wis[1], _x_1 + _x_1)
+    assert np.array_equal(res_zis[0], np.matmul(_x_0, _y_0))
+    assert np.array_equal(res_zis[1], np.matmul(_x_1, _y_1))
 
     # A pmap with a single device
     function = FunctionMaker()
@@ -274,9 +273,9 @@ def test_pmap_on_executor():
     function = function.finalize()
 
     cpprint(function)
-    res = ex.compute(function, {xs: (_x_0,), ys: (_y_0,)})
-    assert np.array_equal(res[wis][0], _x_0 + _x_0)
-    assert np.array_equal(res[zis][0], np.matmul(_x_0, _y_0))
+    (res_wis, res_zis) = ex.compute(function, [(_x_0,), (_y_0,)])
+    assert np.array_equal(res_wis[0], _x_0 + _x_0)
+    assert np.array_equal(res_zis[0], np.matmul(_x_0, _y_0))
 
 
 def test_pmap_dp():
@@ -329,9 +328,6 @@ def test_pmap_dp():
     x_0, x_1 = _x[:8], _x[8:]
     _wA = np.ones((4, 2))
     _wB = np.ones((2, 1))
-    res = ex.compute(
-        function,
-        {xs: (x_0, x_1), wAs: (_wA, _wA), wBs: (_wB, _wB)},
-    )
-    assert np.array_equal(res[zis][0], np.matmul(np.matmul(x_0, _wA), _wB))
-    assert np.array_equal(res[zis][1], np.matmul(np.matmul(x_1, _wA), _wB))
+    (res,) = ex.compute(function, [(x_0, x_1), (_wA, _wA), (_wB, _wB)])
+    assert np.array_equal(res[0], np.matmul(np.matmul(x_0, _wA), _wB))
+    assert np.array_equal(res[1], np.matmul(np.matmul(x_1, _wA), _wB))

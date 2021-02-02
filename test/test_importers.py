@@ -45,7 +45,7 @@ def test_parser():
     ex = SequentialExecutor("numpy")
     _wA = np.ones((4, 6))
     _x = np.arange(8 * 4).reshape((8, 4))
-    res = ex.compute(function, {function.inputs[0]: _wA, function.inputs[1]: _x})
+    res = ex.compute(function, [_wA, _x])
 
     # TODO fix concat's implementation in numpy register for this:
     # assert np.array_equal(res["%var4"], np.matmul(_x, _wA))

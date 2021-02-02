@@ -1,10 +1,9 @@
-from dist_ir.ir import FunctionMaker
-from dist_ir.ir import Topology
+from dist_ir.ir import cpprint, FunctionMaker, Topology
 from dist_ir.ir.type import Float
 from dist_ir.ir.type import Tensor
-from dist_ir.executor.cost_inference import CostModel
+from dist_ir.executor.cost_model import CostModel
 from dist_ir.executor.type_inference import infer_types
-from dist_ir.executor import DistributedSimulator
+from dist_ir.executor import Simulator
 from dist_ir.transforms import shard_transform
 
 
@@ -21,11 +20,10 @@ def test_single_device():
     function = infer_types(function, [a, b])
     device_speeds = {"gpu": 1.0e13}
     # TODO shouldn't device_speeds be set in the topology?
-    cost_model = CostModel(topology, device_speeds)
-    simulator = DistributedSimulator(cost_model)
-    simulator_state = simulator.simulate(function)
-    assert d in simulator_state.timestamps
-    assert d in simulator_state.peak_memory
+    simulator = Simulator(CostModel(topology, device_speeds))
+    state = simulator.interpret(function, (v.type for v in function.inputs))
+    assert d in state.timestamps
+    assert d in state.peak_memory
     # TODO: Check specific values
 
 
@@ -57,11 +55,12 @@ def test_data_parallel():
         transformed_function, transformed_function.inputs
     )
 
-    print(transformed_function)
+    cpprint(transformed_function)
     device_speeds = {"gpu": 1.0e13}
-    cost_model = CostModel(topology, device_speeds)
-    simulator = DistributedSimulator(cost_model)
-    simulator_state = simulator.simulate(transformed_function)
+    simulator = Simulator(CostModel(topology, device_speeds))
+    simulator_state = simulator.interpret(
+        transformed_function, (v.type for v in transformed_function.inputs)
+    )
     assert d0 in simulator_state.timestamps
     assert d1 in simulator_state.timestamps
     assert d0 in simulator_state.peak_memory
@@ -86,8 +85,7 @@ def test_chrome_trace():
     function = infer_types(function, [a, b, c])
 
     device_speeds = {"gpu": 1.0e13}
-    cost_model = CostModel(topology, device_speeds)
-    simulator = DistributedSimulator(cost_model)
+    simulator = Simulator(CostModel(topology, device_speeds))
 
     transformed_function = shard_transform(
         function=function,
@@ -102,5 +100,7 @@ def test_chrome_trace():
         transformed_function, transformed_function.inputs
     )
 
-    simulation = simulator.simulate(transformed_function)
+    simulation = simulator.interpret(
+        transformed_function, (v.type for v in transformed_function.inputs)
+    )
     simulation.dump_chrome_trace("test/trace.json")

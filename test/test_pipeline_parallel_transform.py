@@ -1,7 +1,6 @@
 import numpy as np
 
-from dist_ir.ir import Device, Function
-from dist_ir.ir.type import Float, Tensor
+from dist_ir.ir import cpprint
 from dist_ir.transforms import PipelineParallelTransform
 from dist_ir.executor import SequentialExecutor
 import pipeline_parallel_utils as utils
@@ -36,12 +35,12 @@ def test_mnist_fw_bw():
     print("-" * 88)
     print("Original function")
     print("-" * 88)
-    print(function)
+    cpprint(function)
     print()
     print("-" * 88)
     print("Transformed function")
     print("-" * 88)
-    print(transformed_function)
+    cpprint(transformed_function)
 
     batch_size = 16
     ex = SequentialExecutor("numpy")
@@ -49,47 +48,23 @@ def test_mnist_fw_bw():
     _z = np.ones((batch_size, 1))
     _wA = np.ones((4, 2))
     _wB = np.ones((2, 1))
-    orig_res = ex.compute(
-        function,
-        {
-            function.inputs[0]: _x,
-            function.inputs[1]: _z,
-            function.inputs[2]: _wA,
-            function.inputs[3]: _wB,
-        },
-    )
+    orig_res = ex.compute(function, [_x, _z, _wA, _wB])
 
-    transformed_res = ex.compute(
-        transformed_function,
-        {
-            transformed_function.inputs[0]: _x,
-            transformed_function.inputs[1]: _z,
-            transformed_function.inputs[2]: _wA,
-            transformed_function.inputs[3]: _wB,
-        },
-    )
+    transformed_res = ex.compute(transformed_function, [_x, _z, _wA, _wB])
 
     print("-" * 88)
     print("Original function results")
     print("-" * 88)
-    for k, v in orig_res.items():
-        print(k)
-        print(v)
-        print()
+    print(orig_res)
     print()
     print("-" * 88)
     print("Transformed function results")
     print("-" * 88)
-    for k, v in transformed_res.items():
-        print(k)
-        print(v)
-        print()
+    print(transformed_res)
+    print()
 
-    for i in range(len(function.outputs)):
-        np.testing.assert_array_almost_equal(
-            orig_res[function.outputs[i]],
-            transformed_res[transformed_function.outputs[i]],
-        )
+    for a, b in zip(orig_res, transformed_res):
+        np.testing.assert_array_almost_equal(a, b)
 
 
 if __name__ == "__main__":

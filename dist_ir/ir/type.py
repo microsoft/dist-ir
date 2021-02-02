@@ -28,6 +28,18 @@ class Type:
 
 
 @singleton
+class Bool(Type):
+    """The boolean type. A singleton class."""
+
+    def __repr__(self):
+        return "Bool"
+
+    @property
+    def size(self):
+        return 1  # TODO accurate?
+
+
+@singleton
 class Int(Type):
     """The integer type. A singleton class."""
 
@@ -86,12 +98,19 @@ class TupleType(Type):
         # Override __init__ because it doesn't make sense for a tuple to have a
         # device. Devices are stored in each tuple element.
         object.__setattr__(self, "types", types)  # Can't assign to frozen field
-        assert isinstance(types, tuple) and all(isinstance(t, Type) for t in types)
+        assert isinstance(self.types, tuple)
+        assert all(isinstance(t, Type) for t in self.types)
         assert self.device is None
 
     def __repr__(self):
         elems_str = ", ".join(str(t) for t in self.types)
         return f"Tuple[{elems_str}]"
+
+    def __len__(self):
+        return len(self.types)
+
+    def __iter__(self):
+        return iter(self.types)
 
     def get_all_devices(self) -> Set[Device]:
         devices = set()

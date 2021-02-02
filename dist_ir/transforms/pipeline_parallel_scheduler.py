@@ -60,7 +60,7 @@ class PipelineParallelScheduler(ABC):
                     num_scheduled_stages += 1
                     outputs = stage.outputs
                     for output in outputs:
-                        consumer_ops = function.get_consumers(output)
+                        consumer_ops = function.consumers[output]
                         consumer_stages = utils.get_stages_from_ops(
                             op_to_stage, consumer_ops
                         )

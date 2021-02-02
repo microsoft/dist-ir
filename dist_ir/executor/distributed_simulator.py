@@ -57,7 +57,10 @@ def _simulate_op(
     outputs: Tuple[Any],
 ):
     # Synchronize all input and output devices for this op.
-    # TODO need to do something more robust here
+    # TODO need to do something more robust here, because some input/output
+    # values are np.ndarrays, which don't have device fields.
+    # For e.g., we could wrap all abstract values in some AbstractValue class,
+    # and attach the device tag to this class.
     devices = set()
     for v in inputs + outputs:
         if isinstance(v, Type):
@@ -87,7 +90,7 @@ def _simulate_op(
             state.live_memory[output_device] += out_edge.type.size()
     # TODO: Can we optimize this using a priority queue?
     for value in state.consumers:
-        # TODO are we missing a decrement of state.consumers[value] somewhere?
+        # TODO we are missing a decrement of state.consumers[value] somewhere
         if state.consumers[value] == 0 and all(
             value != v for v in state.function.inputs
         ):

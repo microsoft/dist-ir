@@ -266,9 +266,6 @@ def _create_semantics(type_prop_register):
     }
 
 
-# Handling pmap specially for now since it needs to return a typed subfunction
-
-
 TypeInferrer = AbstractInterpreter(
     semantics=_create_semantics(TypePropRegister), Tuple=lambda t: TupleType(tuple(t))
 )

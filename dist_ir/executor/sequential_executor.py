@@ -12,7 +12,6 @@ class SequentialExecutor:
         semantics = convert_impls_to_semantics(BackendRegister[backend])
         self.interpreter = AbstractInterpreter(semantics=semantics)
 
-    # TODO pmap in absint
     def _compute_op(self, op: Op, inputs: List[Any]):
         """Executes the given op and returns its outputs."""
         op_type = op.op_type

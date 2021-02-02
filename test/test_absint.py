@@ -2,7 +2,7 @@ import numpy as np
 
 from dist_ir.executor import absint
 from dist_ir.executor.numpy_register import NumPyRegister
-from dist_ir.executor.distributed_simulator import MixedImplementations
+from dist_ir.executor.simulator import MixedImplementations
 from dist_ir.importer import mlir_parser
 from dist_ir.ir import cpprint
 from dist_ir.ir.type import Tensor

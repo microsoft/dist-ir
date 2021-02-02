@@ -1,6 +1,5 @@
 from copy import deepcopy
 from collections import defaultdict
-from dist_ir.executor.type_inference import TypePropRegister
 import json
 from typing import Any, Dict, Sequence, Tuple
 
@@ -8,16 +7,14 @@ import numpy as np
 
 from ..ir import Function, Device, Op
 from ..ir.type import Type, Tensor
-from . import utils
 from .absint import AbstractState, AbstractInterpreter
 from .numpy_register import NumPyRegister
+from .type_inference import TypePropRegister
 
 SECONDS_TO_MICROSECONDS = 1e6
 
-# TODO rename: distributed simulator -> simulator
 
-
-class DistributedSimulatorState(AbstractState):
+class SimulatorState(AbstractState):
     def __init__(self, function: Function, inputs: Sequence[Any]):
         AbstractState.__init__(self, function, inputs)
         self.timestamps = defaultdict(float)
@@ -50,7 +47,7 @@ class DistributedSimulatorState(AbstractState):
 
 
 def _simulate_op(
-    state: DistributedSimulatorState,
+    state: SimulatorState,
     op: Op,
     costs: Dict[Device, float],
     inputs: Tuple[Any],
@@ -112,7 +109,7 @@ def _create_semantics(cost_functions, implementations):
     """
 
     def convert_impl(impl_fn, cost_fn):
-        def semantics(op: Op, state: DistributedSimulatorState):
+        def semantics(op: Op, state: SimulatorState):
             # Find the op's inputs in state's environment
             inputs = tuple(state.env[v] for v in op.inputs)
 
@@ -175,7 +172,7 @@ MixedImplementations = {
 
 def Simulator(cost_model):
     return AbstractInterpreter(
-        DistributedSimulatorState,
+        SimulatorState,
         _create_semantics(
             cost_model.cost_functions,
             {**NumPyRegister, **MixedImplementations, **TypePropRegister},

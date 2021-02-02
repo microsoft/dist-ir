@@ -1,6 +1,5 @@
 import numpy as np
 
-from . import utils
 from ..ir.type import Tensor, TupleType
 
 BYTES_IN_GB = 8.0e9

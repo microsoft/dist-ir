@@ -89,6 +89,7 @@ class Function:
         self, ops: List[Op], deepcopy: bool = False, name: Optional[str] = None
     ) -> Function:
         """Returns a Function comprised of the specified subset of ops."""
+        assert not deepcopy  # TODO We shouldn't need this functionality anymore
         subfunction = FunctionMaker(name)
         value_map = {}
         outputs = []

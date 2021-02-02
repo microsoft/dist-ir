@@ -70,6 +70,9 @@ def _parse_type(mlir_type, context: Context):
         device = context.get_device(args[1].strip())
         return Tensor(dtype, shape, device)
 
+    if str(mlir_type) == "none":
+        return None
+
     # TODO handle tuple types
     raise ValueError(f"Unknown MLIR type {mlir_type}")
 

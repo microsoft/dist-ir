@@ -89,7 +89,7 @@ def pp_type(s):
 
 
 def interline(*docs):
-    return concat(intersperse(LINE, docs))
+    return concat(intersperse(HARDLINE, docs))
 
 
 # ----------------------------------------
@@ -113,7 +113,8 @@ def _(function: Function, ctx):
     ops = _pprint_function_body(function, ctx)
     return concat(
         [
-            pretty_call(ctx, pp_fnname("Function"), *function.inputs),
+            annotate(Token.KEYWORD_CONSTANT, "function "),
+            pretty_call(ctx, pp_fnname(function.name), *function.inputs),
             nest(ctx.indent, concat([COLON, HARDLINE, interline(*ops)])),
         ]
     )
@@ -125,11 +126,8 @@ def _(op: Op, ctx):
     args = concat(_join(*(v.name for v in op.inputs)))
 
     if op.op_type == "Pmap":
-        lambda_args = _join(
-            *(pretty_dispatch(i, ctx) for i in op.subfunctions[0].inputs)
-        )
-        lambda_args = concat([LPAREN, nest(ctx.indent, concat(lambda_args)), RPAREN])
         lambda_body = _pprint_function_body(op.subfunctions[0], ctx)
+        lambda_body = interline(*lambda_body)
         actual_args = group(
             concat(
                 [
@@ -160,12 +158,11 @@ def _(op: Op, ctx):
                     COLON,
                     HARDLINE,
                     pp_reserved("lambda"),
-                    " ",
-                    lambda_args,
+                    pretty_call(ctx, " ", *op.subfunctions[0].inputs),
                     COLON,
                     " ",
                     LBRACE,
-                    nest(ctx.indent, concat([HARDLINE] + lambda_body)),
+                    nest(ctx.indent, concat([HARDLINE, lambda_body])),
                     HARDLINE,
                     RBRACE,
                     COMMA,

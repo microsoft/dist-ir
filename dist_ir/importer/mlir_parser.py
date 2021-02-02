@@ -20,26 +20,31 @@ class Context:
     # TODO check that this mapping works for ops that return multiple return values
     values: Dict[str, Value] = field(default_factory=dict)
 
+    def make_fresh_var(self):
+        self.var_number += 1
+        return f"%var{self.var_number}"
 
-def _make_fresh_var(context: Context):
-    context.var_number += 1
-    return f"%var{context.var_number}"
+    def add_value(self, mlir_val, val: Value):
+        assert str(mlir_val) not in self.values
+        self.values[str(mlir_val)] = val
 
+    def get_value(self, mlir_val):
+        return self.values[str(mlir_val)]
 
-def _get_device(d: Union[int, str], context: Context) -> Device:
-    """Given an integer device ID or string device variable, return the
-    corresponding Device object or create one if none exists.
-    """
-    # TODO not sure how to figure out device type here
-    dev_type = "gpu"
-    if d not in context.devices:
-        if isinstance(d, int):
-            context.devices[d] = Device(d, dev_type)
-        elif isinstance(d, str):
-            context.devices[d] = Device.get_new_device_variable(dev_type)
-        else:
-            raise ValueError(f"Unexpected device {d}")
-    return context.devices[d]
+    def get_device(self, d: Union[int, str]) -> Device:
+        """Given an integer device ID or string device variable, return the
+        corresponding Device object or create one if none exists.
+        """
+        # TODO not sure how to figure out device type here
+        dev_type = "gpu"
+        if d not in self.devices:
+            if isinstance(d, int):
+                self.devices[d] = Device(d, dev_type)
+            elif isinstance(d, str):
+                self.devices[d] = Device.get_new_device_variable(dev_type)
+            else:
+                raise ValueError(f"Unexpected device {d}")
+        return self.devices[d]
 
 
 def _parse_type(mlir_type, context: Context):
@@ -62,7 +67,7 @@ def _parse_type(mlir_type, context: Context):
         args = matches.group(1).split(",")
         assert len(args) == 2
         shape, dtype = parse_shape_dtype(args[0])
-        device = _get_device(args[1].strip(), context)
+        device = context.get_device(args[1].strip())
         return Tensor(dtype, shape, device)
 
     # TODO handle tuple types
@@ -86,8 +91,7 @@ def _parse_function(mlir_region, context: Context = None) -> Function:
         v = function.add_input_value(
             f"%arg{arg.arg_number}", _parse_type(arg.type, context)
         )
-        assert str(arg) not in context.values
-        context.values[str(arg)] = v
+        context.add_value(arg, v)
 
     returned = False
     for op in entry_block:
@@ -96,7 +100,7 @@ def _parse_function(mlir_region, context: Context = None) -> Function:
 
         # Collect name and arguments
         op_name = op.operation.name
-        args = [context.values[str(operand)] for operand in op.operands]
+        args = [context.get_value(operand) for operand in op.operands]
 
         # Collect attributes
         attributes = {}
@@ -114,12 +118,12 @@ def _parse_function(mlir_region, context: Context = None) -> Function:
             # TODO better place to do this?
             if attribute.name == "devices":
                 assert isinstance(value, list)
-                value = [_get_device(d, context) for d in value]
+                value = [context.get_device(d) for d in value]
 
             attributes[attribute.name] = value
 
         # Create output names (TODO should be done by Op.__init__ or add_op)
-        output_names = [_make_fresh_var(context) for _ in op.results]
+        output_names = [context.make_fresh_var() for _ in op.results]
 
         subfunctions = []
 
@@ -153,8 +157,7 @@ def _parse_function(mlir_region, context: Context = None) -> Function:
 
         # Collect the results and add to values
         for val, mlirval in zip(outs, op.results):
-            assert str(mlirval) not in context.values
-            context.values[str(mlirval)] = val
+            context.add_value(mlirval, val)
 
     return function.finalize()
 

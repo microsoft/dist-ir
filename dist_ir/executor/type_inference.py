@@ -301,10 +301,9 @@ def _type_function(function: Function, type_map: Dict[Value, Type]) -> Function:
     value_map: Dict[Value, Value] = {}
 
     # Add inputs to new_function
-    assert len(input_types) == len(function.inputs)
-    for old_inp, typ in zip(function.inputs, input_types):
-        new_inp = new_function.add_input_value(old_inp.name, typ)
-        value_map[old_inp] = new_inp
+    for inp in function.inputs:
+        new_inp = new_function.add_input_value(inp.name, type_map[inp])
+        value_map[inp] = new_inp
 
     # Duplicate each op, but with types from typed_env
     for op in function.ops:

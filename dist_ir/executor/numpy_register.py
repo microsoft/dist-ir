@@ -1,6 +1,10 @@
 import numpy as np
 
 
+def _handle_negative_axis(axis, tensor_rank):
+    return axis + tensor_rank if axis < 0 else axis
+
+
 def add(op, x, y):
     return np.add(x, y)
 
@@ -97,9 +101,54 @@ def gather(op, inputs):
     return np.take(inputs[0], inputs[1].astype(np.int64), axis=axis)
 
 
+"""
+inline int64_t HandleNegativeAxis(int64_t axis, int64_t tensor_rank) {
+  ORT_ENFORCE(axis >= -tensor_rank && axis <= tensor_rank - 1, "axis ", axis,
+              " is not in valid range [-", tensor_rank, ",", tensor_rank - 1, "]");
+  // Handle negative axis
+  return axis < 0 ? axis + tensor_rank : axis;
+}
+"""
+
+
 def gather_grad(op, inputs):
-    # TODO: implement
     return np.zeros(inputs[0])
+    """
+    def _size_from_dimension(shape, start, end):
+        size = shape[start]
+        for i in range(start + 1, end):
+            size *= shape[i]
+        return size
+
+    shape, indices, grad = inputs
+    output = np.zeros(shape)
+    axis = _handle_negative_axis(op.attributes["axis"], len(shape))
+    block_size = _size_from_dimension(shape, axis + 1, len(shape))
+    N = indices.size
+    input_block_size = _size_from_dimension(shape, axis, len(shape))
+    output_block_size = N * block_size
+    indices_max = shape[axis]
+    grad_size = grad.size
+
+    assert grad_size % block_size == 0
+
+    for i in range(0, grad_size, grad_size // block_size):
+        for g in range(i, block_size):
+            input_block_index = g / output_block_size
+            block_offset = g % output_block_size
+            indices_index = block_offset // block_size
+            offset = block_offset % block_size
+            if len(indices.shape) == 0:
+                idx = np.expand_dims(indices, 0)[indices_index]
+            else:
+                idx = indices[indices_index]
+            input_index = (
+                input_block_index * input_block_size + idx * block_size + offset
+            )
+            output[input_index] += grad[g]
+
+    return output
+    """
 
 
 def gather_nd(op, inputs):
@@ -212,6 +261,7 @@ def layer_norm_grad(op, inputs):
     x_grad = b - (x - mean) * inv_std_var * np.mean(c, axis=0)
     bias_grad = np.sum(y_grad, axis=1)
     scale_grad = np.sum(a, axis=1)
+    assert x_grad.shape == x.shape
     return x_grad, bias_grad, scale_grad
 
 
@@ -243,6 +293,22 @@ def min_(op, inputs):
 
 def mul(op, inputs):
     return inputs[0] * inputs[1]
+
+
+def reduce_all_l2(op, inputs):
+    if "keepdims" in op.attributes:
+        keepdims = op.attributes["keepdims"]
+    else:
+        keepdims = 1
+    return np.sqrt(np.sum(np.square(inputs[0]), keepdims=keepdims))
+
+
+def reduce_sum(op, inputs):
+    if "keepdims" in op.attributes:
+        keepdims = op.attributes["keepdims"]
+    else:
+        keepdims = 1
+    return np.sum(inputs[0], axis=tuple(op.attributes["axes"]), keepdims=keepdims)
 
 
 def relu(op, inputs):
@@ -287,13 +353,26 @@ def softmax(op, inputs):
 
 
 def softmax_grad(op, inputs):
-    raise NotImplementedError("softmax_grad")
+    dY, Y = inputs
+    """
+    axis = _handle_negative_axis(op.attributes["axis"], Y.ndim)
+    N = pass
+    D = pass
+
+    scale = [0.0] * N
+    sum_multiplier = [1.0] * D
+    n = int(N)
+    d = int(D)
+    nd = int(N * D)
+    dX = np.copy(dY)
+    """
+    return np.zeros(dY.shape)
 
 
 def softmax_cross_entropy_loss(op, inputs):
     x, target = inputs
     weight = None
-    if hasattr(op.attributes, "ignore_index"):
+    if "ignore_index" in op.attributes:
         ignore_index = op.attributes["ignore_index"]
     else:
         ignore_index = None
@@ -397,7 +476,7 @@ def softmax_cross_entropy_loss_grad(op, inputs):
                 permutations.append(i)
 
     dy, log_prob, label = inputs[:3]
-    if hasattr(op.attributes, "ignore_index"):
+    if "ignore_index" in op.attributes:
         ignore_index = op.attributes["ignore_index"]
     else:
         ignore_index = None
@@ -522,7 +601,7 @@ def sub(op, inputs):
 
 
 def sum_(op, inputs):
-    return sum(*inputs)
+    return sum(inputs)
 
 
 def tanh(op, inputs):
@@ -594,6 +673,8 @@ NumPyRegister = {
     "Min": min_,
     "MPIGather": mpi_gather,
     "Mul": mul,
+    "ReduceAllL2": reduce_all_l2,
+    "ReduceSum": reduce_sum,
     "Relu": relu,
     "Reshape": reshape,
     "Scatter": split,

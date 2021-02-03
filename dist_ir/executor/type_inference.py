@@ -267,40 +267,6 @@ def _create_semantics(type_prop_register):
     from a register of type propagation functions
     signature -> (input types -> output types)).
     """
-    # Pmap expects 1 or more tuples as input
-    assert isinstance(input_types, tuple) and len(input_types) > 0
-    assert all(isinstance(t, TupleType) for t in input_types)
-    # Check that pmap's arguments all have same length and shapes
-    assert len(set(len(t.types) for t in input_types)) == 1
-    for t in input_types:
-        assert all(isinstance(x, Tensor) for x in t.types)
-        assert len(set(x.shape for x in t.types)) == 1
-        assert len(set(x.dtype for x in t.types)) == 1
-    # Check that pmap's arguments are on distinct devices
-    devices = tuple(x.device for x in input_types[0].types)
-    assert len(set(devices)) == len(devices)
-    # Check that all inputs have same list of devices
-    for t in input_types:
-        assert devices == tuple(x.device for x in t.types)
-
-    # Subfunction's inputs are given by pmap's arguments, but on device d
-    subfn_input_types = [t.types[0] for t in input_types]
-
-    # Recursively call infer_types on subfunction
-    assert len(op.subfunctions) == 1
-    subfunctions = [infer_types(op.subfunctions[0], subfn_input_types)]
-
-    # Pmap's output types are given by subfunction's output types
-    out_types = tuple(
-        TupleType(
-            tuple(
-                Tensor(shape=t.type.shape, dtype=t.type.dtype, device=d)
-                for d in devices
-            )
-        )
-        for t in subfunctions[0].outputs
-    )
-    return out_types, subfunctions
 
     def convert_impl(type_prop_fn):
         def semantics(op: Op, state: AbstractState):

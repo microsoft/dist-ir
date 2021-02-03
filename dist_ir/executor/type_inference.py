@@ -20,9 +20,9 @@ This module contains a register mapping ops to type propagation functions:
 
 from typing import Dict, List, Tuple
 
-from .absint import AbstractInterpreter, AbstractState
 from ..ir import Device, Function, FunctionMaker, Op, Value
-from ..ir.type import Bool, Float, Int32, Int64, Type, Tensor, TupleType
+from ..ir.type import Bool, Float, Int, Type, Tensor, TupleType
+from .absint import AbstractInterpreter, AbstractState
 
 
 def _raise_type_error(op, *args):
@@ -58,8 +58,8 @@ def _cast_prop_fn(op, x):
     proto_dtype = op.attributes["to"]
     dtype = {
         1: Float(),
-        6: Int32(),
-        7: Int64(),
+        6: Int(),
+        7: Int(),  # TODO distinguish between int32 and int64
         9: Bool(),
     }[proto_dtype]
     return Tensor(dtype=dtype, shape=x.shape, device=x.device)
@@ -95,10 +95,26 @@ def _elementwise_tensor_op_prop_fn(op, x, y):
     return x
 
 
-def _identity_prop_fn(op, x):
-    if not isinstance(x, Tensor):
+def _gather_prop_fn(op, x):
+    if not (
+        isinstance(x, TupleType)
+        and all(isinstance(t, Tensor) for t in x.types)
+        and len(set(t.shape for t in x.types)) == 1
+        and len(set(t.dtype for t in x.types)) == 1
+        and len(x.types) > 0
+    ):
         _raise_type_error(op, x)
-    return x
+    dim = op.attributes["dim"]
+    device = op.attributes["device"]
+    output_shape = list(x.types[0].shape)
+    for i in range(1, len(x.types)):
+        for j in range(len(x.types[i].shape)):
+            if j == dim:
+                output_shape[j] += x.types[i].shape[j]
+            elif x.types[i].shape[j] != x.types[0].shape[j]:
+                _raise_type_error(op, x)
+    output_shape = tuple(output_shape)
+    return Tensor(dtype=x.types[0].dtype, shape=output_shape, device=device)
 
 
 def _matmul_prop_fn(op, x, y):
@@ -127,39 +143,6 @@ def _matmul_grad_prop_fn(op, x, y, z):
         _raise_type_error(op, x, y, z)
 
     return (x, y)
-
-
-def _min_prop_fn(op, *inputs):
-    if not (
-        all(isinstance(inp, Tensor) for inp in inputs)
-        and all(inp.dtype == inputs[0].dtype for inp in inputs)
-        and all(inp.shape == inputs[0].shape for inp in inputs)
-        and all(inp.device == inputs[0].device for inp in inputs)
-    ):
-        _raise_type_error(op, inputs)
-    return inputs[0]
-
-
-def _mpi_gather_prop_fn(op, x):
-    if not (
-        isinstance(x, TupleType)
-        and all(isinstance(t, Tensor) for t in x.types)
-        and len(set(t.shape for t in x.types)) == 1
-        and len(set(t.dtype for t in x.types)) == 1
-        and len(x.types) > 0
-    ):
-        _raise_type_error(op, x)
-    dim = op.attributes["dim"]
-    device = op.attributes["device"]
-    output_shape = list(x.types[0].shape)
-    for i in range(1, len(x.types)):
-        for j in range(len(x.types[i].shape)):
-            if j == dim:
-                output_shape[j] += x.types[i].shape[j]
-            elif x.types[i].shape[j] != x.types[0].shape[j]:
-                _raise_type_error(op, x)
-    output_shape = tuple(output_shape)
-    return Tensor(dtype=x.types[0].dtype, shape=output_shape, device=device)
 
 
 def _scatter_prop_fn(op, x):
@@ -206,12 +189,6 @@ def _send_prop_fn(op, x):
 def _slice_prop_fn(op, x, starts, ends, axes):
     # We don't know the shape of the output, so:
     return Tensor(dtype=x.dtype, shape=None, device=x.device)
-
-
-def _shape_prop_fn(op, x):
-    if not (isinstance(x, Tensor) and x.shape is not None):
-        _raise_type_error(op, x)
-    return Tensor(dtype=Int64(), shape=(len(x.shape),), device=x.device)
 
 
 def _split_prop_fn(op, x):

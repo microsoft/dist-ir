@@ -21,7 +21,7 @@ This module contains a register mapping ops to type propagation functions:
 from typing import Dict, List, Tuple
 
 from ..ir import Device, Function, FunctionMaker, Op, Value
-from ..ir.type import Bool, Float, Int, Type, Tensor, TupleType
+from ..ir.type import Bool, Float, Int32, Int64, Type, Tensor, TupleType
 from .absint import AbstractInterpreter, AbstractState
 
 
@@ -58,8 +58,8 @@ def _cast_prop_fn(op, x):
     proto_dtype = op.attributes["to"]
     dtype = {
         1: Float(),
-        6: Int(),
-        7: Int(),  # TODO distinguish between int32 and int64
+        6: Int32(),
+        7: Int64(),
         9: Bool(),
     }[proto_dtype]
     return Tensor(dtype=dtype, shape=x.shape, device=x.device)
@@ -222,7 +222,7 @@ TypePropRegister = {
     ("Broadcast", (Tensor,)): _broadcast_prop_fn,
     ("Cast", (Tensor,)): _cast_prop_fn,
     ("Concat", (TupleType,)): _concat_prop_fn,
-    ("Gather", (TupleType,)): _gather_prop_fn,
+    ("MPIGather", (TupleType,)): _gather_prop_fn,
     # ("Loss", (Tensor, Tensor)): TODO
     # ("LossGrad", (Tensor, Tensor)): TODO
     ("MatMul", (Tensor, Tensor)): _matmul_prop_fn,

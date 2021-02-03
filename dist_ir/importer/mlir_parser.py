@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Union
 import mlir
 from ..ir import Function, FunctionMaker, Value
 from ..ir.device import Device
-from ..ir.type import Float, Int, Tensor
+from ..ir.type import Float, Int32, Int64, Tensor
 
 
 @dataclass
@@ -44,7 +44,7 @@ def _get_device(d: Union[int, str], context: Context) -> Device:
 
 def _parse_type(mlir_type, context: Context):
     # Unfortunately, I can't inspect the MLIR type object, so parsing the string:
-    dtype_map = {"f32": Float(), "i64": Int()}
+    dtype_map = {"f32": Float(), "i32": Int32(), "i64": Int64()}
 
     def parse_shape_dtype(shape_str):
         dims = shape_str.strip().split("x")

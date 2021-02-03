@@ -19,11 +19,10 @@ def broadcast(op, x):
     return tuple(x for _ in range(len(op.attributes["devices"])))
 
 
-def bias_fast_gelu_grad_dx(op, inputs):
+def bias_fast_gelu_grad_dx(op, dy, x, b):
     kAlpha = np.sqrt(np.pi) * np.sqrt(0.5)
     kGamma = 0.044715
     kBeta = kGamma * kAlpha * 3.0
-    dy, x, b = inputs
     input_shape = x.shape
     bias_shape = b.shape
     x_cube = np.power(x, 3)
@@ -53,52 +52,45 @@ def concat2(op, x, y):
 
 def concat(op, xs):
     # TODO make variadic
-    # assert len(inputs) == 1
-    # dim = op.attributes["dim"]
-    # return np.concatenate(inputs[0], axis=dim)
     dim = op.attributes["dim"]
     return np.concatenate(xs, axis=dim)
 
 
-def div(op, inputs):
-    return inputs[0] / inputs[1]
+def div(op, x, y):
+    return x / y
 
 
-def dropout(op, inputs):
-    x, ratio, training_mode = inputs
+def dropout(op, x, ratio, training_mode):
     if training_mode:
         scale = 1.0 / (1.0 - ratio)
         mask = np.random.randint(0, 2, size=x.shape)
         x = scale * mask * x
-        assert x.shape == inputs[0].shape
         return x, mask
     else:
         return x
 
 
-def dropout_grad(op, inputs):
-    # TODO: Handle 4th input?
-    dy, mask, ratio, _ = inputs
-
+def dropout_grad(op, dy, mask, ratio, extra_input=None):
+    # TODO: Figure out what extra input is
     if ratio == 0:
         return dy
     else:
         return mask * dy / (1.0 - ratio)
 
 
-def expand(op, inputs):
-    return inputs[0] * np.ones(inputs[1])
+def expand(op, x, y):
+    return x * np.ones(y)
 
 
-def fast_gelu(op, inputs):
+def fast_gelu(op, x, y):
     # https://github.com/hendrycks/GELUs
-    x = inputs[0]
+    # TODO: What should we do with y?
     return 1.0 / (1.0 + np.exp(-1.702 * x))
 
 
-def gather(op, inputs):
+def gather(op, x, y):
     axis = op.attributes["axis"]
-    return np.take(inputs[0], inputs[1].astype(np.int64), axis=axis)
+    return np.take(x, y.astype(np.int64), axis=axis)
 
 
 """
@@ -111,8 +103,8 @@ inline int64_t HandleNegativeAxis(int64_t axis, int64_t tensor_rank) {
 """
 
 
-def gather_grad(op, inputs):
-    return np.zeros(inputs[0])
+def gather_grad(op, shape, indices, grad):
+    return np.zeros(shape)
     """
     def _size_from_dimension(shape, start, end):
         size = shape[start]
@@ -120,7 +112,6 @@ def gather_grad(op, inputs):
             size *= shape[i]
         return size
 
-    shape, indices, grad = inputs
     output = np.zeros(shape)
     axis = _handle_negative_axis(op.attributes["axis"], len(shape))
     block_size = _size_from_dimension(shape, axis + 1, len(shape))
@@ -151,8 +142,7 @@ def gather_grad(op, inputs):
     """
 
 
-def gather_nd(op, inputs):
-    data, indices = inputs
+def gather_nd(op, data, indices):
     batch_dims = op.attributes["batch_dims"]
 
     # https://github.com/onnx/onnx/blob/b1e0bc9a31eaefc2a9946182fbad939843534984/onnx/backend/test/case/node/gathernd.py#L15
@@ -200,16 +190,16 @@ def gather_nd(op, inputs):
     return np.asarray(output_data_buffer, dtype=data.dtype).reshape(output_shape)
 
 
-def gather_nd_grad(op, inputs):
-    input_shape, indices_tensor, update_tensor = inputs
+def gather_nd_grad(op, input_shape, indices_tensor, update_tensor):
+    output_tensor = np.zeros(input_shape)
+    # TODO: Finish implementing
+
+    """
     batch_dims = op.attributes["batch_dims"]
     indices_shape = indices_tensor.shape
     last_indices_dimension = batch_dims + indices_shape[-1]
     assert last_indices_dimension <= len(input_shape)
-    output_tensor = np.zeros(input_shape)
 
-    # TODO: Finish implementing
-    """
     grad_size = update_tensor.ndim
     slice_size = element_count_per_slice
     for i in range(grad_size):
@@ -220,21 +210,15 @@ def gather_nd_grad(op, inputs):
     return output_tensor
 
 
-def mpi_gather(op, inputs):
-    dim = op.attributes["dim"]
-    return np.concatenate(xs, axis=dim)
-
-
 def identity(op, x):
     return x
 
 
-def gemm(op, inputs):
+def gemm(op, a, b, c):
     alpha = op.attributes["alpha"]
     beta = op.attributes["beta"]
     transA = op.attributes["transA"]
     transB = op.attributes["transB"]
-    a, b, c = inputs
     if transA:
         a = a.T
     if transB:
@@ -242,18 +226,15 @@ def gemm(op, inputs):
     return np.matmul(alpha * a, beta * b) + c
 
 
-def layer_norm(op, inputs):
+def layer_norm(op, x, scale, beta):
     eps = 1e-5
-    x, scale, beta = inputs
     mean = np.mean(x)
     std = np.std(x)
     x = (x - mean) / (pow(std, 2) + eps) * scale + beta
-    assert x.shape == inputs[0].shape
     return x, mean, std
 
 
-def layer_norm_grad(op, inputs):
-    y_grad, x, scale, mean, inv_std_var = inputs
+def layer_norm_grad(op, y_grad, x, scale, mean, inv_std_var):
     assert mean == np.mean(x)
     a = y_grad * (x - mean) * inv_std_var
     b = y_grad * scale * inv_std_var
@@ -265,7 +246,7 @@ def layer_norm_grad(op, inputs):
     return x_grad, bias_grad, scale_grad
 
 
-def loss(op, inputs):
+def loss(op, x, y):
     N = op.attributes["N"]
     return np.square(x - y) / N
 
@@ -287,43 +268,40 @@ def relu(op, x):
     return np.maximum(x, 0)
 
 
-def min_(op, inputs):
-    return np.minimum(*inputs)
+def mpi_gather(op, xs):
+    dim = op.attributes["dim"]
+    return np.concatenate(xs, axis=dim)
 
 
-def mul(op, inputs):
-    return inputs[0] * inputs[1]
+def mul(op, x, y):
+    return x * y
 
 
-def reduce_all_l2(op, inputs):
+def reduce_all_l2(op, *xs):
+    return np.sqrt(sum([np.square(x) for x in xs]))
+
+
+def reduce_sum(op, x):
     if "keepdims" in op.attributes:
         keepdims = op.attributes["keepdims"]
     else:
         keepdims = 1
-    return np.sqrt(np.sum(np.square(inputs[0]), keepdims=keepdims))
+    return np.sum(x, axis=tuple(op.attributes["axes"]), keepdims=keepdims)
 
 
-def reduce_sum(op, inputs):
-    if "keepdims" in op.attributes:
-        keepdims = op.attributes["keepdims"]
-    else:
-        keepdims = 1
-    return np.sum(inputs[0], axis=tuple(op.attributes["axes"]), keepdims=keepdims)
+def relu(op, x):
+    return np.maximum(x, 0)
 
 
-def relu(op, inputs):
-    return np.maximum(inputs[0], 0)
-
-
-def reshape(op, inputs):
-    new_shape = np.copy(inputs[1])
+def reshape(op, x, new_shape):
+    new_shape = list(new_shape)
     for i in range(len(new_shape)):
         if new_shape[i] == 0:
-            new_shape[i] = inputs[0].shape[i]
-    return np.reshape(inputs[0], new_shape)
+            new_shape[i] = x.shape[i]
+    return np.reshape(x, new_shape)
 
 
-def select(op, inputs):
+def select(op, xs):
     dim = op.attributes["dim"]
     return xs[dim]
 
@@ -335,25 +313,13 @@ def slice_conc(op, x, starts, ends, axes):
     return x[slices]
 
 
-def shape(op, inputs):
-    return np.array(inputs[0].shape)
-
-
-def slice_(op, inputs):
-    x, starts, ends, axes = inputs
-    slices = {axis: slice(s, e) for (s, e, axis) in zip(starts, ends, axes)}
-    slices = tuple(slices.get(d, slice(None)) for d in range(x.ndim))
-    return x[slices]
-
-
-def softmax(op, inputs):
+def softmax(op, x):
     axis = op.attributes["axis"]
-    exp = np.exp(inputs[0])
+    exp = np.exp(x)
     return exp / np.sum(exp, axis=axis, keepdims=True)
 
 
-def softmax_grad(op, inputs):
-    dY, Y = inputs
+def softmax_grad(op, dY, Y):
     """
     axis = _handle_negative_axis(op.attributes["axis"], Y.ndim)
     N = pass
@@ -369,8 +335,7 @@ def softmax_grad(op, inputs):
     return np.zeros(dY.shape)
 
 
-def softmax_cross_entropy_loss(op, inputs):
-    x, target = inputs
+def softmax_cross_entropy_loss(op, x, target):
     weight = None
     if "ignore_index" in op.attributes:
         ignore_index = op.attributes["ignore_index"]
@@ -457,7 +422,7 @@ def softmax_cross_entropy_loss(op, inputs):
         return loss
 
 
-def softmax_cross_entropy_loss_grad(op, inputs):
+def softmax_cross_entropy_loss_grad(op, dy, log_prob, label, weight=None):
     # https://github.com/microsoft/onnxruntime/blob/master/orttraining/orttraining/training_ops/cpu/loss/softmax_cross_entropy_loss.cc
     def get_permuation_and_shape(ncd_to_ndc, tensor_shape, new_shape, permutations):
         new_shape.append(tensor_shape[0])
@@ -475,7 +440,6 @@ def softmax_cross_entropy_loss_grad(op, inputs):
                 new_shape.append(tensor_shape[i])
                 permutations.append(i)
 
-    dy, log_prob, label = inputs[:3]
     if "ignore_index" in op.attributes:
         ignore_index = op.attributes["ignore_index"]
     else:
@@ -495,8 +459,7 @@ def softmax_cross_entropy_loss_grad(op, inputs):
         tranpose_output = np.transpose(log_prob, permutations)
         log_prob = transpose_output
 
-    if len(inputs) == 4:
-        weight = inputs[3]
+    if weight is not None:
         if reduction is None:
             for i in range(n_d):
                 label_sample = label[i]
@@ -579,7 +542,7 @@ def softmax_cross_entropy_loss_grad(op, inputs):
     return d_logit
 
 
-def split(op, inputs):
+def split(op, x):
     dim = op.attributes["dim"]
     if op.op_type == "Split":
         num_splits = op.attributes["num_splits"]
@@ -591,30 +554,24 @@ def split(op, inputs):
     return tuple(y for y in np.split(x, num_splits, axis=dim))
 
 
+def sub(op, x, y):
+    return x - y
+
+
+def sum_(op, *xs):
+    return sum(xs)
+
+
+def tanh(op, x):
+    return np.tanh(x)
+
+
 def transpose(op, x):
     perm = op.attributes["perm"]
     return np.transpose(x, perm)
 
 
-def sub(op, inputs):
-    return inputs[0] - inputs[1]
-
-
-def sum_(op, inputs):
-    return sum(inputs)
-
-
-def tanh(op, inputs):
-    return np.tanh(inputs[0])
-
-
-def transpose(op, inputs):
-    perm = op.attributes["perm"]
-    return np.transpose(inputs[0], perm)
-
-
-def unsqueeze(op, inputs):
-    x = inputs[0]
+def unsqueeze(op, x):
     axes = op.attributes["axes"]
     # TODO: Does this need to be in reverse order?
     for i in axes:
@@ -625,72 +582,70 @@ def unsqueeze(op, inputs):
 NumPyRegister = {
     ("Add", (np.ndarray, np.ndarray)): add,
     ("Allreduce", (tuple,)): allreduce,
+    (
+        "BiasFastGeluGrad_dX",
+        (np.ndarray, np.ndarray, np.ndarray),
+    ): bias_fast_gelu_grad_dx,
     ("Broadcast", (np.ndarray,)): broadcast,
     ("Cast", (np.ndarray,)): cast,
     ("Concat", (tuple,)): concat,
     ("Concat", (np.ndarray, np.ndarray)): concat2,
-    ("Gather", (tuple,)): gather,
+    ("Div", (np.ndarray, np.ndarray)): div,
+    ("Dropout", (np.ndarray, np.ndarray, bool)): dropout,
+    ("DropoutGrad", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): dropout_grad,
+    ("Expand", (np.ndarray, np.ndarray)): expand,
+    ("Gather", (np.ndarray, np.ndarray)): gather,
+    ("GatherND", (np.ndarray, np.ndarray)): gather_nd,
+    ("GatherNDGrad", (np.ndarray, np.ndarray, np.ndarray)): gather_nd_grad,
+    ("GatherGrad", (np.ndarray, np.ndarray, np.ndarray)): gather_grad,
+    ("Gemm", (np.ndarray, np.ndarray, np.ndarray)): gemm,
+    ("FastGelu", (np.ndarray, np.ndarray)): fast_gelu,
+    ("Identity", (np.ndarray,)): identity,
+    ("LayerNormalization", (np.ndarray, np.ndarray, np.ndarray)): layer_norm,
+    (
+        "LayerNormalizationGrad",
+        (np.ndarray, np.ndarray, np.ndarray, np.float64, np.float64),
+    ): layer_norm_grad,
+    (
+        "LayerNormalizationGrad",
+        (np.ndarray, np.ndarray, np.ndarray, np.float32, np.float32),
+    ): layer_norm_grad,
     ("Loss", (np.ndarray, np.ndarray)): loss,
     ("LossGrad", (np.ndarray, np.ndarray)): loss_grad,
     ("MatMul", (np.ndarray, np.ndarray)): matmul,
     ("MatMulGrad", (np.ndarray, np.ndarray, np.ndarray)): matmul_grad,
     ("Min", (np.ndarray, np.ndarray)): lambda op, x, y: np.minimum(x, y),
+    ("MPIGather", (tuple,)): mpi_gather,
+    ("Mul", (np.ndarray, np.ndarray)): mul,
+    ("ReduceAllL2", tuple(np.ndarray for i in range(60))): reduce_all_l2,
+    ("ReduceAllL2", tuple(np.ndarray for i in range(61))): reduce_all_l2,
+    ("ReduceAllL2", tuple(np.ndarray for i in range(62))): reduce_all_l2,
+    ("ReduceAllL2", tuple(np.ndarray for i in range(63))): reduce_all_l2,
+    ("ReduceAllL2", tuple(np.ndarray for i in range(64))): reduce_all_l2,
+    ("ReduceSum", (np.ndarray,)): reduce_sum,
     ("Relu", (np.ndarray,)): relu,
+    ("Reshape", (np.ndarray, np.ndarray)): reshape,
     ("Scatter", (np.ndarray,)): split,
     ("Select", (tuple,)): select,
     ("Send", (np.ndarray,)): identity,
-    ("Split", (np.ndarray,)): split,
     ("Shape", (np.ndarray,)): lambda op, x: np.array(x.shape, dtype=np.int64),
     ("Slice", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): slice_conc,
+    ("Split", (np.ndarray,)): split,
+    ("Softmax", (np.ndarray,)): softmax,
+    ("SoftmaxCrossEntropyLoss", (np.ndarray, np.ndarray)): softmax_cross_entropy_loss,
+    (
+        "SoftmaxCrossEntropyLossGrad",
+        (np.ndarray, np.ndarray, np.ndarray),
+    ): softmax_cross_entropy_loss_grad,
+    (
+        "SoftmaxCrossEntropyLossGrad",
+        (np.ndarray, np.ndarray, np.ndarray, np.ndarray),
+    ): softmax_cross_entropy_loss_grad,
+    ("SoftmaxGrad", (np.ndarray, np.ndarray)): softmax_grad,
+    ("Sub", (np.ndarray, np.ndarray)): sub,
+    ("Sum", (np.ndarray, np.ndarray)): sum_,
+    ("Sum", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): sum_,
+    ("Tanh", (np.ndarray,)): tanh,
     ("Transpose", (np.ndarray,)): transpose,
+    ("Unsqueeze", (np.ndarray,)): unsqueeze,
 }
-
-"""
-NumPyRegister = {
-    "Add": add,
-    "Allreduce": allreduce,
-    "BiasFastGeluGrad_dX": bias_fast_gelu_grad_dx,
-    "Broadcast": broadcast,
-    "Cast": cast,
-    "Concat": concat,
-    "Div": div,
-    "Dropout": dropout,
-    "DropoutGrad": dropout_grad,
-    "Expand": expand,
-    "FastGelu": fast_gelu,
-    "Gather": gather,
-    "GatherGrad": gather_grad,
-    "GatherND": gather_nd,
-    "GatherNDGrad": gather_nd_grad,
-    "Gemm": gemm,
-    "Identity": identity,
-    "LayerNormalization": layer_norm,
-    "LayerNormalizationGrad": layer_norm_grad,
-    "Loss": loss,
-    "LossGrad": loss_grad,
-    "MatMul": matmul,
-    "MatMulGrad": matmul_grad,
-    "Min": min_,
-    "MPIGather": mpi_gather,
-    "Mul": mul,
-    "ReduceAllL2": reduce_all_l2,
-    "ReduceSum": reduce_sum,
-    "Relu": relu,
-    "Reshape": reshape,
-    "Scatter": split,
-    "Select": select,
-    "Send": identity,
-    "Shape": shape,
-    "Slice": slice_,
-    "Softmax": softmax,
-    "SoftmaxGrad": softmax_grad,
-    "SoftmaxCrossEntropyLoss": softmax_cross_entropy_loss,
-    "SoftmaxCrossEntropyLossGrad": softmax_cross_entropy_loss_grad,
-    "Split": split,
-    "Sub": sub,
-    "Sum": sum_,
-    "Tanh": tanh,
-    "Transpose": transpose,
-    "Unsqueeze": unsqueeze,
-}
-"""

@@ -20,7 +20,7 @@ def test_parse_tensor_from_file():
                 / "examples"
                 / "bert_training_data"
                 / f"sample{i}"
-                / f"sample_{i}_{j}.data"
+                / f"feature{j}.pb"
             )
             tensor = parse_tensor_from_file(tensor_proto_path)
             print(tensor)

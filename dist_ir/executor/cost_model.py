@@ -32,7 +32,7 @@ class CostModel:
             ("Broadcast", (Tensor,)): self._broadcast_cost_fn,
             ("Cast", (Tensor,)): self._cast_cost_fn,
             ("Concat", (TupleType,)): self._concat_cost_fn,
-            ("Gather", (TupleType,)): self._gather_cost_fn,
+            ("MPIGather", (TupleType,)): self._gather_cost_fn,
             ("Loss", (Tensor, Tensor)): self._loss_cost_fn,
             ("LossGrad", (Tensor, Tensor)): self._loss_grad_cost_fn,
             ("MatMul", (Tensor, Tensor)): self._matmul_cost_fn,

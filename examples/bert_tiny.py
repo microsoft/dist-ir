@@ -55,7 +55,7 @@ def main():
     cpprint(function)
     """
     ex = SequentialExecutor("numpy")
-    outputs = ex.compute(function, input_data)
+    outputs = ex.compute(function, [input_data[i] for i in function.inputs])
 
 
 def get_missing_op_types():

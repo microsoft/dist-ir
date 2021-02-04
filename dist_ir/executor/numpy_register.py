@@ -5,6 +5,13 @@ def _handle_negative_axis(axis, tensor_rank):
     return axis + tensor_rank if axis < 0 else axis
 
 
+def _size_helper(shape, start, end):
+    size = shape[start]
+    for i in range(start + 1, end):
+        size *= shape[i]
+    return size
+
+
 def add(op, x, y):
     return np.add(x, y)
 
@@ -31,6 +38,7 @@ def bias_fast_gelu_grad_dx(op, dy, x, b):
     dx = dy * (
         0.5 * (tanh_result + sech_sqr_result * (kAlpha * x + kBeta + x_cube) + 1)
     )
+    assert dx.shape == input_shape
     return dx
 
 
@@ -93,18 +101,24 @@ def gather(op, x, y):
     return np.take(x, y.astype(np.int64), axis=axis)
 
 
-"""
-inline int64_t HandleNegativeAxis(int64_t axis, int64_t tensor_rank) {
-  ORT_ENFORCE(axis >= -tensor_rank && axis <= tensor_rank - 1, "axis ", axis,
-              " is not in valid range [-", tensor_rank, ",", tensor_rank - 1, "]");
-  // Handle negative axis
-  return axis < 0 ? axis + tensor_rank : axis;
-}
-"""
-
-
 def gather_grad(op, shape, indices, grad):
-    return np.zeros(shape)
+    # https://github.com/microsoft/onnxruntime/blob/master/orttraining/orttraining/test/training_ops/cpu/tensor/gather_grad_op_test.cc#L18
+    axis = _handle_negative_axis(op.attributes["axis"], len(shape))
+    num_batches = _size_helper(shape, 0, axis)
+    gather_dimension_size = shape[axis]
+    num_gathered_per_index = _size_helper(shape, axis + 1, len(shape))
+    output = np.zeros(shape)
+    for batch_idx in range(num_batches):
+        output_batch_offset = batch_idx * gather_dimension_size * num_gathered_per_index
+        grad_batch_offset = batch_idx * len(indices) * num_gathered_per_index
+        for i in range(len(indices)):
+            grad_row_offset = grad_batch_offset + i * num_gathered_per_index
+            output_row_offset = (
+                output_batch_offset + indices[i] * num_gathered_per_index
+            )
+            for j in range(num_gathered_per_index):
+                output[output_row_offset + j] += grad[grad_row_offset + j]
+    return output
     """
     def _size_from_dimension(shape, start, end):
         size = shape[start]
@@ -113,7 +127,6 @@ def gather_grad(op, shape, indices, grad):
         return size
 
     output = np.zeros(shape)
-    axis = _handle_negative_axis(op.attributes["axis"], len(shape))
     block_size = _size_from_dimension(shape, axis + 1, len(shape))
     N = indices.size
     input_block_size = _size_from_dimension(shape, axis, len(shape))
@@ -278,7 +291,7 @@ def mul(op, x, y):
 
 
 def reduce_all_l2(op, *xs):
-    return np.sqrt(sum([np.square(x) for x in xs]))
+    return np.sqrt(sum([np.linalg.norm(x) for x in xs]))
 
 
 def reduce_sum(op, x):
@@ -320,19 +333,9 @@ def softmax(op, x):
 
 
 def softmax_grad(op, dY, Y):
-    """
-    axis = _handle_negative_axis(op.attributes["axis"], Y.ndim)
-    N = pass
-    D = pass
-
-    scale = [0.0] * N
-    sum_multiplier = [1.0] * D
-    n = int(N)
-    d = int(D)
-    nd = int(N * D)
-    dX = np.copy(dY)
-    """
-    return np.zeros(dY.shape)
+    # https://github.com/tensorflow/tensorflow/blob/dec8e0b11f4f87693b67e125e67dfbc68d26c205/tensorflow/python/ops/nn_grad.py#L285
+    sum_channels = np.sum(dY * Y, -1, keepdims=True)
+    return (dY - sum_channels) * Y
 
 
 def softmax_cross_entropy_loss(op, x, target):

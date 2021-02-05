@@ -86,7 +86,7 @@ class Function:
         return value in self.outputs
 
     def get_subfunction(
-        self, ops: List[Op], deepcopy: bool = False, name: Optional[str] = None
+        self, ops: List[Op], deepcopy: bool = False, name: Optional[str] = "bar"
     ) -> Function:
         """Returns a Function comprised of the specified subset of ops."""
         assert not deepcopy  # TODO We shouldn't need this functionality anymore

@@ -58,15 +58,15 @@ def _parse_attribute(attr):
     elif attr_type == 11:
         raise NotImplementedError("Sparse tensor attribute")
     elif attr_type == 6:
-        value = list(attr.floats)
+        value = tuple(attr.floats)
         for v in value:
             assert isinstance(v, float)
     elif attr_type == 7:
-        value = list(attr.ints)
+        value = tuple(attr.ints)
         for v in value:
             assert isinstance(v, int)
     elif attr_type == 8:
-        value = list(attr.strings)
+        value = tuple(attr.strings)
         for v in value:
             assert isinstance(v, str)
     elif attr_type == 9:
@@ -108,7 +108,7 @@ def parse_tensor_from_file(path):
     return _parse_tensor_proto(tensor_proto)
 
 
-def import_from_onnx(onnx_model, parse_input_data=True):
+def import_from_onnx(onnx_model, default_device=None, parse_input_data=True):
     # TODO: Remove prints?
     # TODO: Support types beyond Tensor
     onnx_model = onnx.load(onnx_model)
@@ -126,7 +126,7 @@ def import_from_onnx(onnx_model, parse_input_data=True):
         assert hasattr(value, "type")
         assert hasattr(value.type, "tensor_type")
         dtype = _get_dist_ir_dtype_from_onnx_dtype(value.type.tensor_type.elem_type)
-        typ = Tensor(dtype=dtype)
+        typ = Tensor(dtype=dtype, device=default_device)
         v = dist_ir_function.add_input_value(value.name, typ)
         inputs[value.name] = v
 
@@ -136,7 +136,9 @@ def import_from_onnx(onnx_model, parse_input_data=True):
             return
         assert "TensorProto" in str(type(value))
         dist_ir_dtype = _get_dist_ir_dtype_from_onnx_dtype(value.data_type)
-        typ = Tensor(dtype=dist_ir_dtype, shape=tuple(value.dims))
+        typ = Tensor(
+            dtype=dist_ir_dtype, shape=tuple(value.dims), device=default_device
+        )
         v = dist_ir_function.add_input_value(value.name, typ)
         inputs[value.name] = v
         if parse_input_data:

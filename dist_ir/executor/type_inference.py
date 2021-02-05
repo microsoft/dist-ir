@@ -83,6 +83,11 @@ def _concat_prop_fn(op, x, y):
     return Tensor(dtype=x.dtype, shape=output_shape, device=x.device)
 
 
+def _dropout_prop_fn(op, x, y, z):
+    # TODO
+    return x
+
+
 def _elementwise_tensor_op_prop_fn(op, x, y):
     if not (
         isinstance(x, Tensor)
@@ -95,26 +100,24 @@ def _elementwise_tensor_op_prop_fn(op, x, y):
     return x
 
 
-def _gather_prop_fn(op, x):
-    if not (
-        isinstance(x, TupleType)
-        and all(isinstance(t, Tensor) for t in x.types)
-        and len(set(t.shape for t in x.types)) == 1
-        and len(set(t.dtype for t in x.types)) == 1
-        and len(x.types) > 0
-    ):
+def _expand_prop_fn(op, x, y):
+    # TODO
+    return Tensor(dtype=x.dtype, device=x.device)
+
+
+def _gather_prop_fn(op, x, y):
+    # TODO
+    return Tensor(dtype=x.dtype, device=x.device)
+
+
+def _identity_prop_fn(op, x):
+    if not isinstance(x, Tensor):
         _raise_type_error(op, x)
-    dim = op.attributes["dim"]
-    device = op.attributes["device"]
-    output_shape = list(x.types[0].shape)
-    for i in range(1, len(x.types)):
-        for j in range(len(x.types[i].shape)):
-            if j == dim:
-                output_shape[j] += x.types[i].shape[j]
-            elif x.types[i].shape[j] != x.types[0].shape[j]:
-                _raise_type_error(op, x)
-    output_shape = tuple(output_shape)
-    return Tensor(dtype=x.types[0].dtype, shape=output_shape, device=device)
+    return x
+
+
+def _layer_norm_prop_fn(op, x, y, z):
+    return Tensor(dtype=x.dtype, device=x.device)
 
 
 def _matmul_prop_fn(op, x, y):
@@ -143,6 +146,45 @@ def _matmul_grad_prop_fn(op, x, y, z):
         _raise_type_error(op, x, y, z)
 
     return (x, y)
+
+
+def _min_prop_fn(op, x, y):
+    if not (
+        isinstance(x, Tensor)
+        and isinstance(y, Tensor)
+        and x.dtype == y.dtype
+        and x.device == y.device
+    ):
+        _raise_type_error(op, x, y)
+    return x
+
+
+def _mpi_gather_prop_fn(op, x):
+    if not (
+        isinstance(x, TupleType)
+        and all(isinstance(t, Tensor) for t in x.types)
+        and len(set(t.shape for t in x.types)) == 1
+        and len(set(t.dtype for t in x.types)) == 1
+        and len(x.types) > 0
+    ):
+        _raise_type_error(op, x)
+    dim = op.attributes["dim"]
+    device = op.attributes["device"]
+    output_shape = list(x.types[0].shape)
+    for i in range(1, len(x.types)):
+        for j in range(len(x.types[i].shape)):
+            if j == dim:
+                output_shape[j] += x.types[i].shape[j]
+            elif x.types[i].shape[j] != x.types[0].shape[j]:
+                _raise_type_error(op, x)
+    output_shape = tuple(output_shape)
+    return Tensor(dtype=x.types[0].dtype, shape=output_shape, device=device)
+
+
+def _reshape_prop_fn(op, x, y):
+    if not (isinstance(x, Tensor) and isinstance(y, Tensor) and x.device == y.device):
+        _raise_type_error(op, x, y)
+    return Tensor(device=x.device)
 
 
 def _scatter_prop_fn(op, x):
@@ -186,6 +228,12 @@ def _send_prop_fn(op, x):
     return Tensor(dtype=x.dtype, shape=x.shape, device=device)
 
 
+def _shape_prop_fn(op, x):
+    if not isinstance(x, Tensor):
+        _raise_type_error(op, x)
+    return Tensor(dtype=Int64(), shape=None, device=x.device)
+
+
 def _slice_prop_fn(op, x, starts, ends, axes):
     # We don't know the shape of the output, so:
     return Tensor(dtype=x.dtype, shape=None, device=x.device)
@@ -222,15 +270,22 @@ TypePropRegister = {
     ("Broadcast", (Tensor,)): _broadcast_prop_fn,
     ("Cast", (Tensor,)): _cast_prop_fn,
     ("Concat", (TupleType,)): _concat_prop_fn,
-    ("MPIGather", (TupleType,)): _gather_prop_fn,
+    ("Dropout", (Tensor, Tensor, type(Bool()))): _dropout_prop_fn,
+    ("Expand", (Tensor, Tensor)): _expand_prop_fn,
+    ("Gather", (Tensor, Tensor)): _gather_prop_fn,
+    ("Identity", (Tensor,)): _identity_prop_fn,
+    ("MPIGather", (TupleType,)): _mpi_gather_prop_fn,
     # ("Loss", (Tensor, Tensor)): TODO
     # ("LossGrad", (Tensor, Tensor)): TODO
+    ("LayerNormalization", (Tensor, Tensor, Tensor)): _layer_norm_prop_fn,
     ("MatMul", (Tensor, Tensor)): _matmul_prop_fn,
     ("MatMulGrad", (Tensor, Tensor, Tensor)): _matmul_grad_prop_fn,
-    # ("Min", (Tensor, Tensor)): TODO
+    ("Min", (Tensor, Tensor)): _min_prop_fn,
+    ("Reshape", (Tensor, Tensor)): _reshape_prop_fn,
     ("Scatter", (Tensor,)): _scatter_prop_fn,
     ("Select", (Tensor,)): _select_prop_fn,
     ("Send", (Tensor,)): _send_prop_fn,
+    ("Shape", (Tensor,)): _shape_prop_fn,
     ("Split", (Tensor,)): _split_prop_fn,
     # ("Shape", (Tensor,)): TODO
     ("Slice", (Tensor, Tensor, Tensor, Tensor)): _slice_prop_fn,

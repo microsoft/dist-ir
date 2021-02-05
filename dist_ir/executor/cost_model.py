@@ -32,6 +32,7 @@ class CostModel:
             ("Broadcast", (Tensor,)): self._broadcast_cost_fn,
             ("Cast", (Tensor,)): self._cast_cost_fn,
             ("Concat", (TupleType,)): self._concat_cost_fn,
+            ("Identity", (Tensor,)): self._identity_cost_fn,
             ("MPIGather", (TupleType,)): self._gather_cost_fn,
             ("Loss", (Tensor, Tensor)): self._loss_cost_fn,
             ("LossGrad", (Tensor, Tensor)): self._loss_grad_cost_fn,
@@ -86,6 +87,10 @@ class CostModel:
         # TODO: Compute cost properly
         devices = xs.get_all_devices()
         return {device: 0 for device in devices}
+
+    def _identity_cost_fn(self, op, x):
+        # TODO: Compute cost properly
+        return {x.device: 0}
 
     def _loss_cost_fn(self, op, x, y):
         # TODO: Compute cost properly

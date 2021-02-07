@@ -124,12 +124,21 @@ def shard_transform(
                         inputs=[pmap_output_values[i]],
                         output_names=[f"{output_value.name}s"],
                     )
-                elif reduction_op_type == "Gather":
+                elif reduction_op_type == "MPIReduce":
+                    device = reduction_params[output_value]["device"]
+                    pmap_output = transformed_function.add_op(
+                        "MPIReduce",
+                        name=f"MPIReduce/{output_value.name}",
+                        attributes={"device": device},
+                        inputs=[pmap_output_values[i]],
+                        output_names=[f"{output_value.name}s"],
+                    )
+                elif reduction_op_type == "MPIGather":
                     dim = reduction_params[output_value]["dim"]
                     device = reduction_params[output_value]["device"]
                     pmap_output = transformed_function.add_op(
                         "MPIGather",
-                        name=f"Gather/{output_value.name}",
+                        name=f"MPIGather/{output_value.name}",
                         inputs=[pmap_output_values[i]],
                         attributes={"dim": dim, "device": device},
                         output_names=[f"{output_value.name}"],

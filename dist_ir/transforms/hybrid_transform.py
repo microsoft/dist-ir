@@ -15,7 +15,6 @@ def hybrid_transform(function, dp_config, hp_config, pp_config=None):
         dp_config["devices"],
         dp_config["verify_fn"],
     )
-    cpprint(function)
     # Get a mutable representation of the function.
     function = FunctionMaker(
         function.name, list(function.ops), list(function.inputs), list(function.outputs)
@@ -32,7 +31,6 @@ def hybrid_transform(function, dp_config, hp_config, pp_config=None):
                 hp_config["devices"],
                 hp_config["verify_fn"],
             )
-            cpprint(subfunction)
             # TODO: Is this necessary here?
             function.ops[i] = Op(
                 op_type="Pmap",

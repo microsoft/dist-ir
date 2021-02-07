@@ -33,14 +33,17 @@ class CostModel:
             ("Cast", (Tensor,)): self._cast_cost_fn,
             ("Concat", (TupleType,)): self._concat_cost_fn,
             ("Identity", (Tensor,)): self._identity_cost_fn,
-            ("MPIGather", (TupleType,)): self._gather_cost_fn,
+            ("Join", (Tensor, Tensor)): self._join_cost_fn,
+            ("Join", (Tensor, Tensor, Tensor, Tensor)): self._join_cost_fn,
+            ("MPIGather", (TupleType,)): self._mpi_gather_cost_fn,
+            ("MPIReduce", (TupleType,)): self._mpi_reduce_cost_fn,
             ("Loss", (Tensor, Tensor)): self._loss_cost_fn,
             ("LossGrad", (Tensor, Tensor)): self._loss_grad_cost_fn,
             ("MatMul", (Tensor, Tensor)): self._matmul_cost_fn,
             ("MatMulGrad", (Tensor, Tensor, Tensor)): self._matmul_grad_cost_fn,
             ("Min", (Tensor, Tensor)): self._min_cost_fn,
             ("Scatter", (Tensor,)): self._scatter_cost_fn,
-            ("Select", (Tensor,)): notImplemented,
+            ("Select", (TupleType,)): self._select_cost_fn,
             ("Send", (Tensor,)): self._send_cost_fn,
             ("Split", (Tensor,)): notImplemented,
             ("Shape", (Tensor,)): self._shape_cost_fn,
@@ -83,14 +86,24 @@ class CostModel:
         devices = xs.get_all_devices()
         return {device: 0 for device in devices}
 
-    def _gather_cost_fn(self, op, xs):
+    def _mpi_gather_cost_fn(self, op, xs):
         # TODO: Compute cost properly
+        devices = xs.get_all_devices()
+        return {device: 0 for device in devices}
+
+    def _mpi_reduce_cost_fn(self, op, xs):
         devices = xs.get_all_devices()
         return {device: 0 for device in devices}
 
     def _identity_cost_fn(self, op, x):
         # TODO: Compute cost properly
         return {x.device: 0}
+
+    def _join_cost_fn(self, op, *xs):
+        costs = {}
+        for x in xs:
+            costs[x.device] = 0
+        return costs
 
     def _loss_cost_fn(self, op, x, y):
         # TODO: Compute cost properly
@@ -126,6 +139,12 @@ class CostModel:
     def _scatter_cost_fn(self, op, x):
         cost = x.size()
         return {d: cost for d in op.attributes["devices"]}
+
+    def _select_cost_fn(self, op, xs):
+        costs = {}
+        for typ in xs.types:
+            costs[typ.device] = 0
+        return costs
 
     def _send_cost_fn(self, op, x):
         costs = {}

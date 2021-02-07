@@ -239,6 +239,10 @@ def gemm(op, a, b, c):
     return np.matmul(alpha * a, beta * b) + c
 
 
+def join(op, *xs):
+    return tuple(xs)
+
+
 def layer_norm(op, x, scale, beta):
     eps = 1e-5
     mean = np.mean(x)
@@ -284,6 +288,10 @@ def relu(op, x):
 def mpi_gather(op, xs):
     dim = op.attributes["dim"]
     return np.concatenate(xs, axis=dim)
+
+
+def mpi_reduce(op, xs):
+    return np.sum(xs)
 
 
 def mul(op, x, y):
@@ -604,6 +612,8 @@ NumPyRegister = {
     ("Gemm", (np.ndarray, np.ndarray, np.ndarray)): gemm,
     ("FastGelu", (np.ndarray, np.ndarray)): fast_gelu,
     ("Identity", (np.ndarray,)): identity,
+    ("Join", (np.ndarray, np.ndarray)): join,
+    ("Join", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): join,
     ("LayerNormalization", (np.ndarray, np.ndarray, np.ndarray)): layer_norm,
     (
         "LayerNormalizationGrad",
@@ -619,6 +629,7 @@ NumPyRegister = {
     ("MatMulGrad", (np.ndarray, np.ndarray, np.ndarray)): matmul_grad,
     ("Min", (np.ndarray, np.ndarray)): lambda op, x, y: np.minimum(x, y),
     ("MPIGather", (tuple,)): mpi_gather,
+    ("MPIReduce", (tuple,)): mpi_reduce,
     ("Mul", (np.ndarray, np.ndarray)): mul,
     ("ReduceAllL2", tuple(np.ndarray for i in range(60))): reduce_all_l2,
     ("ReduceAllL2", tuple(np.ndarray for i in range(61))): reduce_all_l2,

@@ -1,3 +1,4 @@
+from .hybrid_transform_unrolled import hybrid_transform_unrolled
 from .hybrid_transform import hybrid_transform
 from .shard_transform import shard_transform
 from .pipeline_parallel_transform import PipelineParallelTransform

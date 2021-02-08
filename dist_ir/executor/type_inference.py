@@ -127,6 +127,28 @@ def _layer_norm_prop_fn(op, x, y, z):
     return Tensor(dtype=x.dtype, device=x.device)
 
 
+def _loss_prop_fn(op, x, y):
+    if not (
+        isinstance(x, Tensor)
+        and isinstance(y, Tensor)
+        and x.shape == y.shape
+        and x.device == y.device
+    ):
+        _raise_type_error(op, x, y)
+    return Tensor(dtype=Float(), shape=(1,), device=x.device)
+
+
+def _loss_grad_prop_fn(op, x, y):
+    if not (
+        isinstance(x, Tensor)
+        and isinstance(y, Tensor)
+        and x.shape == y.shape
+        and x.device == y.device
+    ):
+        _raise_type_error(op, x, y)
+    return x
+
+
 def _matmul_prop_fn(op, x, y):
     if not (
         isinstance(x, Tensor)
@@ -203,6 +225,12 @@ def _mpi_reduce_prop_fn(op, x):
         _raise_type_error(op, x)
     device = op.attributes["device"]
     return Tensor(dtype=x.types[0].dtype, shape=x.types[0].shape, device=device)
+
+
+def _relu_prop_fn(op, x):
+    if not isinstance(x, Tensor):
+        _raise_type_error(x)
+    return x
 
 
 def _reshape_prop_fn(op, x, y):
@@ -317,12 +345,13 @@ TypePropRegister = {
     ): _join_prop_fn,
     ("MPIGather", (TupleType,)): _mpi_gather_prop_fn,
     ("MPIReduce", (TupleType,)): _mpi_reduce_prop_fn,
-    # ("Loss", (Tensor, Tensor)): TODO
-    # ("LossGrad", (Tensor, Tensor)): TODO
+    ("Loss", (Tensor, Tensor)): _loss_prop_fn,
+    ("LossGrad", (Tensor, Tensor)): _loss_grad_prop_fn,
     ("LayerNormalization", (Tensor, Tensor, Tensor)): _layer_norm_prop_fn,
     ("MatMul", (Tensor, Tensor)): _matmul_prop_fn,
     ("MatMulGrad", (Tensor, Tensor, Tensor)): _matmul_grad_prop_fn,
     ("Min", (Tensor, Tensor)): _min_prop_fn,
+    ("Relu", (Tensor,)): _relu_prop_fn,
     ("Reshape", (Tensor, Tensor)): _reshape_prop_fn,
     ("Scatter", (Tensor,)): _scatter_prop_fn,
     ("Select", (TupleType,)): _select_prop_fn,
@@ -346,7 +375,6 @@ def _create_semantics(type_prop_register):
         def semantics(op: Op, state: AbstractState):
             # Find the op's inputs in state's environment
             inputs = tuple(state.env[v] for v in op.inputs)
-
             # Run the type propagation function
             outputs = type_prop_fn(op, *inputs)
 

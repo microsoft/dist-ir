@@ -12,6 +12,7 @@ def _reduce_output(
     orig_output,
     transformed_outputs,
     reduction_params,
+    device,
     parallelism_level,
 ):
     transformed_output = transformed_function.add_op(
@@ -20,7 +21,6 @@ def _reduce_output(
         output_names=[f"{orig_output.name}s_{parallelism_level}"],
     )
     if reduction_params["op_type"] == "MPIReduce":
-        device = reduction_params["device"]
         reduced_output = transformed_function.add_op(
             "MPIReduce",
             attributes={"device": device},
@@ -28,7 +28,6 @@ def _reduce_output(
             output_names=[f"{orig_output.name}_{parallelism_level}"],
         )
     elif reduction_params["op_type"] == "MPIGather":
-        device = reduction_params["device"]
         dim = reduction_params["dim"]
         reduced_output = transformed_function.add_op(
             "MPIGather",
@@ -144,6 +143,7 @@ def hybrid_transform_unrolled(function, dp_config, hp_config, pp_config=None):
                 hp_output,
                 hp_outputs_to_reduce[hp_output],
                 hp_config["reduction_params"][hp_output],
+                dp_config["devices"][i],
                 "hp",
             )
             dp_outputs_to_reduce[hp_output].append(reduced_output)
@@ -153,6 +153,7 @@ def hybrid_transform_unrolled(function, dp_config, hp_config, pp_config=None):
             dp_output,
             dp_outputs_to_reduce[dp_output],
             dp_config["reduction_params"][dp_output],
+            dp_config["reduction_params"][dp_output]["device"],
             "dp",
         )
     return transformed_function.finalize()

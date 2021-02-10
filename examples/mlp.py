@@ -161,8 +161,9 @@ def main(args):
 
     device_tree = get_device_tree(args, devices)
     transformed_function = parallel_transform_3d(
-        function, device_tree, args.num_microbatches
+        args, function, device_tree, args.num_microbatches
     )
+    # cpprint(transformed_function)
     transformed_function = infer_types(
         transformed_function, transformed_function.inputs
     )

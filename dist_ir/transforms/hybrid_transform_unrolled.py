@@ -38,39 +38,45 @@ def _reduce_output(
     return reduced_output
 
 
+def _partition_input_dp(inp, transformed_function, dp_config):
+    v = transformed_function.add_input_value(inp.name, inp.type)
+    dp_vs = []
+    if inp in dp_config["input_dims"]:
+        distributed_v = transformed_function.add_op(
+            "Scatter",
+            inputs=[v],
+            attributes={
+                "dim": dp_config["input_dims"][inp],
+                "devices": dp_config["devices"],
+            },
+            output_names=[f"{v.name}is_dp"],
+        )
+    else:
+        distributed_v = transformed_function.add_op(
+            "Broadcast",
+            name=f"Broadcast/{inp.name}",
+            inputs=[v],
+            attributes={"devices": dp_config["devices"]},
+            output_names=[f"{v.name}is_dp"],
+        )
+    dp_vs = [
+        transformed_function.add_op(
+            "Select",
+            inputs=[distributed_v],
+            attributes={"dim": i},
+            output_names=[f"{v.name}_dp_{device.device_id}"],
+        )
+        for i, device in enumerate(dp_config["devices"])
+    ]
+    return dp_vs
+
+
 def hybrid_transform_unrolled(function, dp_config, hp_config, pp_config=None):
     transformed_function = FunctionMaker(name=function.name)
     input_map = {}
     for inp in function.inputs:
         v = transformed_function.add_input_value(inp.name, inp.type)
-        dp_vs = []
-        if inp in dp_config["input_dims"]:
-            distributed_v = transformed_function.add_op(
-                "Scatter",
-                inputs=[v],
-                attributes={
-                    "dim": dp_config["input_dims"][inp],
-                    "devices": dp_config["devices"],
-                },
-                output_names=[f"{v.name}is_dp"],
-            )
-        else:
-            distributed_v = transformed_function.add_op(
-                "Broadcast",
-                name=f"Broadcast/{inp.name}",
-                inputs=[v],
-                attributes={"devices": dp_config["devices"]},
-                output_names=[f"{v.name}is_dp"],
-            )
-        dp_vs = [
-            transformed_function.add_op(
-                "Select",
-                inputs=[distributed_v],
-                attributes={"dim": i},
-                output_names=[f"{v.name}_dp_{device.device_id}"],
-            )
-            for i, device in enumerate(dp_config["devices"])
-        ]
+        dp_vs = _partition_input_dp(inp, transformed_function, dp_config)
         hp_vs = []
         for i, dp_v in enumerate(dp_vs):
             if inp in hp_config["input_dims"]:

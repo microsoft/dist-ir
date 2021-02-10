@@ -278,11 +278,18 @@ def matmul(op, x, y):
 
 
 def matmul_grad(op, x, y, dz):
-    return (np.dot(dz, y.T), np.dot(x.T, dz))
+    # return (np.dot(dz, y.T), np.dot(x.T, dz))
+    return (np.dot(x, dz), np.dot(y, dz))
 
 
 def relu(op, x):
     return np.maximum(x, 0)
+
+
+def relu_grad(op, x, dy):
+    dx = np.zeros(x.shape)
+    dx[x > 0] = 1
+    return np.dot(dx.T, dy)
 
 
 def mpi_gather(op, xs):
@@ -638,6 +645,7 @@ NumPyRegister = {
     ("ReduceAllL2", tuple(np.ndarray for i in range(64))): reduce_all_l2,
     ("ReduceSum", (np.ndarray,)): reduce_sum,
     ("Relu", (np.ndarray,)): relu,
+    ("ReluGrad", (np.ndarray, np.ndarray)): relu_grad,
     ("Reshape", (np.ndarray, np.ndarray)): reshape,
     ("Scatter", (np.ndarray,)): split,
     ("Select", (tuple,)): select,

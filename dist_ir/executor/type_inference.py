@@ -233,6 +233,18 @@ def _relu_prop_fn(op, x):
     return x
 
 
+def _relu_grad_prop_fn(op, x, y):
+    if not (
+        isinstance(x, Tensor)
+        and isinstance(y, Tensor)
+        and x.dtype == y.dtype
+        and x.device == y.device
+        and x.shape[0] == y.shape[0]
+    ):
+        _raise_type_error(op, x, y)
+    return Tensor(dtype=x.dtype, shape=(x.shape[1], y.shape[1]), device=x.device)
+
+
 def _reshape_prop_fn(op, x, y):
     if not (isinstance(x, Tensor) and isinstance(y, Tensor) and x.device == y.device):
         _raise_type_error(op, x, y)
@@ -248,6 +260,7 @@ def _scatter_prop_fn(op, x):
     assert len(devices) == len(set(devices))
     dim = op.attributes["dim"]
     # TODO: Should we add another function to raise an attribute error?
+    assert dim >= 0 and dim < len(x.shape)
     assert x.shape[dim] % len(devices) == 0
     output_shape = list(x.shape)
     output_shape[dim] //= len(devices)
@@ -352,6 +365,7 @@ TypePropRegister = {
     ("MatMulGrad", (Tensor, Tensor, Tensor)): _matmul_grad_prop_fn,
     ("Min", (Tensor, Tensor)): _min_prop_fn,
     ("Relu", (Tensor,)): _relu_prop_fn,
+    ("ReluGrad", (Tensor, Tensor)): _relu_grad_prop_fn,
     ("Reshape", (Tensor, Tensor)): _reshape_prop_fn,
     ("Scatter", (Tensor,)): _scatter_prop_fn,
     ("Select", (TupleType,)): _select_prop_fn,

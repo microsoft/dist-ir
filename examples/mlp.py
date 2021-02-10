@@ -11,7 +11,11 @@ from dist_ir.ir import FunctionMaker, cpprint, pformat, Device, Topology, Value
 from dist_ir.executor import infer_types, SequentialExecutor, Simulator
 from dist_ir.executor.cost_model import CostModel
 from dist_ir.ir.type import Bool, Float, Int64, Tensor
-from dist_ir.transforms import hybrid_transform_unrolled
+from dist_ir.transforms import (
+    parallel_transform_3d,
+    hybrid_transform_unrolled,
+    PipeDreamScheduler,
+)
 
 
 def mlp(args, devices):
@@ -30,7 +34,8 @@ def mlp(args, devices):
     )
     weights = []
     input_dim = args.input_dim
-    for i, hidden_dim in enumerate(args.hidden_dims):
+    hidden_dim = args.hidden_dim
+    for i in range(args.num_hidden_layers):
         w = function.add_input_value(
             f"w{chr(ord('A')+i)}",
             Tensor(dtype=Float(), shape=(input_dim, hidden_dim), device=devices[0]),
@@ -43,17 +48,18 @@ def mlp(args, devices):
     )
     weights.append(w)
 
-    y = x
+    a = x
     for i, weight in enumerate(weights):
-        y = function.add_op("MatMul", inputs=[y, weight], output_names=[f"y{i}"])
+        y = function.add_op("MatMul", inputs=[a, weight], output_names=[f"y{i}"])
+        a = function.add_op("Relu", inputs=[y], output_names=[f"a{i}"])
         # TODO: Add activation function?
 
     l = function.add_op(
-        "Loss", inputs=[y, z], attributes={"N": args.batch_size}, output_names=["l"]
+        "Loss", inputs=[a, z], attributes={"N": args.batch_size}, output_names=["l"]
     )
     dl = function.add_op(
         "LossGrad",
-        inputs=[y, z],
+        inputs=[a, z],
         attributes={"N": args.batch_size},
         output_names=["dl"],
     )
@@ -61,16 +67,86 @@ def mlp(args, devices):
     dy = dl
     for i, weight in enumerate(weights[::-1]):
         i = len(weights) - i - 1
+        da = function.add_op(
+            "ReluGrad",
+            inputs=[function.ops[2 * i + 1].outputs[0], dy],
+            output_names=[f"da{i}"],
+        )
         dy, dw = function.add_op(
             "MatMulGrad",
-            inputs=[function.ops[i].outputs[0], weights[i], dy],
+            inputs=[function.ops[2 * i].outputs[0], weights[i], da],
             output_names=[f"dy{i}", f"dw{chr(ord('A')+i)}"],
         )
-
     return function.finalize()
 
 
+def partition(args, function, device_tree):
+    num_blocks = args.num_hidden_layers + 1
+    assert num_blocks % args.pp_degree == 0
+    num_blocks_per_device = num_blocks // args.pp_degree
+    partition_maps = {}
+    root_device = list(device_tree.keys())[0]
+    for dp_root_device in device_tree[root_device]:
+        partition_maps[dp_root_device] = {}
+        for hp_root_device in device_tree[root_device][dp_root_device]:
+            partition_map = {}
+            for i, device in enumerate(device_tree[root_device][dp_root_device]):
+                fwd_start = i * num_blocks_per_device * 2
+                fwd_end = (i + 1) * num_blocks_per_device * 2 + (
+                    2 if i == args.pp_degree - 1 else 0
+                )
+                bwd_start = len(function.ops) - ((i + 1) * num_blocks_per_device * 2)
+                bwd_end = bwd_start + num_blocks_per_device * 2
+                fwd_stage = function.get_subfunction(
+                    function.ops[fwd_start:fwd_end],
+                    name=f"fwd_stage{i}",
+                )
+                bwd_stage = function.get_subfunction(
+                    function.ops[bwd_start:bwd_end],
+                    name=f"bwd_stage{i}",
+                )
+                partition_map[fwd_stage] = device
+                partition_map[bwd_stage] = device
+            partition_maps[dp_root_device][hp_root_device] = partition_map
+    return partition_maps
+
+
+def get_device_tree(args, devices):
+    dp_size = args.world_size // args.dp_degree
+    hp_size = dp_size // args.hp_degree
+    device_tree = {
+        devices[0]: {
+            devices[1 + i * dp_size]: {
+                devices[1 + i * dp_size + j * hp_size]: tuple(
+                    devices[
+                        1
+                        + i * dp_size
+                        + j * hp_size : 1
+                        + i * dp_size
+                        + (j + 1) * hp_size
+                    ]
+                )
+                for j in range(args.hp_degree)
+            }
+            for i in range(args.dp_degree)
+        }
+    }
+    return device_tree
+
+
 def main(args):
+    if not args.num_hidden_layers % 2 == 1:
+        raise ValueError(
+            "Must have odd number of hidden layers to support horizontal parallelism"
+        )
+    if not args.dp_degree * args.pp_degree * args.hp_degree == args.world_size:
+        raise ValueError(
+            "Product of data parallel, pipeline parallel, and horizontal parallel "
+            "degrees must be the world size"
+        )
+    if not args.num_hidden_layers + 1 >= args.world_size:
+        raise ValueError("Must have at least as many layers as devices")
+
     device_speeds = {"gpu": 1.0e13}
     topology = Topology()
     devices = [topology.add_device("gpu") for i in range(args.world_size + 1)]
@@ -83,6 +159,20 @@ def main(args):
     input_data = [np.random.normal(size=(inp.type.shape)) for inp in function.inputs]
     res = ex.compute(function, input_data)
 
+    device_tree = get_device_tree(args, devices)
+    transformed_function = parallel_transform_3d(
+        function, device_tree, args.num_microbatches
+    )
+    transformed_function = infer_types(
+        transformed_function, transformed_function.inputs
+    )
+    cpprint(transformed_function)
+
+    # partition_maps = partition(args, function, device_tree)
+    # scheduler = PipeDreamScheduler(args.num_microbatches)
+    # schedule = scheduler.schedule(function, partition_map)
+
+    """
     dp_config = {
         "input_dims": {function.inputs[0]: 0, function.inputs[1]: 0},
         "reduction_params": {
@@ -91,7 +181,7 @@ def main(args):
                 "device": devices[0],
             },
             function.outputs[1]: {
-                "op_type": "MPIReduce",
+            "op_type": "MPIReduce",
                 "device": devices[0],
             },
             function.outputs[2]: {
@@ -133,6 +223,7 @@ def main(args):
         "verify_fn": None,
     }
     """
+    """
     stages = [
         function.get_subfunction([function.ops[0]], name="f0"),
         function.get_subfunction([function.ops[1]], name="f1"),
@@ -152,6 +243,7 @@ def main(args):
     }
     """
 
+    """
     transformed_function = hybrid_transform_unrolled(
         function, dp_config, hp_config, pp_config=None
     )
@@ -168,6 +260,7 @@ def main(args):
     simulation = simulator.interpret(
         transformed_function, (v.type for v in transformed_function.inputs)
     )
+    """
 
 
 if __name__ == "__main__":
@@ -183,13 +276,19 @@ if __name__ == "__main__":
         "--input_dim", type=int, default=16, help="Input data dimension"
     )
     parser.add_argument(
-        "--hidden_dims",
+        "--num_hidden_layers",
         type=int,
-        nargs="+",
-        default=[32],
-        help="Hidden layer dimensions",
+        help="Number of hidden layers",
     )
+    parser.add_argument("--hidden_dim", type=int, default=64, help="Hidden dimension")
     parser.add_argument("--output_dim", type=int, default=64, help="Output dimension")
-    parser.add_argument("--world_size", type=int, default=4, help="World size")
+    parser.add_argument("--world_size", type=int, default=8, help="World size")
+    parser.add_argument("--dp_degree", type=int, default=2, help="Data parallel degree")
+    parser.add_argument(
+        "--pp_degree", type=int, default=2, help="Pipeline parallel degree"
+    )
+    parser.add_argument(
+        "--hp_degree", type=int, default=2, help="Horizontal parallel degree"
+    )
     args = parser.parse_args()
     main(args)

@@ -43,6 +43,7 @@ class CostModel:
             ("MatMulGrad", (Tensor, Tensor, Tensor)): self._matmul_grad_cost_fn,
             ("Min", (Tensor, Tensor)): self._min_cost_fn,
             ("Relu", (Tensor,)): self._relu_cost_fn,
+            ("Relu", (Tensor, Tensor)): self._relu_grad_cost_fn,
             ("Scatter", (Tensor,)): self._scatter_cost_fn,
             ("Select", (TupleType,)): self._select_cost_fn,
             ("Send", (Tensor,)): self._send_cost_fn,
@@ -138,6 +139,9 @@ class CostModel:
         return {x.device: x.size()}
 
     def _relu_cost_fn(self, op, x):
+        return {x.device: 0}
+
+    def _relu_grad_cost_fn(self, op, x, y):
         return {x.device: 0}
 
     def _scatter_cost_fn(self, op, x):

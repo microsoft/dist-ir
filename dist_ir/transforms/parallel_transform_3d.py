@@ -6,16 +6,22 @@ from ..ir import Device, cpprint
 from .pipedream_scheduler import PipeDreamScheduler
 
 
-def _expand_tuple(vs, function, size, name, parallelism_level):
+def _expand_tuple(vs, function, size, output_names):
     return [
         function.add_op(
             "Select",
             inputs=[vs],
             attributes={"dim": i},
-            output_names=[f"{name}_{parallelism_level}_{i}"],
+            output_names=[
+                output_names[i]
+            ],  # None if name is None else [f"{name}_{parallelism_level}_{i}"],
         )
         for i in range(size)
     ]
+
+
+def _join_tuple(vs, function, output_name):
+    return function.add_op("Join", inputs=vs, output_names=[output_name])
 
 
 def _scatter_value(v, function, dim, devices, parallelism_level):
@@ -25,7 +31,8 @@ def _scatter_value(v, function, dim, devices, parallelism_level):
         attributes={"dim": dim, "devices": devices},
         output_names=[f"{v.name}s_{parallelism_level}"],
     )
-    return _expand_tuple(vs, function, len(devices), v.name, parallelism_level)
+    output_names = [f"{v.name}_{parallelism_level}_{i}" for i in range(len(devices))]
+    return _expand_tuple(vs, function, len(devices), output_names)
 
 
 def _broadcast_value(v, function, devices, parallelism_level):
@@ -35,7 +42,8 @@ def _broadcast_value(v, function, devices, parallelism_level):
         attributes={"devices": devices},
         output_names=[f"{v.name}s_{parallelism_level}"],
     )
-    return _expand_tuple(vs, function, len(devices), v.name, parallelism_level)
+    output_names = [f"{v.name}_{parallelism_level}_{i}" for i in range(len(devices))]
+    return _expand_tuple(vs, function, len(devices), output_names)
 
 
 def _split_value(v, function, num_splits, parallelism_level):
@@ -46,7 +54,43 @@ def _split_value(v, function, num_splits, parallelism_level):
         attributes={"dim": 0, "num_splits": num_splits},
         output_names=[f"{v.name}s_{parallelism_level}"],
     )
-    return _expand_tuple(vs, function, num_splits, v.name, parallelism_level)
+    output_names = [f"{v.name}_{parallelism_level}_{i}" for i in range(num_splits)]
+    return _expand_tuple(vs, function, num_splits, output_names)
+
+
+def _gather_values(vs, function, dim, device, output_name):
+    return function.add_op(
+        "MPIGather",
+        inputs=[_join_tuple(vs, function, output_name=output_name)],
+        attributes={"dim": dim, "device": device},
+        output_names=[output_name],
+    )
+
+
+def _allgather_values(
+    vs, function, dim, output_name, expand_tuple=False, expanded_output_names=None
+):
+    gathered_vs = function.add_op(
+        "Allgather",
+        attributes={"dim": dim},
+        inputs=[_join_tuple(vs, function, output_name=output_name)],
+        output_names=[output_name],
+    )
+    if expand_tuple:
+        # TODO: Add output names
+        return _expand_tuple(
+            gathered_vs, function, len(tuple(vs)), output_names=expanded_output_names
+        )
+    else:
+        return gathered_vs
+
+
+def _allreduce_values(vs, function, output_name):
+    return function.add_op(
+        "Allreduce",
+        inputs=[_join_tuple(vs, function, output_name=output_name)],
+        output_names=[output_name],
+    )
 
 
 def _send_value(v, device, function):
@@ -56,6 +100,20 @@ def _send_value(v, device, function):
         attributes={"device": device},
         output_names=[f"{v.name}@{device.device_id}"],
     )
+
+
+def _add_values(v1, v2, function, output_name):
+    return function.add_op("Add", inputs=[v1, v1], output_names=[output_name])
+
+
+def _concat_values(v1, v2, function, dim, output_name):
+    return function.add_op(
+        "Concat", inputs=[v1, v1], attributes={"dim": dim}, output_names=[output_name]
+    )
+
+
+def _identity(v, function, output_name):
+    return function.add_op("Identity", inputs=[v], output_names=[output_name])
 
 
 def _partition_inputs_dp(transformed_function, device_tree, x, z, weights):
@@ -104,7 +162,8 @@ def _partition_inputs_hp(transformed_function, device_tree, dp_inputs, x, z, wei
                 parallelism_level="hp",
             )
             for j, weight in enumerate(weights):
-                dim = (j + 1) % 2
+                # dim = (j + 1) % 2
+                dim = 1
                 hp_inputs[dp_inputs[weight][i]] = _scatter_value(
                     dp_inputs[weight][i],
                     transformed_function,
@@ -217,15 +276,109 @@ def parallel_transform_3d(args, function, device_tree, num_microbatches):
         weights,
     )
 
-    # Instantiate the function for each subgroup of devices.
     device_tree_root = tuple(device_tree.keys())[0]
     for i, dp_device in enumerate(device_tree[device_tree_root]):
-        for j, hp_device in enumerate(device_tree[device_tree_root][dp_device]):
-            output_map = {}
+        pp_schedules = []
+        hp_devices = device_tree[device_tree_root][dp_device]
+        for j, hp_device in enumerate(hp_devices):
             pp_devices = device_tree[device_tree_root][dp_device][hp_device]
             partition_map = _pipeline_parallel_partition(args, function, pp_devices)
             scheduler = PipeDreamScheduler(num_microbatches)
             schedule = scheduler.schedule(function, partition_map)
+            pp_schedules.append(schedule)
+
+        output_map = defaultdict(lambda: defaultdict(dict))
+        # Jointly iterate through all the schedules, timestep by timestep.
+        for timesteps in zip(*pp_schedules):
+            # For a given set of timesteps, iterate through in order of matching
+            # horizontal parallel devices.
+            for devices in zip(*tuple(sorted(ts.keys()) for ts in timesteps)):
+                # Verify that for this group of horizontal parallel devices the
+                # corresponding pipeline parallel stage is exactly the same.
+                assert (
+                    len(set(ts[device] for ts, device in zip(timesteps, devices))) == 1
+                )
+                stage, microbatch_id = timesteps[0][devices[0]]
+                for op in stage.ops:
+                    # Collect inputs for this op.
+                    for j, device in enumerate(devices):
+                        input_values = []
+                        input_devices = []
+                        for inp in op.inputs:
+                            if inp in function.inputs:
+                                v = transformed_inputs[inp]
+                                dp_v = dp_inputs[v][i]
+                                hp_v = hp_inputs[dp_v][j]
+                                if (
+                                    inp == function.inputs[0]
+                                    or inp == function.inputs[1]
+                                ):
+                                    pp_v = pp_inputs[hp_v][microbatch_id]
+                                else:
+                                    pp_v = pp_inputs[hp_v][0]
+                                input_values.append(pp_v)
+                                input_devices.append(hp_device)
+                            else:
+                                output_value, output_device = output_map[j][
+                                    microbatch_id
+                                ][inp]
+                                input_values.append(output_value)
+                                input_devices.append(output_device)
+                        # Add the op once for each device to the transformed function.
+                        transformed_outputs = transformed_function.add_op(
+                            op.op_type,
+                            inputs=input_values,
+                            attributes=op.attributes,
+                            output_names=[v.name for v in op.outputs],
+                        )
+                        if not isinstance(transformed_outputs, tuple):
+                            transformed_outputs = (transformed_outputs,)
+                        for output, transformed_output in zip(
+                            op.outputs, transformed_outputs
+                        ):
+                            assert output not in output_map[j][microbatch_id]
+                            output_map[j][microbatch_id][output] = (
+                                transformed_output,
+                                device,
+                            )
+
+                    # If the op is a MatMul or MatMulGrad op, aggregate its outputs (AllGather).
+                    if op.op_type == "MatMul" or op.op_type == "MatMulGrad":
+                        for output in op.outputs:
+                            gathered_outputs = _allgather_values(
+                                tuple(
+                                    output_map[j][microbatch_id][output][0]
+                                    for j in range(len(devices))
+                                ),
+                                transformed_function,
+                                dim=1,
+                                output_name=f"{output.name}s",
+                                expand_tuple=True,
+                                expanded_output_names=[
+                                    output_map[j][microbatch_id][output][0].name
+                                    for j in range(len(devices))
+                                ],
+                            )
+                            assert len(gathered_outputs) == len(devices)
+                            for j, (device, gathered_output) in enumerate(
+                                zip(devices, gathered_outputs)
+                            ):
+                                output_map[j][microbatch_id][output] = (
+                                    gathered_output,
+                                    device,
+                                )
+
+    """
+    # Instantiate the function for each subgroup of devices.
+    device_tree_root = tuple(device_tree.keys())[0]
+    dp_outputs = defaultdict(list)
+    for i, dp_device in enumerate(device_tree[device_tree_root]):
+        for j, hp_device in enumerate(device_tree[device_tree_root][dp_device]):
+            pp_devices = device_tree[device_tree_root][dp_device][hp_device]
+            partition_map = _pipeline_parallel_partition(args, function, pp_devices)
+            scheduler = PipeDreamScheduler(num_microbatches)
+            schedule = scheduler.schedule(function, partition_map)
+            output_map = {}
             for timestep in schedule:
                 for device in timestep:
                     stage, microbatch_id = timestep[device]
@@ -274,8 +427,54 @@ def parallel_transform_3d(args, function, device_tree, num_microbatches):
                         for output, transformed_output in zip(
                             op.outputs, transformed_outputs
                         ):
-                            output_map[output] = (transformed_output, device)
-                        # TODO: Aggregate outputs for pipeline parallelism
+                            # Aggregate outputs for pipeline parallelism.
+                            if output in function.outputs:
+                                if output not in output_map:
+                                    pp_aggregated_output = _identity(
+                                        transformed_output,
+                                        transformed_function,
+                                        f"{transformed_output.name}_aggregated",
+                                    )
+                                else:
+                                    pp_aggregated_output, pp_device = output_map[output]
+                                    assert pp_device == device
+                                    if "dw" in output.name:
+                                        pp_aggregated_output = _add_values(
+                                            pp_aggregated_output,
+                                            transformed_output,
+                                            transformed_function,
+                                            output_name=pp_aggregated_output.name,
+                                        )
+                                    else:
+                                        pp_aggregated_output = _concat_values(
+                                            pp_aggregated_output,
+                                            transformed_output,
+                                            transformed_function,
+                                            dim=0,
+                                            output_name=pp_aggregated_output.name,
+                                        )
+
+                                output_map[output] = (pp_aggregated_output, device)
+                            else:
+                                output_map[output] = (transformed_output, device)
+
                         # TODO: Aggregate outputs for horizontal parallelism
                         # TODO: Aggregate outputs for data parallelism
+        for k, v in output_map.items():
+            if k in function.outputs:
+                dp_outputs[k].append(v)
+    for k, v in dp_outputs.items():
+        values, devices = zip(*v)
+        print(values, devices)
+        if "dw" in k.name:
+            _allreduce_values(values, transformed_function, output_name=f"{k.name}s")
+        else:
+            _gather_values(
+                values,
+                transformed_function,
+                dim=0,
+                device=device_tree_root,
+                output_name=k.name,
+            )
+    """
     return transformed_function.finalize()

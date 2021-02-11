@@ -16,6 +16,11 @@ def add(op, x, y):
     return np.add(x, y)
 
 
+def allgather(op, xs):
+    v = mpi_gather(op, xs)
+    return (v for i in range(len(xs)))
+
+
 def allreduce(op, xs):
     # TODO: Add attribute for reduction operator
     sum_ = np.sum(xs, axis=0)
@@ -599,6 +604,7 @@ def unsqueeze(op, x):
 
 NumPyRegister = {
     ("Add", (np.ndarray, np.ndarray)): add,
+    ("Allgather", (tuple,)): allgather,
     ("Allreduce", (tuple,)): allreduce,
     (
         "BiasFastGeluGrad_dX",

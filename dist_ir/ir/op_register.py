@@ -11,6 +11,7 @@ class OpRegisterEntry:
 
 OpRegister = {
     "Add": OpRegisterEntry(num_inputs=2, num_outputs=1),
+    "Allgather": OpRegisterEntry(num_inputs=1, num_outputs=1),
     "Allreduce": OpRegisterEntry(num_inputs=1, num_outputs=1),
     "BiasFastGeluGrad_dX": OpRegisterEntry(num_inputs=3, num_outputs=1),
     "BiasDropout": OpRegisterEntry(num_inputs=5, num_outputs=2),

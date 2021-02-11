@@ -163,97 +163,12 @@ def main(args):
     transformed_function = parallel_transform_3d(
         args, function, device_tree, args.num_microbatches
     )
-    # cpprint(transformed_function)
-    transformed_function = infer_types(
-        transformed_function, transformed_function.inputs
-    )
-    cpprint(transformed_function)
-
-    # partition_maps = partition(args, function, device_tree)
-    # scheduler = PipeDreamScheduler(args.num_microbatches)
-    # schedule = scheduler.schedule(function, partition_map)
-
-    """
-    dp_config = {
-        "input_dims": {function.inputs[0]: 0, function.inputs[1]: 0},
-        "reduction_params": {
-            function.outputs[0]: {
-                "op_type": "MPIReduce",
-                "device": devices[0],
-            },
-            function.outputs[1]: {
-            "op_type": "MPIReduce",
-                "device": devices[0],
-            },
-            function.outputs[2]: {
-                "op_type": "MPIGather",
-                "dim": 0,
-                "device": devices[0],
-            },
-            function.outputs[3]: {
-                "op_type": "MPIReduce",
-                "device": devices[0],
-            },
-        },
-        "devices": (devices[1], devices[3]),
-        "verify_fn": None,
-    }
-    hp_config = {
-        "input_dims": {function.inputs[2]: 1, function.inputs[3]: 0},
-        "reduction_params": {
-            function.outputs[0]: {
-                "op_type": "MPIReduce",
-            },
-            function.outputs[1]: {
-                "op_type": "MPIGather",
-                "dim": 1,
-            },
-            function.outputs[2]: {
-                "op_type": "MPIGather",
-                "dim": 0,
-            },
-            function.outputs[3]: {
-                "op_type": "MPIReduce",
-                "dim": 0,
-            },
-        },
-        "devices": {
-            devices[1]: (devices[1], devices[2]),
-            devices[3]: (devices[3], devices[4]),
-        },
-        "verify_fn": None,
-    }
-    """
-    """
-    stages = [
-        function.get_subfunction([function.ops[0]], name="f0"),
-        function.get_subfunction([function.ops[1]], name="f1"),
-    ]
-    partition_map = OrderedDict([(stages[0], devices[2]), (stages[1], devices[6])])
-    schedule = [
-        {devices[2]: (stages[0], 0)},
-        {devices[2]: (stages[0], 1), devices[6]: (stages[1], 0)},
-        {devices[6]: (stages[1], 1)},
-    ]
-    pp_config = {
-        "num_microbatches": num_microbatches,
-        "batch_dims": {function.inputs[0]: 0},
-        "reduction_params": {function.outputs[0]: {"op_type": "Concat", "dim": 0}},
-        "partition_map": partition_map,
-        "schedule": schedule,
-    }
-    """
-
-    """
-    transformed_function = hybrid_transform_unrolled(
-        function, dp_config, hp_config, pp_config=None
-    )
-    cpprint(transformed_function)
     transformed_function = infer_types(
         transformed_function, transformed_function.inputs
     )
     cpprint(transformed_function, width=250)
-    transformed_res = ex.compute(function, input_data)
+    """
+    transformed_res = ex.compute(transformed_function, input_data)
     for a, b in zip(res, transformed_res):
         np.testing.assert_array_almost_equal(a, b)
 

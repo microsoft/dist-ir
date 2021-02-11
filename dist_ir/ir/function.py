@@ -51,8 +51,11 @@ class Function:
         for op in self.ops:
             for in_edge in op.inputs:
                 if in_edge not in seen:
+                    import pdb
+
+                    pdb.set_trace()
                     raise ValueError(
-                        f"Ops are not in topological order: op {op.name} has "
+                        f"Ops are not in topological order: op {op} has "
                         f"unseen edge {in_edge}"
                     )
             for out_edge in op.outputs:

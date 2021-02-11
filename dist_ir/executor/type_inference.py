@@ -30,17 +30,39 @@ def _raise_type_error(op, *args):
     raise ValueError(f"Type error: op\n{op}\nwas given arguments\n{tuple(args)}")
 
 
-def _allreduce_prop_fn(op, x):
-    devices = tuple(t.device for t in x.types)
+def _allreduce_prop_fn(op, xs):
+    devices = tuple(t.device for t in xs.types)
     if not (
-        isinstance(x, TupleType)
-        and all(isinstance(t, Tensor) for t in x.types)
-        and len(x.types) > 0
-        and all(t.shape == x.types[0].shape for t in x.types)
+        isinstance(xs, TupleType)
+        and all(isinstance(t, Tensor) for t in xs.types)
+        and len(xs.types) > 0
+        and all(t.shape == xs.types[0].shape for t in xs.types)
         and len(set(devices)) == len(devices)
     ):
-        _raise_type_error(op, x)
-    return x
+        _raise_type_error(op, xs)
+    return xs
+
+
+def _allgather_prop_fn(op, xs):
+    devices = tuple(t.device for t in xs.types)
+    dtypes = tuple(t.dtype for t in xs.types)
+    if not (
+        isinstance(xs, TupleType)
+        and all(isinstance(t, Tensor) for t in xs.types)
+        and len(xs.types) > 0
+        and len(set(dtypes)) == 1
+        and len(set(devices)) == len(devices)
+    ):
+        _raise_type_error(op, xs)
+    dim = op.attributes["dim"]
+    shape = list(xs.types[0].shape)
+    for typ in xs.types[1:]:
+        shape[dim] += typ.shape[dim]
+    return TupleType(
+        types=tuple(
+            Tensor(shape=tuple(shape), dtype=dtypes[0], device=d) for d in devices
+        )
+    )
 
 
 # TODO update the below prop functions to be as robust as _allreduce_prop_fn
@@ -331,6 +353,7 @@ def _transpose_prop_fn(op, x):
 
 TypePropRegister = {
     ("Add", (Tensor, Tensor)): _elementwise_tensor_op_prop_fn,
+    ("Allgather", (TupleType,)): _allgather_prop_fn,
     ("Allreduce", (TupleType,)): _allreduce_prop_fn,
     ("Broadcast", (Tensor,)): _broadcast_prop_fn,
     ("Cast", (Tensor,)): _cast_prop_fn,

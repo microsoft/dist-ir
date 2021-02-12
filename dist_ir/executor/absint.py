@@ -1,3 +1,4 @@
+import numpy as np
 from typing import Any, Dict, Sequence
 
 from ..ir import Function, Op, Value
@@ -123,6 +124,11 @@ def convert_impls_to_semantics(impls):
                 outputs = (outputs,)
             assert len(outputs) == len(op.outputs)
             for x, val in zip(op.outputs, outputs):
+                if isinstance(val, np.ndarray) and x.type.shape != tuple(val.shape):
+                    import pdb
+
+                    pdb.set_trace()
+
                 state.env[x] = val
 
         return semantics

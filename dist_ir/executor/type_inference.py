@@ -157,7 +157,7 @@ def _loss_prop_fn(op, x, y):
         and x.device == y.device
     ):
         _raise_type_error(op, x, y)
-    return Tensor(dtype=Float(), shape=(1,), device=x.device)
+    return x
 
 
 def _loss_grad_prop_fn(op, x, y):
@@ -264,7 +264,8 @@ def _relu_grad_prop_fn(op, x, y):
         and x.shape[0] == y.shape[0]
     ):
         _raise_type_error(op, x, y)
-    return Tensor(dtype=x.dtype, shape=(x.shape[1], y.shape[1]), device=x.device)
+    return x
+    # return Tensor(dtype=x.dtype, shape=(x.shape[1], y.shape[1]), device=x.device)
 
 
 def _reshape_prop_fn(op, x, y):

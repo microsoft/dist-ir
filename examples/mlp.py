@@ -44,7 +44,7 @@ def mlp(args, devices):
         weights.append(w)
     w = function.add_input_value(
         f"w{chr(ord('A')+i+1)}",
-        Tensor(dtype=Float(), shape=(input_dim, args.output_dim), device=devices[0]),
+        Tensor(dtype=Float(), shape=(hidden_dim, args.output_dim), device=devices[0]),
     )
     weights.append(w)
 
@@ -69,12 +69,12 @@ def mlp(args, devices):
         i = len(weights) - i - 1
         da = function.add_op(
             "ReluGrad",
-            inputs=[function.ops[2 * i + 1].outputs[0], dy],
+            inputs=[function.ops[2 * i + 1].inputs[0], dy],
             output_names=[f"da{i}"],
         )
         dy, dw = function.add_op(
             "MatMulGrad",
-            inputs=[function.ops[2 * i].outputs[0], weights[i], da],
+            inputs=[function.ops[2 * i].inputs[0], weights[i], da],
             output_names=[f"dy{i}", f"dw{chr(ord('A')+i)}"],
         )
     return function.finalize()
@@ -167,11 +167,24 @@ def main(args):
         transformed_function, transformed_function.inputs
     )
     cpprint(transformed_function, width=250)
-    """
     transformed_res = ex.compute(transformed_function, input_data)
-    for a, b in zip(res, transformed_res):
-        np.testing.assert_array_almost_equal(a, b)
-
+    for i, a in enumerate(function.outputs):
+        for j, b in enumerate(transformed_function.outputs):
+            if a.name == b.name and a.type.shape == b.type.shape:
+                try:
+                    np.testing.assert_array_almost_equal(res[i], transformed_res[j])
+                except AssertionError as e:
+                    print(f"Outputs {a} and {b} do not match!")
+                    print(res[i])
+                    print()
+                    print(transformed_res[j])
+                    print()
+                    print("-" * 100)
+                    print()
+                break
+    # for a, b in zip(res, transformed_res):
+    #    np.testing.assert_array_almost_equal(a, b)
+    """
     simulator = Simulator(CostModel(topology, device_speeds))
     simulation = simulator.interpret(
         transformed_function, (v.type for v in transformed_function.inputs)

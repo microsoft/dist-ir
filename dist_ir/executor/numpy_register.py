@@ -283,8 +283,8 @@ def matmul(op, x, y):
 
 
 def matmul_grad(op, x, y, dz):
-    # return (np.dot(dz, y.T), np.dot(x.T, dz))
-    return (np.dot(x, dz), np.dot(y, dz))
+    return (np.dot(dz, y.T), np.dot(x.T, dz))
+    # return (np.dot(x, dz), np.dot(y, dz))
 
 
 def relu(op, x):
@@ -292,9 +292,10 @@ def relu(op, x):
 
 
 def relu_grad(op, x, dy):
-    dx = np.zeros(x.shape)
-    dx[x > 0] = 1
-    return np.dot(dx.T, dy)
+    # TODO: fix
+    dx = np.zeros(dy.shape)
+    dx[dy > 0] = 1
+    return dx
 
 
 def mpi_gather(op, xs):
@@ -303,7 +304,7 @@ def mpi_gather(op, xs):
 
 
 def mpi_reduce(op, xs):
-    return np.sum(xs)
+    return np.sum(xs, axis=0)
 
 
 def mul(op, x, y):

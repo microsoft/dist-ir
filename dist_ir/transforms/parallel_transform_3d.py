@@ -8,56 +8,35 @@ from ..ir import Device, cpprint
 from .pipedream_scheduler import PipeDreamScheduler
 
 
-def _expand_tuple(vs, function, size, output_names):
-    return [
-        function.add_op(
-            "Select",
-            inputs=[vs],
-            attributes={"dim": i},
-            output_names=[
-                output_names[i]
-            ],  # None if name is None else [f"{name}_{parallelism_level}_{i}"],
-        )
-        for i in range(size)
-    ]
-
-
-def _join_tuple(vs, function, output_name):
-    return function.add_op("Join", inputs=vs, output_names=[output_name])
-
-
 def _scatter_value(v, function, dim, devices, parallelism_level):
-    vs = function.add_op(
-        "Scatter",
+    output_names = [f"{v.name}_{parallelism_level}_{i}" for i in range(len(devices))]
+    return function.add_op(
+        "MPIScatter",
         inputs=[v],
         attributes={"dim": dim, "devices": devices},
-        output_names=[f"{v.name}s_{parallelism_level}"],
+        output_names=output_names,
     )
-    output_names = [f"{v.name}_{parallelism_level}_{i}" for i in range(len(devices))]
-    return _expand_tuple(vs, function, len(devices), output_names)
 
 
 def _broadcast_value(v, function, devices, parallelism_level):
-    vs = function.add_op(
-        "Broadcast",
+    output_names = [f"{v.name}_{parallelism_level}_{i}" for i in range(len(devices))]
+    return function.add_op(
+        "MPIBroadcast",
         inputs=[v],
         attributes={"devices": devices},
-        output_names=[f"{v.name}s_{parallelism_level}"],
+        output_names=output_names,
     )
-    output_names = [f"{v.name}_{parallelism_level}_{i}" for i in range(len(devices))]
-    return _expand_tuple(vs, function, len(devices), output_names)
 
 
 def _split_value(v, function, num_splits, parallelism_level):
     assert parallelism_level == "pp"
-    vs = function.add_op(
+    output_names = [f"{v.name}_{parallelism_level}_{i}" for i in range(num_splits)]
+    return function.add_op(
         "Split",
         inputs=[v],
         attributes={"dim": 0, "num_splits": num_splits},
-        output_names=[f"{v.name}s_{parallelism_level}"],
+        output_names=output_names,
     )
-    output_names = [f"{v.name}_{parallelism_level}_{i}" for i in range(num_splits)]
-    return _expand_tuple(vs, function, num_splits, output_names)
 
 
 def _gather_values(vs, function, dim, device, output_name):
@@ -86,20 +65,12 @@ def _allgather_values(
         return gathered_vs
 
 
-def _allreduce_values(
-    vs, function, output_name, expand_tuple=False, expanded_output_names=None
-):
-    reduced_vs = function.add_op(
-        "Allreduce",
-        inputs=[_join_tuple(vs, function, output_name=output_name)],
-        output_names=[output_name],
+def _allreduce_values(vs, function, output_names):
+    return function.add_op(
+        "MPIAllreduce",
+        inputs=vs,
+        output_names=output_names,
     )
-    if expand_tuple:
-        return _expand_tuple(
-            reduced_vs, function, len(tuple(vs)), output_names=expanded_output_names
-        )
-    else:
-        return reduced_vs
 
 
 def _send_value(v, device, function):
@@ -112,19 +83,19 @@ def _send_value(v, device, function):
 
 
 def _add_values(v1, v2, function, output_name):
-    return function.add_op("Add", inputs=[v1, v1], output_names=[output_name])
+    return function.add_op("Add", inputs=[v1, v2], output_names=[output_name])
 
 
 def _concat_values(v1, v2, function, dim, output_name):
     return function.add_op(
-        "Concat", inputs=[v1, v1], attributes={"dim": dim}, output_names=[output_name]
+        "Concat", inputs=[v1, v2], attributes={"dim": dim}, output_names=[output_name]
     )
 
 
 def _mpi_reduce_values(vs, function, device, output_name):
     return function.add_op(
         "MPIReduce",
-        inputs=[_join_tuple(vs, function, output_name=f"{output_name}s")],
+        inputs=vs,
         attributes={"device": device},
         output_names=[output_name],
     )
@@ -133,7 +104,7 @@ def _mpi_reduce_values(vs, function, device, output_name):
 def _mpi_gather_values(vs, function, dim, device, output_name):
     return function.add_op(
         "MPIGather",
-        inputs=[_join_tuple(vs, function, output_name=f"{output_name}s")],
+        inputs=vs,
         attributes={"dim": dim, "device": device},
         output_names=[output_name],
     )
@@ -349,7 +320,8 @@ def parallel_transform_3d(args, function, device_tree, num_microbatches):
                             inputs=input_values,
                             attributes=op.attributes,
                             output_names=[
-                                f"{v.name}_{device.device_id}" for v in op.outputs
+                                f"{v.name}_dp_{i}_hp_{j}_pp_{microbatch_id}_device_{device}"
+                                for v in op.outputs
                             ],
                         )
                         if not isinstance(transformed_outputs, tuple):
@@ -362,7 +334,9 @@ def parallel_transform_3d(args, function, device_tree, num_microbatches):
                                 transformed_output,
                                 device,
                             )
-                    j = None  # Debug, remove
+                    # TODO: Remove debug code
+                    j = None
+                    device = None
 
                     # Aggregate horizontal parallel outputs.
                     if op.op_type == "MatMul" or op.op_type == "MatMulGrad":
@@ -383,11 +357,9 @@ def parallel_transform_3d(args, function, device_tree, num_microbatches):
                                         for j in range(len(devices))
                                     ),
                                     transformed_function,
-                                    output_name=f"{output.name}_hp",
-                                    expand_tuple=True,
-                                    expanded_output_names=[
-                                        f"{output_map[j][microbatch_id][output][0].name}_hp"
-                                        for j in range(len(devices))
+                                    output_names=[
+                                        f"{output.name}_dp_{i}_hp_all_pp_{microbatch_id}_device_{device.device_id}"
+                                        for j, device in enumerate(devices)
                                     ],
                                 )
                                 assert len(reduced_outputs) == len(devices)
@@ -401,62 +373,82 @@ def parallel_transform_3d(args, function, device_tree, num_microbatches):
 
                     # Aggregate pipeline parallel outputs.
                     for output in op.outputs:
-                        if output in function.outputs and microbatch_id > 0:
+                        if output in function.outputs:
                             for j, device in enumerate(devices):
-                                assert output in output_map[j][0]
-                                mb_0_output, mb_0_device = output_map[j][0][output]
                                 mb_k_output, mb_k_device = output_map[j][microbatch_id][
                                     output
                                 ]
-                                assert mb_0_device == device
                                 assert mb_k_device == device
-                                print(
-                                    f"Doing pipeline parallel aggregation for {mb_0_output} "
-                                    f"and {mb_k_output} on device {device.device_id}"
-                                )
-                                if "dw" in output.name:
-                                    output_map[j][0][output] = (
-                                        _add_values(
-                                            mb_0_output,
+                                match = re.search("hp\_(.*)\_pp", mb_k_output.name)
+                                hp_level = match.group(1)
+                                if microbatch_id == 0:
+                                    output_map[j]["all"][output] = (
+                                        _identity(
                                             mb_k_output,
                                             transformed_function,
-                                            output_name=f"{output.name}_pp",
+                                            f"{output.name}_dp_{i}_hp_{hp_level}_pp_all_device_{mb_k_device.device_id}",
                                         ),
-                                        mb_0_device,
+                                        mb_k_device,
                                     )
                                 else:
-                                    output_map[j][0][output] = (
-                                        _concat_values(
-                                            mb_0_output,
-                                            mb_k_output,
-                                            transformed_function,
-                                            dim=0,
-                                            output_name=f"{output.name}_pp",
-                                        ),
-                                        mb_0_device,
+                                    assert output in output_map[j]["all"]
+                                    mb_all_output, mb_all_device = output_map[j]["all"][
+                                        output
+                                    ]
+                                    assert mb_all_device == device
+                                    assert (
+                                        re.search(
+                                            "hp\_(.*)\_pp", mb_all_output.name
+                                        ).group(1)
+                                        == hp_level
                                     )
-        # Collect the function outputs from microbatch 0 (i.e. the pipeline
-        # parallel aggregated outputs) to do data parallel aggregation.
+                                    print(
+                                        f"Doing pipeline parallel aggregation for {mb_all_output} "
+                                        f"and {mb_k_output} on device {device.device_id}"
+                                    )
+                                    if "dw" in output.name:
+                                        output_map[j]["all"][output] = (
+                                            _add_values(
+                                                mb_all_output,
+                                                mb_k_output,
+                                                transformed_function,
+                                                output_name=f"{output.name}_dp_{i}_hp_{hp_level}_pp_all_device_{mb_all_device.device_id}",
+                                            ),
+                                            mb_all_device,
+                                        )
+                                    else:
+                                        output_map[j]["all"][output] = (
+                                            _concat_values(
+                                                mb_all_output,
+                                                mb_k_output,
+                                                transformed_function,
+                                                dim=0,
+                                                output_name=f"{output.name}_dp_{i}_hp_{hp_level}_pp_all_device_{mb_all_device.device_id}",
+                                            ),
+                                            mb_all_device,
+                                        )
+        # Collect the pipeline-parallel aggregated function outputs to do data parallel aggregation.
         for output in function.outputs:
             if "dw" in output.name:
                 print(
                     f"Concatenating horizontal parallel values "
-                    f"{tuple(output_map[j][0][output][0] for j in output_map)}"
+                    f"{tuple(output_map[j]['all'][output][0] for j in output_map)}"
                 )
                 match = re.search("dw(.)", output.name)
                 weight_id = ord(match.group(1)) - ord("A")
                 dim = (weight_id + 1) % 2
                 gathered_gradient = _mpi_gather_values(
-                    tuple(output_map[j][0][output][0] for j in output_map),
+                    tuple(output_map[j]["all"][output][0] for j in output_map),
                     transformed_function,
                     dim=dim,
                     device=device_tree_root,
-                    output_name=f"{output.name}_gathered",
+                    output_name=f"{output.name}_dp_{i}_hp_all_pp_all_mb_device_{device_tree_root.device_id}",
                 )
                 dp_outputs[output].append(gathered_gradient)
             else:
-                value, _ = output_map[j][0][output]
-                dp_outputs[output].append(value)
+                for j in output_map:
+                    value, _ = output_map[j]["all"][output]
+                    dp_outputs[output].append(value)
     for output in dp_outputs:
         print(f"Doing data parallel reduction for {dp_outputs[output]}")
         if "dw" in output.name:

@@ -51,9 +51,6 @@ class Function:
         for op in self.ops:
             for in_edge in op.inputs:
                 if in_edge not in seen:
-                    import pdb
-
-                    pdb.set_trace()
                     raise ValueError(
                         f"Ops are not in topological order: op {op} has "
                         f"unseen edge {in_edge}"
@@ -220,6 +217,10 @@ class FunctionMaker:
             for in_edge in op.inputs:
                 is_output[in_edge] = False
             for out_edge in op.outputs:
+                if out_edge in is_output and not is_output[out_edge]:
+                    print(
+                        f"{out_edge.name} was not an output, but now is output of {op.op_type}"
+                    )
                 is_output[out_edge] = True
 
         self.outputs = [v for v in is_output if is_output[v]]

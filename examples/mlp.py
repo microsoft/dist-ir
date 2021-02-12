@@ -168,7 +168,7 @@ def main(args):
     transformed_function = infer_types(
         transformed_function, transformed_function.inputs
     )
-    cpprint(transformed_function, width=250)
+    cpprint(transformed_function, width=5000)
     transformed_res = ex.compute(transformed_function, input_data)
     for i, a in enumerate(function.outputs):
         for j, b in enumerate(transformed_function.outputs):

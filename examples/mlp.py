@@ -144,8 +144,10 @@ def main(args):
             "Product of data parallel, pipeline parallel, and horizontal parallel "
             "degrees must be the world size"
         )
-    if not args.num_hidden_layers + 1 >= args.world_size:
-        raise ValueError("Must have at least as many layers as devices")
+    if not args.num_hidden_layers + 1 >= args.pp_degree:  # args.world_size:
+        raise ValueError(
+            "Must have at least as many layers as pipeline parallel devices"
+        )
 
     device_speeds = {"gpu": 1.0e13}
     topology = Topology()

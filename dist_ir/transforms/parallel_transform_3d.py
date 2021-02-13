@@ -219,16 +219,14 @@ def _partition_inputs_pp(
     return pp_inputs
 
 
-def _pipeline_parallel_partition(args, function, devices):
-    num_blocks = args.num_hidden_layers + 1
-    assert num_blocks % args.pp_degree == 0
-    num_blocks_per_device = num_blocks // args.pp_degree
+def _pipeline_parallel_partition(function, pp_degree, devices):
+    num_blocks = len(function.inputs) - 2
+    assert num_blocks % pp_degree == 0
+    num_blocks_per_device = num_blocks // pp_degree
     partition_map = {}
     for i, device in enumerate(devices):
         fwd_start = i * num_blocks_per_device * 2
-        fwd_end = (i + 1) * num_blocks_per_device * 2 + (
-            2 if i == args.pp_degree - 1 else 0
-        )
+        fwd_end = (i + 1) * num_blocks_per_device * 2 + (2 if i == pp_degree - 1 else 0)
         bwd_start = len(function.ops) - ((i + 1) * num_blocks_per_device * 2)
         bwd_end = bwd_start + num_blocks_per_device * 2
         fwd_stage = function.get_subfunction(
@@ -244,8 +242,35 @@ def _pipeline_parallel_partition(args, function, devices):
     return partition_map
 
 
-def parallel_transform_3d(args, function, device_tree, num_microbatches):
+def _get_device_tree(dp_degree, hp_degree, pp_degree, devices):
+    world_size = dp_degree * hp_degree * pp_degree
+    dp_size = world_size // dp_degree
+    hp_size = dp_size // hp_degree
+    device_tree = {
+        devices[0]: {
+            devices[1 + i * dp_size]: {
+                devices[1 + i * dp_size + j * hp_size]: tuple(
+                    devices[
+                        1
+                        + i * dp_size
+                        + j * hp_size : 1
+                        + i * dp_size
+                        + (j + 1) * hp_size
+                    ]
+                )
+                for j in range(hp_degree)
+            }
+            for i in range(dp_degree)
+        }
+    }
+    return device_tree
+
+
+def parallel_transform_3d(
+    function, dp_degree, hp_degree, pp_degree, devices, num_microbatches
+):
     transformed_function = FunctionMaker(name=function.name)
+    device_tree = _get_device_tree(dp_degree, hp_degree, pp_degree, devices)
 
     # Add inputs to the transformed function.
     transformed_inputs = {}
@@ -272,7 +297,9 @@ def parallel_transform_3d(args, function, device_tree, num_microbatches):
         # Construct the pipeline parallel schedules for each horizontal parallel partition.
         for j, hp_device in enumerate(hp_devices):
             pp_devices = device_tree[device_tree_root][dp_device][hp_device]
-            partition_map = _pipeline_parallel_partition(args, function, pp_devices)
+            partition_map = _pipeline_parallel_partition(
+                function, pp_degree, pp_devices
+            )
             scheduler = PipeDreamScheduler(num_microbatches)
             schedule = scheduler.schedule(function, partition_map)
             pp_schedules.append(schedule)

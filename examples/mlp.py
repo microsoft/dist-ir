@@ -35,7 +35,7 @@ def mlp(args, devices):
     weights = []
     input_dim = args.input_dim
     hidden_dim = args.hidden_dim
-    for i in range(args.num_hidden_layers):
+    for i in range(args.num_hidden_layers - 1):
         w = function.add_input_value(
             f"w{chr(ord('A')+i)}",
             Tensor(dtype=Float(), shape=(input_dim, hidden_dim), device=devices[0]),
@@ -80,78 +80,20 @@ def mlp(args, devices):
     return function.finalize()
 
 
-def partition(args, function, device_tree):
-    num_blocks = args.num_hidden_layers + 1
-    assert num_blocks % args.pp_degree == 0
-    num_blocks_per_device = num_blocks // args.pp_degree
-    partition_maps = {}
-    root_device = list(device_tree.keys())[0]
-    for dp_root_device in device_tree[root_device]:
-        partition_maps[dp_root_device] = {}
-        for hp_root_device in device_tree[root_device][dp_root_device]:
-            partition_map = {}
-            for i, device in enumerate(device_tree[root_device][dp_root_device]):
-                fwd_start = i * num_blocks_per_device * 2
-                fwd_end = (i + 1) * num_blocks_per_device * 2 + (
-                    2 if i == args.pp_degree - 1 else 0
-                )
-                bwd_start = len(function.ops) - ((i + 1) * num_blocks_per_device * 2)
-                bwd_end = bwd_start + num_blocks_per_device * 2
-                fwd_stage = function.get_subfunction(
-                    function.ops[fwd_start:fwd_end],
-                    name=f"fwd_stage{i}",
-                )
-                bwd_stage = function.get_subfunction(
-                    function.ops[bwd_start:bwd_end],
-                    name=f"bwd_stage{i}",
-                )
-                partition_map[fwd_stage] = device
-                partition_map[bwd_stage] = device
-            partition_maps[dp_root_device][hp_root_device] = partition_map
-    return partition_maps
-
-
-def get_device_tree(args, devices):
-    dp_size = args.world_size // args.dp_degree
-    hp_size = dp_size // args.hp_degree
-    device_tree = {
-        devices[0]: {
-            devices[1 + i * dp_size]: {
-                devices[1 + i * dp_size + j * hp_size]: tuple(
-                    devices[
-                        1
-                        + i * dp_size
-                        + j * hp_size : 1
-                        + i * dp_size
-                        + (j + 1) * hp_size
-                    ]
-                )
-                for j in range(args.hp_degree)
-            }
-            for i in range(args.dp_degree)
-        }
-    }
-    return device_tree
-
-
 def main(args):
-    if not args.num_hidden_layers % 2 == 1:
+    if not args.num_hidden_layers % 2 == 0:
         raise ValueError(
-            "Must have odd number of hidden layers to support horizontal parallelism"
+            "Must have even number of hidden layers to support horizontal parallelism"
         )
-    if not args.dp_degree * args.pp_degree * args.hp_degree == args.world_size:
-        raise ValueError(
-            "Product of data parallel, pipeline parallel, and horizontal parallel "
-            "degrees must be the world size"
-        )
-    if not args.num_hidden_layers + 1 >= args.pp_degree:  # args.world_size:
+    if not args.num_hidden_layers >= args.pp_degree:
         raise ValueError(
             "Must have at least as many layers as pipeline parallel devices"
         )
 
     device_speeds = {"gpu": 1.0e13}
     topology = Topology()
-    devices = [topology.add_device("gpu") for i in range(args.world_size + 1)]
+    world_size = args.dp_degree * args.hp_degree * args.pp_degree
+    devices = [topology.add_device("gpu") for i in range(world_size + 1)]
 
     function = mlp(args, topology.devices)
     cpprint(function)
@@ -161,9 +103,13 @@ def main(args):
     input_data = [np.random.normal(size=(inp.type.shape)) for inp in function.inputs]
     res = ex.compute(function, input_data)
 
-    device_tree = get_device_tree(args, devices)
     transformed_function = parallel_transform_3d(
-        args, function, device_tree, args.num_microbatches
+        function,
+        args.dp_degree,
+        args.hp_degree,
+        args.pp_degree,
+        devices,
+        args.num_microbatches,
     )
     transformed_function = infer_types(
         transformed_function, transformed_function.inputs
@@ -215,7 +161,6 @@ if __name__ == "__main__":
     )
     parser.add_argument("--hidden_dim", type=int, default=64, help="Hidden dimension")
     parser.add_argument("--output_dim", type=int, default=64, help="Output dimension")
-    parser.add_argument("--world_size", type=int, default=8, help="World size")
     parser.add_argument("--dp_degree", type=int, default=2, help="Data parallel degree")
     parser.add_argument(
         "--pp_degree", type=int, default=2, help="Pipeline parallel degree"

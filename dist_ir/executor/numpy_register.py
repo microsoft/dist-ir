@@ -21,7 +21,7 @@ def allgather(op, xs):
     return (v for i in range(len(xs)))
 
 
-def allreduce(op, xs):
+def allreduce(op, *xs):
     # TODO: Add attribute for reduction operator
     sum_ = np.sum(xs, axis=0)
     return tuple(sum_ for i in range(len(xs)))
@@ -298,12 +298,12 @@ def relu_grad(op, x, dy):
     return dx
 
 
-def mpi_gather(op, xs):
+def mpi_gather(op, *xs):
     dim = op.attributes["dim"]
     return np.concatenate(xs, axis=dim)
 
 
-def mpi_reduce(op, xs):
+def mpi_reduce(op, *xs):
     return np.sum(xs, axis=0)
 
 
@@ -570,7 +570,7 @@ def split(op, x):
     dim = op.attributes["dim"]
     if op.op_type == "Split":
         num_splits = op.attributes["num_splits"]
-    elif op.op_type == "Scatter":
+    elif op.op_type == "MPIScatter":
         num_splits = len(op.attributes["devices"])
     else:
         raise NotImplementedError(op.op_type)
@@ -606,12 +606,10 @@ def unsqueeze(op, x):
 NumPyRegister = {
     ("Add", (np.ndarray, np.ndarray)): add,
     ("Allgather", (tuple,)): allgather,
-    ("Allreduce", (tuple,)): allreduce,
     (
         "BiasFastGeluGrad_dX",
         (np.ndarray, np.ndarray, np.ndarray),
     ): bias_fast_gelu_grad_dx,
-    ("Broadcast", (np.ndarray,)): broadcast,
     ("Cast", (np.ndarray,)): cast,
     ("Concat", (tuple,)): concat,
     ("Concat", (np.ndarray, np.ndarray)): concat2,
@@ -642,8 +640,40 @@ NumPyRegister = {
     ("MatMul", (np.ndarray, np.ndarray)): matmul,
     ("MatMulGrad", (np.ndarray, np.ndarray, np.ndarray)): matmul_grad,
     ("Min", (np.ndarray, np.ndarray)): lambda op, x, y: np.minimum(x, y),
-    ("MPIGather", (tuple,)): mpi_gather,
-    ("MPIReduce", (tuple,)): mpi_reduce,
+    ("MPIAllreduce", (np.ndarray, np.ndarray)): allreduce,
+    ("MPIAllreduce", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): allreduce,
+    ("MPIBroadcast", (np.ndarray,)): broadcast,
+    ("MPIGather", (np.ndarray, np.ndarray)): mpi_gather,
+    ("MPIGather", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): mpi_gather,
+    (
+        "MPIGather",
+        (
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+        ),
+    ): mpi_gather,
+    ("MPIReduce", (np.ndarray, np.ndarray)): mpi_reduce,
+    ("MPIReduce", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): mpi_reduce,
+    (
+        "MPIReduce",
+        (
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+            np.ndarray,
+        ),
+    ): mpi_reduce,
+    ("MPIScatter", (np.ndarray,)): split,
     ("Mul", (np.ndarray, np.ndarray)): mul,
     ("ReduceAllL2", tuple(np.ndarray for i in range(60))): reduce_all_l2,
     ("ReduceAllL2", tuple(np.ndarray for i in range(61))): reduce_all_l2,
@@ -654,7 +684,6 @@ NumPyRegister = {
     ("Relu", (np.ndarray,)): relu,
     ("ReluGrad", (np.ndarray, np.ndarray)): relu_grad,
     ("Reshape", (np.ndarray, np.ndarray)): reshape,
-    ("Scatter", (np.ndarray,)): split,
     ("Select", (tuple,)): select,
     ("Send", (np.ndarray,)): identity,
     ("Shape", (np.ndarray,)): lambda op, x: np.array(x.shape, dtype=np.int64),

@@ -479,6 +479,12 @@ TypePropRegister = {
     ): _mpi_allreduce_prop_fn,
     ("MPIBroadcast", (Tensor,)): _mpi_broadcast_prop_fn,
     ("MPIGather", (Tensor, Tensor)): _mpi_gather_prop_fn,
+    ("MPIGather", (Tensor, Tensor, Tensor, Tensor)): _mpi_gather_prop_fn,
+    ("MPIGather", (Tensor, Tensor, Tensor, Tensor)): _mpi_gather_prop_fn,
+    (
+        "MPIGather",
+        (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor),
+    ): _mpi_gather_prop_fn,
     (
         "MPIReduce",
         (
@@ -486,8 +492,11 @@ TypePropRegister = {
             Tensor,
         ),
     ): _mpi_reduce_prop_fn,
-    ("MPIGather", (Tensor, Tensor, Tensor, Tensor)): _mpi_gather_prop_fn,
     ("MPIReduce", (Tensor, Tensor, Tensor, Tensor)): _mpi_reduce_prop_fn,
+    (
+        "MPIReduce",
+        (Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor),
+    ): _mpi_reduce_prop_fn,
     ("MPIScatter", (Tensor,)): _mpi_scatter_prop_fn,
     ("MPIAllreduce_v2", (TupleType)): _mpi_allreduce_v2_prop_fn,
     ("MPIBroadcast_v2", (Tensor,)): _mpi_broadcast_v2_prop_fn,

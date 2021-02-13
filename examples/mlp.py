@@ -174,23 +174,25 @@ def main(args):
         for j, b in enumerate(transformed_function.outputs):
             if a.name == b.name and a.type.shape == b.type.shape:
                 try:
-                    np.testing.assert_array_almost_equal(res[i], transformed_res[j])
+                    np.testing.assert_array_almost_equal(
+                        res[i], transformed_res[j], decimal=2
+                    )
                 except AssertionError as e:
                     print(f"Outputs {a} and {b} do not match!")
                     print(res[i])
                     print()
                     print(transformed_res[j])
                     print()
+                    print(f"Difference: {np.linalg.norm(res[i] - transformed_res[j])}")
                     print("-" * 100)
                     print()
                 break
-    # for a, b in zip(res, transformed_res):
-    #    np.testing.assert_array_almost_equal(a, b)
     """
     simulator = Simulator(CostModel(topology, device_speeds))
     simulation = simulator.interpret(
         transformed_function, (v.type for v in transformed_function.inputs)
     )
+    print(simulation)
     """
 
 

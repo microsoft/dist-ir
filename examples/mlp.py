@@ -15,6 +15,8 @@ from dist_ir.transforms import (
     PipeDreamScheduler,
 )
 
+DGX_BANDWIDTH_GBPS = 200 * 8.0
+
 
 def mlp(args, devices):
     function = FunctionMaker(name="mlp")
@@ -94,6 +96,10 @@ def main(args):
     topology = Topology()
     world_size = args.dp_degree * args.hp_degree * args.pp_degree
     devices = [topology.add_device("gpu") for i in range(world_size + 1)]
+    for i in range(1, len(devices)):
+        topology.set_bandwidth(devices[0], devices[i], float("inf"))
+        for j in range(i, len(devices)):
+            topology.set_bandwidth(devices[i], devices[j], DGX_BANDWIDTH_GBPS)
 
     function = mlp(args, topology.devices)
     cpprint(function)
@@ -133,13 +139,10 @@ def main(args):
                     print("-" * 100)
                     print()
                 break
-    """
     simulator = Simulator(CostModel(topology, device_speeds))
     simulation = simulator.interpret(
         transformed_function, (v.type for v in transformed_function.inputs)
     )
-    print(simulation)
-    """
 
 
 if __name__ == "__main__":

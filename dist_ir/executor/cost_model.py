@@ -18,36 +18,71 @@ class CostModel:
 
     # TODO instead of passing the op, should we pass the attributes as kwargs?
 
-    def __init__(self, topology, device_speeds):
+    def __init__(self, topology):
         self._topology = topology
-        # TODO shouldn't device speeds be part of the topology?
-        self._device_speeds = device_speeds
 
         def notImplemented(*args):
             raise NotImplementedError
 
         self.cost_functions = {
             ("Add", (Tensor, Tensor)): self._add_cost_fn,
-            ("Allreduce", (TupleType,)): self._allreduce_cost_fn,
-            ("Broadcast", (Tensor,)): self._broadcast_cost_fn,
             ("Cast", (Tensor,)): self._cast_cost_fn,
-            ("Concat", (TupleType,)): self._concat_cost_fn,
+            ("Concat", (Tensor, Tensor)): self._concat_cost_fn,
             ("Identity", (Tensor,)): self._identity_cost_fn,
             ("Join", (Tensor, Tensor)): self._join_cost_fn,
             ("Join", (Tensor, Tensor, Tensor, Tensor)): self._join_cost_fn,
-            ("MPIGather", (TupleType,)): self._mpi_gather_cost_fn,
-            ("MPIReduce", (TupleType,)): self._mpi_reduce_cost_fn,
+            ("MPIAllreduce", (Tensor,) * 2): self._mpi_allreduce_cost_fn,
+            ("MPIAllreduce", (Tensor,) * 4): self._mpi_allreduce_cost_fn,
+            ("MPIAllreduce", (Tensor,) * 8): self._mpi_allreduce_cost_fn,
+            ("MPIAllreduce", (Tensor,) * 16): self._mpi_allreduce_cost_fn,
+            ("MPIAllreduce", (Tensor,) * 32): self._mpi_allreduce_cost_fn,
+            ("MPIAllreduce", (Tensor,) * 64): self._mpi_allreduce_cost_fn,
+            ("MPIAllreduce", (Tensor,) * 128): self._mpi_allreduce_cost_fn,
+            ("MPIAllreduce", (Tensor,) * 256): self._mpi_allreduce_cost_fn,
+            ("MPIAllreduce", (Tensor,) * 512): self._mpi_allreduce_cost_fn,
+            ("MPIAllreduce", (Tensor,) * 1024): self._mpi_allreduce_cost_fn,
+            ("MPIAllreduce", (Tensor,) * 2048): self._mpi_allreduce_cost_fn,
+            ("MPIAllreduce", (Tensor,) * 4096): self._mpi_allreduce_cost_fn,
+            ("MPIAllreduce", (Tensor,) * 8192): self._mpi_allreduce_cost_fn,
+            ("MPIBroadcast", (Tensor,)): self._mpi_broadcast_cost_fn,
+            ("MPIGather", (Tensor,) * 2): self._mpi_gather_cost_fn,
+            ("MPIGather", (Tensor,) * 4): self._mpi_gather_cost_fn,
+            ("MPIGather", (Tensor,) * 8): self._mpi_gather_cost_fn,
+            ("MPIGather", (Tensor,) * 16): self._mpi_gather_cost_fn,
+            ("MPIGather", (Tensor,) * 32): self._mpi_gather_cost_fn,
+            ("MPIGather", (Tensor,) * 64): self._mpi_gather_cost_fn,
+            ("MPIGather", (Tensor,) * 128): self._mpi_gather_cost_fn,
+            ("MPIGather", (Tensor,) * 256): self._mpi_gather_cost_fn,
+            ("MPIGather", (Tensor,) * 512): self._mpi_gather_cost_fn,
+            ("MPIGather", (Tensor,) * 1024): self._mpi_gather_cost_fn,
+            ("MPIGather", (Tensor,) * 2048): self._mpi_gather_cost_fn,
+            ("MPIGather", (Tensor,) * 4096): self._mpi_gather_cost_fn,
+            ("MPIGather", (Tensor,) * 8192): self._mpi_gather_cost_fn,
+            ("MPIReduce", (Tensor,) * 2): self._mpi_reduce_cost_fn,
+            ("MPIReduce", (Tensor,) * 4): self._mpi_reduce_cost_fn,
+            ("MPIReduce", (Tensor,) * 8): self._mpi_reduce_cost_fn,
+            ("MPIReduce", (Tensor,) * 16): self._mpi_reduce_cost_fn,
+            ("MPIReduce", (Tensor,) * 32): self._mpi_reduce_cost_fn,
+            ("MPIReduce", (Tensor,) * 64): self._mpi_reduce_cost_fn,
+            ("MPIReduce", (Tensor,) * 128): self._mpi_reduce_cost_fn,
+            ("MPIReduce", (Tensor,) * 256): self._mpi_reduce_cost_fn,
+            ("MPIReduce", (Tensor,) * 512): self._mpi_reduce_cost_fn,
+            ("MPIReduce", (Tensor,) * 1024): self._mpi_reduce_cost_fn,
+            ("MPIReduce", (Tensor,) * 2048): self._mpi_reduce_cost_fn,
+            ("MPIReduce", (Tensor,) * 4096): self._mpi_reduce_cost_fn,
+            ("MPIReduce", (Tensor,) * 8192): self._mpi_reduce_cost_fn,
+            ("MPIScatter", (Tensor,)): self._mpi_scatter_cost_fn,
+            # ("MPIAllreduce_v2", (TupleType,)): self._allreduce_cost_fn,
             ("Loss", (Tensor, Tensor)): self._loss_cost_fn,
             ("LossGrad", (Tensor, Tensor)): self._loss_grad_cost_fn,
             ("MatMul", (Tensor, Tensor)): self._matmul_cost_fn,
             ("MatMulGrad", (Tensor, Tensor, Tensor)): self._matmul_grad_cost_fn,
             ("Min", (Tensor, Tensor)): self._min_cost_fn,
             ("Relu", (Tensor,)): self._relu_cost_fn,
-            ("Relu", (Tensor, Tensor)): self._relu_grad_cost_fn,
-            ("Scatter", (Tensor,)): self._scatter_cost_fn,
+            ("ReluGrad", (Tensor, Tensor)): self._relu_grad_cost_fn,
             ("Select", (TupleType,)): self._select_cost_fn,
             ("Send", (Tensor,)): self._send_cost_fn,
-            ("Split", (Tensor,)): notImplemented,
+            ("Split", (Tensor,)): self._split_cost_fn,
             ("Shape", (Tensor,)): self._shape_cost_fn,
             ("Slice", (Tensor, Tensor, Tensor, Tensor)): self._slice_cost_fn,
         }
@@ -56,45 +91,15 @@ class CostModel:
         # TODO: Check this cost computation
         flops = x.size()
         # TODO: Use a better way of computing runtime from FLOPs
-        runtime = flops / self._device_speeds[x.device.device_type]
+        runtime = flops / self._topology.device_speeds[x.device.device_type]
         return {x.device: runtime}
-
-    def _allreduce_cost_fn(self, op, xs):
-        input_size = xs.types[0].size()
-        devices = list(xs.get_all_devices())
-        num_devices = len(devices)
-        per_device_data = 2 * input_size * (num_devices - 1) / num_devices
-        per_device_data_gb = per_device_data / BYTES_IN_GB
-        all_bandwidths = []
-        for i in range(len(devices)):
-            for j in range(i, len(devices)):
-                all_bandwidths.append(
-                    self._topology.get_bandwidth(devices[i], devices[j])
-                )
-        average_bandwidth = np.mean(all_bandwidths)
-        cost = per_device_data_gb / average_bandwidth
-
-        return {device: cost for device in devices}
-
-    def _broadcast_cost_fn(self, op, x):
-        cost = x.size()
-        return {d: cost for d in op.attributes["devices"]}
 
     def _cast_cost_fn(self, op, x):
         return {x.device: x.size()}
 
-    def _concat_cost_fn(self, op, xs):
+    def _concat_cost_fn(self, op, *xs):
         # TODO: Compute cost properly
-        devices = xs.get_all_devices()
-        return {device: 0 for device in devices}
-
-    def _mpi_gather_cost_fn(self, op, xs):
-        # TODO: Compute cost properly
-        devices = xs.get_all_devices()
-        return {device: 0 for device in devices}
-
-    def _mpi_reduce_cost_fn(self, op, xs):
-        devices = xs.get_all_devices()
+        devices = [x.device for x in xs]
         return {device: 0 for device in devices}
 
     def _identity_cost_fn(self, op, x):
@@ -116,18 +121,13 @@ class CostModel:
         return {x.device: 0}
 
     def _matmul_cost_fn(self, op, x, y):
-        # TODO integrate device speed
-        return {x.device: 2 * x.shape[0] * x.shape[1] * y.shape[1]}
-
-    def _matmul_cost_fn(self, op, x, y):
         # TODO: Check this cost computation
         flops = 2 * x.shape[0] * x.shape[1] * y.shape[1]
         # TODO: Use a better way of computing runtime from FLOPs
-        runtime = flops / self._device_speeds[x.device.device_type]
+        runtime = flops / self._topology.device_speeds[x.device.device_type]
         return {x.device: runtime}
 
     def _matmul_grad_cost_fn(self, op, x, y, dz):
-        # TODO: Check this cost computation
         # dx = dz * y.T, dy = x.T * dz
         xT = Tensor(dtype=x.dtype, shape=(x.shape[1], x.shape[0]), device=x.device)
         yT = Tensor(dtype=y.dtype, shape=(y.shape[1], y.shape[0]), device=y.device)
@@ -138,15 +138,48 @@ class CostModel:
     def _min_cost_fn(self, op, x, y):
         return {x.device: x.size()}
 
+    def _mpi_allreduce_cost_fn(self, op, *xs):
+        input_size = xs[0].size()
+        devices = [x.device for x in xs]
+        num_devices = len(devices)
+        per_device_data = 2 * input_size * (num_devices - 1) / num_devices
+        per_device_data_gb = per_device_data / BYTES_IN_GB
+        all_bandwidths = []
+        for i in range(len(devices)):
+            for j in range(i + 1, len(devices)):
+                all_bandwidths.append(
+                    self._topology.get_bandwidth(devices[i], devices[j])
+                )
+        average_bandwidth = np.mean(all_bandwidths)
+        cost = per_device_data_gb / average_bandwidth
+
+        return {device: cost for device in devices}
+
+    def _mpi_broadcast_cost_fn(self, op, x):
+        cost = 0
+        # cost = x.size()
+        return {d: cost for d in op.attributes["devices"]}
+
+    def _mpi_gather_cost_fn(self, op, *xs):
+        # TODO: Compute cost properly
+        devices = [x.device for x in xs]
+        return {device: 0 for device in devices}
+
+    def _mpi_reduce_cost_fn(self, op, *xs):
+        # TODO: Compute cost properly
+        devices = [x.device for x in xs]
+        return {device: 0 for device in devices}
+
+    def _mpi_scatter_cost_fn(self, op, x):
+        # cost = x.size()
+        cost = 0
+        return {d: cost for d in op.attributes["devices"]}
+
     def _relu_cost_fn(self, op, x):
         return {x.device: 0}
 
     def _relu_grad_cost_fn(self, op, x, y):
         return {x.device: 0}
-
-    def _scatter_cost_fn(self, op, x):
-        cost = x.size()
-        return {d: cost for d in op.attributes["devices"]}
 
     def _select_cost_fn(self, op, xs):
         costs = {}
@@ -173,7 +206,10 @@ class CostModel:
         return costs
 
     def _shape_cost_fn(self, op, x):
-        return {x.device: 1}  # TODO 1 clock cycle? 1 flop?
+        return {x.device: 0}  # TODO 1 clock cycle? 1 flop?
 
     def _slice_cost_fn(self, op, x, starts, ends, axes):
-        return {x.device: 1}  # TODO is this accurate?
+        return {x.device: 0}  # TODO is this accurate?
+
+    def _split_cost_fn(self, op, x):
+        return {x.device: 0}

@@ -353,14 +353,14 @@ def parallel_transform_3d(
                         ):
                             if d != device:
                                 if (v, device) in forwarded_value_cache:
-                                    logging.info(
+                                    logging.debug(
                                         f"Found ({v.name}, {device.device_id}) in sent value cache"
                                     )
                                     input_values[idx] = forwarded_value_cache[
                                         (v, device)
                                     ]
                                 else:
-                                    print(
+                                    logging.debug(
                                         f"Sending value {v.name} from {d.device_id} to device {device.device_id}"
                                     )
                                     input_values[idx] = _send_value(
@@ -406,7 +406,7 @@ def parallel_transform_3d(
                                         # Weight gradients do not need to be aggregated
                                         # across model parallel partitions.
                                         continue
-                                    logging.info(
+                                    logging.debug(
                                         f"Doing horizontal parallel reduction for microbatch {microbatch_id} for "
                                         f"{tuple(output_map[j][microbatch_id][output][0] for j in range(len(devices)))}"
                                     )
@@ -461,7 +461,7 @@ def parallel_transform_3d(
                                         ).group(1)
                                         == hp_level
                                     )
-                                    logging.info(
+                                    logging.debug(
                                         f"Doing pipeline parallel aggregation for {mb_all_output} "
                                         f"and {mb_k_output} on device {device.device_id}"
                                     )
@@ -489,7 +489,7 @@ def parallel_transform_3d(
         # Collect the pipeline-parallel aggregated function outputs to do data parallel aggregation.
         for output in function.outputs:
             if "dw" in output.name:
-                logging.info(
+                logging.debug(
                     f"Concatenating horizontal parallel values "
                     f"{tuple(output_map[j]['all'][output][0] for j in output_map)}"
                 )
@@ -515,7 +515,7 @@ def parallel_transform_3d(
     # Aggregate data parallel outputs.
     if dp_degree > 1:
         for output in dp_outputs:
-            logging.info(f"Doing data parallel reduction for {dp_outputs[output]}")
+            logging.debug(f"Doing data parallel reduction for {dp_outputs[output]}")
             if "dw" in output.name:
                 _mpi_reduce_values(
                     dp_outputs[output],

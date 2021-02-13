@@ -1,9 +1,7 @@
 import argparse
 from collections import defaultdict, OrderedDict
+import logging
 import numpy as np
-import onnx
-from pathlib import Path
-from contextlib import redirect_stdout
 
 import dist_ir
 from dist_ir.importer import import_from_onnx, parse_tensor_from_file
@@ -81,6 +79,8 @@ def mlp(args, devices):
 
 
 def main(args):
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
     if not args.num_hidden_layers % 2 == 0:
         raise ValueError(
             "Must have even number of hidden layers to support horizontal parallelism"
@@ -167,6 +167,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--hp_degree", type=int, default=2, help="Horizontal parallel degree"
+    )
+    parser.add_argument(
+        "--verbose", action="store_true", default=False, help="Verbose mode"
     )
     args = parser.parse_args()
     main(args)

@@ -155,7 +155,7 @@ def _partition_inputs_hp(function, device_tree, dp_inputs):
     dp_devices = tuple(device_tree[device_tree_root].keys())
     hp_inputs = {}
     for i, dp_device in enumerate(dp_devices):
-        hp_devices = tuple(device_tree[device_tree_root][dp_device])
+        hp_devices = tuple(sorted(device_tree[device_tree_root][dp_device].keys()))
         if len(hp_devices) > 1:
             hp_inputs[dp_inputs[x][i]] = _broadcast_value(
                 dp_inputs[x][i],
@@ -200,7 +200,7 @@ def _partition_inputs_pp(
     dp_devices = tuple(device_tree[device_tree_root].keys())
     pp_inputs = {}
     for i, dp_device in enumerate(dp_devices):
-        hp_devices = tuple(device_tree[device_tree_root][dp_device])
+        hp_devices = tuple(sorted(device_tree[device_tree_root][dp_device].keys()))
         for j, hp_device in enumerate(hp_devices):
             hp_x = hp_inputs[dp_inputs[x][i]][j]
             hp_z = hp_inputs[dp_inputs[z][i]][j]
@@ -296,7 +296,7 @@ def parallel_transform_3d(
     dp_outputs = defaultdict(list)
     for i, dp_device in enumerate(device_tree[device_tree_root]):
         pp_schedules = []
-        hp_devices = device_tree[device_tree_root][dp_device]
+        hp_devices = tuple(sorted(device_tree[device_tree_root][dp_device].keys()))
         # Construct the pipeline parallel schedules for each horizontal parallel partition.
         for j, hp_device in enumerate(hp_devices):
             pp_devices = device_tree[device_tree_root][dp_device][hp_device]
@@ -327,6 +327,9 @@ def parallel_transform_3d(
                     for j, device in enumerate(devices):
                         input_values = []
                         input_devices = []
+                        pp_devices = device_tree[device_tree_root][dp_device][
+                            hp_devices[j]
+                        ]
                         for inp in op.inputs:
                             if inp in function.inputs:
                                 v = transformed_inputs[inp]
@@ -340,7 +343,7 @@ def parallel_transform_3d(
                                 else:
                                     pp_v = pp_inputs[hp_v][0]
                                 input_values.append(pp_v)
-                                input_devices.append(hp_device)
+                                input_devices.append(pp_devices[0])
                             else:
                                 output_value, output_device = output_map[j][
                                     microbatch_id

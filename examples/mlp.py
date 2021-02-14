@@ -92,8 +92,8 @@ def main(args):
             "Must have at least as many layers as pipeline parallel devices"
         )
 
-    device_speeds = {"gpu": 1.0e13}
-    topology = Topology()
+    device_speeds = device_speeds = {"gpu": 1.0e13}
+    topology = Topology(device_speeds)
     world_size = args.dp_degree * args.hp_degree * args.pp_degree
     devices = [topology.add_device("gpu") for i in range(world_size + 1)]
     for i in range(1, len(devices)):
@@ -139,10 +139,11 @@ def main(args):
                     print("-" * 100)
                     print()
                 break
-    simulator = Simulator(CostModel(topology, device_speeds))
+    simulator = Simulator(CostModel(topology))
     simulation = simulator.interpret(
         transformed_function, (v.type for v in transformed_function.inputs)
     )
+    simulation.dump_chrome_trace("distributed_trace.json")
 
 
 if __name__ == "__main__":

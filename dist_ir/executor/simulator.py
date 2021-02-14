@@ -23,10 +23,10 @@ class SimulatorState(AbstractState):
         self.consumers = defaultdict(int)
         self.trace = []
 
-    def add_trace_event(self, op_name, device, start_time, duration):
+    def add_trace_event(self, op_type, device, start_time, duration):
         self.trace.append(
             {
-                "name": op_name,
+                "name": op_type,
                 "ph": "X",
                 "ts": start_time,
                 "dur": duration,
@@ -70,7 +70,7 @@ def _simulate_op(
     # Update the trace and timestamps
     for device in costs:
         state.add_trace_event(
-            op.name,
+            op.op_type,
             device,
             state.timestamps[device],
             costs[device],

@@ -11,11 +11,11 @@ from dist_ir.executor.cost_model import CostModel
 from dist_ir.ir.type import Bool, Float, Int64, Tensor
 from dist_ir.transforms import (
     parallel_transform_3d,
-    hybrid_transform_unrolled,
+    steady_state_transform,
     PipeDreamScheduler,
 )
 
-DGX_BANDWIDTH_GBPS = 200 * 8.0
+DGX_BANDWIDTH_GBPS = 200
 
 
 def mlp(args, devices):
@@ -92,7 +92,7 @@ def main(args):
             "Must have at least as many layers as pipeline parallel devices"
         )
 
-    device_speeds = device_speeds = {"gpu": 1.0e13}
+    device_speeds = device_speeds = {"gpu": 1.0e12}
     topology = Topology(device_speeds)
     world_size = args.dp_degree * args.hp_degree * args.pp_degree
     devices = [topology.add_device("gpu") for i in range(world_size + 1)]
@@ -120,7 +120,7 @@ def main(args):
     transformed_function = infer_types(
         transformed_function, transformed_function.inputs
     )
-    cpprint(transformed_function, width=5000)
+    cpprint(transformed_function, width=1000)
     transformed_res = ex.compute(transformed_function, input_data)
     for i, a in enumerate(function.outputs):
         for j, b in enumerate(transformed_function.outputs):
@@ -139,6 +139,11 @@ def main(args):
                     print("-" * 100)
                     print()
                 break
+    transformed_function, typed_input_values = steady_state_transform(
+        transformed_function
+    )
+    cpprint(transformed_function, width=1000)
+    transformed_function = infer_types(transformed_function, typed_input_values)
     simulator = Simulator(CostModel(topology))
     simulation = simulator.interpret(
         transformed_function, (v.type for v in transformed_function.inputs)

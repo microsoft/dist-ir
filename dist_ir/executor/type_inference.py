@@ -387,9 +387,9 @@ def _select_prop_fn(op, x):
 
 
 def _send_prop_fn(op, x):
-    if not isinstance(x, Tensor):
-        _raise_type_error(op, x)
     device = op.attributes["device"]
+    if not isinstance(x, Tensor) or device == x.device:
+        _raise_type_error(op, x)
     return Tensor(dtype=x.dtype, shape=x.shape, device=device)
 
 

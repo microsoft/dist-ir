@@ -5,19 +5,25 @@ def steady_state_transform(function):
     """Removes any send ops from input values to isolate steady state behavior."""
 
     done = False
-    iteration = 0
     inv_value_maps = []
     global_inv_value_map = {}
     while not done:
-        print(f"Iteration {iteration}")
         done = True
         transformed_function = FunctionMaker()
         value_map = {}
+        input_consumers = set()
+        function_inputs_set = set(function.inputs)
+        for inp in function.inputs:
+            consumers = function.consumers[inp]
+            for consumer in consumers:
+                if set(consumer.inputs).issubset(function_inputs_set):
+                    input_consumers.add(consumer)
         for op in function.ops:
-            if all(inp in function.inputs for inp in op.inputs) and (
+            if op in input_consumers and (
                 op.op_type == "MPIBroadcast"
                 or op.op_type == "MPIScatter"
                 or op.op_type == "Split"
+                or op.op_type == "Send"
             ):
                 for output in op.outputs:
                     v = transformed_function.add_input_value(output.name, output.type)
@@ -46,7 +52,7 @@ def steady_state_transform(function):
             for inv_value_map in inv_value_maps[::-1]:
                 v = inv_value_map[v]
             global_inv_value_map[inp] = v
-        iteration += 1
+        assert len(transformed_function.ops) <= len(function.ops)
         function = transformed_function.finalize()
     typed_input_values = [
         global_inv_value_map[inp] for inp in transformed_function.inputs

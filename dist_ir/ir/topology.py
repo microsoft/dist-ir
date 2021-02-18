@@ -2,11 +2,10 @@ from .device import Device
 
 
 class Topology:
-    def __init__(self, device_speeds):
+    def __init__(self):
         self._device_id_counter = 0
         self._devices = []
         self._bandwidths = {}
-        self.device_speeds = device_speeds
 
     @property
     def devices(self):

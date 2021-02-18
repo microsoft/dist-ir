@@ -22,6 +22,7 @@ class SimulatorState(AbstractState):
         self.live_memory = defaultdict(float)
         self.consumers = defaultdict(int)
         self.trace = []
+        self._function_inputs_set = set(function.inputs)
 
     def add_trace_event(self, op_type, device, start_time, duration):
         self.trace.append(
@@ -77,29 +78,20 @@ def _simulate_op(
         )
         state.timestamps[device] += costs[device]
 
-    # Update the live memory.
     for out_edge in op.outputs:
         state.consumers[out_edge] = len(state.function.consumers[out_edge])
-        # Output value could live on multiple devices (e.g. scatter) so
-        # update memory on all devices:
-        output_devices = out_edge.type.get_all_devices()
-        for output_device in output_devices:
-            state.live_memory[output_device] += out_edge.type.size()
-    # TODO: Can we optimize this using a priority queue?
-    for value in state.consumers:
-        # TODO we are missing a decrement of state.consumers[value] somewhere
-        if state.consumers[value] == 0 and all(
-            value != v for v in state.function.inputs
-        ):
-            value_devices = value.type.get_all_devices()
-            for device in value_devices:
-                state.live_memory[device] -= value.type.size()
 
     # Update the peak memory.
     for device in state.live_memory:
         state.peak_memory[device] = max(
             state.peak_memory[device], state.live_memory[device]
         )
+
+    # Update the live memory.
+    for in_edge in op.inputs:
+        state.consumers[in_edge] -= 1
+        if state.consumers[in_edge] == 0:
+            state.live_memory[in_edge.type.device] -= in_edge.type.size()
 
 
 def _create_semantics(cost_functions, implementations):

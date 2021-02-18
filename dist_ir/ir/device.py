@@ -7,6 +7,8 @@ class Device:
 
     device_id: str
     device_type: str
+    throughput: float = 1.0e14
+    dram_bandwidth: float = 1.2e12
     is_variable: bool = False
 
     device_variable_id: ClassVar[int] = 0

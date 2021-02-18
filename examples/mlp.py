@@ -2,6 +2,7 @@ import argparse
 from collections import defaultdict, OrderedDict
 import logging
 import numpy as np
+import time
 
 import dist_ir
 from dist_ir.importer import import_from_onnx, parse_tensor_from_file
@@ -92,23 +93,28 @@ def main(args):
             "Must have at least as many layers as pipeline parallel devices"
         )
 
-    device_speeds = device_speeds = {"gpu": 1.0e12}
-    topology = Topology(device_speeds)
+    topology = Topology()
     world_size = args.dp_degree * args.hp_degree * args.pp_degree
     devices = [topology.add_device("gpu") for i in range(world_size + 1)]
-    for i in range(1, len(devices)):
-        topology.set_bandwidth(devices[0], devices[i], float("inf"))
-        for j in range(i, len(devices)):
+    for i in range(0, len(devices)):
+        for j in range(i + 1, len(devices)):
             topology.set_bandwidth(devices[i], devices[j], DGX_BANDWIDTH_GBPS)
 
     function = mlp(args, topology.devices)
-    cpprint(function)
+    if args.verbose:
+        cpprint(function)
     function = infer_types(function, function.inputs)
-    cpprint(function)
-    ex = SequentialExecutor("numpy")
-    input_data = [np.random.normal(size=(inp.type.shape)) for inp in function.inputs]
-    res = ex.compute(function, input_data)
+    print(f"Function has {len(function.ops)} ops at start")
+    if args.verbose:
+        cpprint(function)
+    if args.evaluate:
+        ex = SequentialExecutor("numpy")
+        input_data = [
+            np.random.normal(size=(inp.type.shape)) for inp in function.inputs
+        ]
+        res = ex.compute(function, input_data)
 
+    start_time = time.time()
     transformed_function = parallel_transform_3d(
         function,
         args.dp_degree,
@@ -117,37 +123,57 @@ def main(args):
         devices,
         args.num_microbatches,
     )
+    duration = time.time() - start_time
+    print(f"3D transform time: {duration}")
     transformed_function = infer_types(
         transformed_function, transformed_function.inputs
     )
-    cpprint(transformed_function, width=1000)
-    transformed_res = ex.compute(transformed_function, input_data)
-    for i, a in enumerate(function.outputs):
-        for j, b in enumerate(transformed_function.outputs):
-            if a.name == b.name and a.type.shape == b.type.shape:
-                try:
-                    np.testing.assert_array_almost_equal(
-                        res[i], transformed_res[j], decimal=2
-                    )
-                except AssertionError as e:
-                    print(f"Outputs {a} and {b} do not match!")
-                    print(res[i])
-                    print()
-                    print(transformed_res[j])
-                    print()
-                    print(f"Difference: {np.linalg.norm(res[i] - transformed_res[j])}")
-                    print("-" * 100)
-                    print()
-                break
+    print(f"Function has {len(transformed_function.ops)} ops after 3D transform")
+    if args.verbose:
+        cpprint(transformed_function, width=1000)
+    if args.evaluate:
+        transformed_res = ex.compute(transformed_function, input_data)
+        for i, a in enumerate(function.outputs):
+            for j, b in enumerate(transformed_function.outputs):
+                if a.name == b.name and a.type.shape == b.type.shape:
+                    try:
+                        np.testing.assert_array_almost_equal(
+                            res[i], transformed_res[j], decimal=2
+                        )
+                    except AssertionError as e:
+                        print(f"Outputs {a} and {b} do not match!")
+                        print(res[i])
+                        print()
+                        print(transformed_res[j])
+                        print()
+                        print(
+                            f"Difference: {np.linalg.norm(res[i] - transformed_res[j])}"
+                        )
+                        print("-" * 100)
+                        print()
+                    break
+    start_time = time.time()
     transformed_function, typed_input_values = steady_state_transform(
         transformed_function
     )
-    cpprint(transformed_function, width=1000)
+    duration = time.time() - start_time
+    print(f"Steady state transform time: {duration}")
     transformed_function = infer_types(transformed_function, typed_input_values)
+    if args.verbose:
+        cpprint(transformed_function, width=1000)
+    start_time = time.time()
     simulator = Simulator(CostModel(topology))
+    print(f"Function has {len(transformed_function.ops)} ops after steady state")
+    op_counts = defaultdict(lambda: 0)
+    for op in transformed_function.ops:
+        op_counts[op.op_type] += 1
+    for op_type, count in op_counts.items():
+        print(f"{op_type}: {count}")
     simulation = simulator.interpret(
         transformed_function, (v.type for v in transformed_function.inputs)
     )
+    duration = time.time() - start_time
+    print(f"Simulation time: {duration}")
     simulation.dump_chrome_trace("distributed_trace.json")
 
 
@@ -176,6 +202,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--hp_degree", type=int, default=2, help="Horizontal parallel degree"
+    )
+    parser.add_argument(
+        "--evaluate",
+        action="store_true",
+        default=False,
+        help="If set, evaluate the function",
     )
     parser.add_argument(
         "--verbose", action="store_true", default=False, help="Verbose mode"

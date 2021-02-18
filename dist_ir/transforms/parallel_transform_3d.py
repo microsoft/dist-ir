@@ -65,7 +65,7 @@ def _allgather_values(
         return gathered_vs
 
 
-def _allreduce_values(vs, function, output_names):
+def _mpi_allreduce_values(vs, function, output_names):
     return function.add_op(
         "MPIAllreduce",
         inputs=vs,
@@ -112,6 +112,14 @@ def _mpi_gather_values(vs, function, dim, device, output_name):
 
 def _identity(v, function, output_name):
     return function.add_op("Identity", inputs=[v], output_names=[output_name])
+
+
+def _get_op_to_stage_map(stages):
+    op_to_stage = {}
+    for stage in stages:
+        for op in stage.ops:
+            op_to_stage[op] = stage
+    return op_to_stage
 
 
 def _partition_inputs_dp(function, device_tree):
@@ -202,20 +210,25 @@ def _partition_inputs_pp(
     for i, dp_device in enumerate(dp_devices):
         hp_devices = tuple(sorted(device_tree[device_tree_root][dp_device].keys()))
         for j, hp_device in enumerate(hp_devices):
+            pp_devices = device_tree[device_tree_root][dp_device][hp_device]
             hp_x = hp_inputs[dp_inputs[x][i]][j]
             hp_z = hp_inputs[dp_inputs[z][i]][j]
-            pp_inputs[hp_x] = _split_value(
-                hp_x,
-                function,
-                num_splits=num_microbatches,
-                parallelism_level="pp",
-            )
-            pp_inputs[hp_z] = _split_value(
-                hp_z,
-                function,
-                num_splits=num_microbatches,
-                parallelism_level="pp",
-            )
+            if len(pp_devices) > 1:
+                pp_inputs[hp_x] = _split_value(
+                    hp_x,
+                    function,
+                    num_splits=num_microbatches,
+                    parallelism_level="pp",
+                )
+                pp_inputs[hp_z] = _split_value(
+                    hp_z,
+                    function,
+                    num_splits=num_microbatches,
+                    parallelism_level="pp",
+                )
+            else:
+                pp_inputs[hp_x] = [hp_x]
+                pp_inputs[hp_z] = [hp_z]
             for weight in weights:
                 hp_weight = hp_inputs[dp_inputs[weight][i]][j]
                 pp_inputs[hp_weight] = [hp_weight]
@@ -295,22 +308,31 @@ def parallel_transform_3d(
     device_tree_root = tuple(device_tree.keys())[0]
     dp_outputs = defaultdict(list)
     for i, dp_device in enumerate(device_tree[device_tree_root]):
+        # pp_schedules is a list of pipeline parallel schedules, with one schedule
+        # (represented as a list of dicts) list for every horizontal
+        # parallel partition.
+        partition_maps = {}
         pp_schedules = []
         hp_devices = tuple(sorted(device_tree[device_tree_root][dp_device].keys()))
         # Construct the pipeline parallel schedules for each horizontal parallel partition.
         for j, hp_device in enumerate(hp_devices):
             pp_devices = device_tree[device_tree_root][dp_device][hp_device]
-            partition_map = _pipeline_parallel_partition(
+            partition_maps[j] = _pipeline_parallel_partition(
                 function, pp_degree, pp_devices
             )
+            op_to_stage_map = _get_op_to_stage_map(partition_maps[j].keys())
             scheduler = PipeDreamScheduler(num_microbatches)
-            schedule = scheduler.schedule(function, partition_map)
+            schedule = scheduler.schedule(function, partition_maps[j])
             pp_schedules.append(schedule)
 
-        forwarded_value_cache = {}
+        forwarded_value_map = {}
         output_map = defaultdict(lambda: defaultdict(dict))
         matmul_counter = defaultdict(lambda: 0)
         # Jointly iterate through all the schedules, timestep by timestep.
+        # Timesteps will be a tuple of dicts corresponding to the schedules
+        # at this timestep (represented as a dict) for each horizontal parallel
+        # partition. The keys (devices) for each schedule will be different, but the values
+        # should be the same.
         for timesteps in zip(*pp_schedules):
             # For a given set of timesteps, iterate through in order of matching
             # horizontal parallel devices.
@@ -355,26 +377,21 @@ def parallel_transform_3d(
                             zip(op.inputs, input_values, input_devices)
                         ):
                             if d != device:
-                                if (v, device) in forwarded_value_cache:
+                                if (v, device) in forwarded_value_map:
                                     logging.debug(
                                         f"Found ({v.name}, {device.device_id}) in sent value cache"
                                     )
-                                    input_values[idx] = forwarded_value_cache[
-                                        (v, device)
-                                    ]
                                 else:
                                     logging.debug(
-                                        f"Sending value {v.name} from {d.device_id} to device {device.device_id}"
+                                        f"Sending value {inp.name} to device {device.device_id}"
                                     )
-                                    input_values[idx] = _send_value(
+                                    forwarded_value_map[(v, device)] = _send_value(
                                         v,
                                         transformed_function,
                                         device,
                                         output_name=f"{inp.name}_dp_{i}_hp_{j}_pp_{microbatch_id}_device_{device.device_id}",
                                     )
-                                    forwarded_value_cache[(v, device)] = input_values[
-                                        idx
-                                    ]
+                                input_values[idx] = forwarded_value_map[(v, device)]
                         # Add the op once for each device to the transformed function.
                         transformed_outputs = transformed_function.add_op(
                             op.op_type,
@@ -395,6 +412,7 @@ def parallel_transform_3d(
                                 transformed_output,
                                 device,
                             )
+
                     # TODO: Remove debug code
                     j = None
                     device = None
@@ -413,7 +431,7 @@ def parallel_transform_3d(
                                         f"Doing horizontal parallel reduction for microbatch {microbatch_id} for "
                                         f"{tuple(output_map[j][microbatch_id][output][0] for j in range(len(devices)))}"
                                     )
-                                    reduced_outputs = _allreduce_values(
+                                    reduced_outputs = _mpi_allreduce_values(
                                         tuple(
                                             output_map[j][microbatch_id][output][0]
                                             for j in range(len(devices))
@@ -444,14 +462,20 @@ def parallel_transform_3d(
                                 match = re.search("hp\_(.*)\_pp", mb_k_output.name)
                                 hp_level = match.group(1)
                                 if microbatch_id == 0:
-                                    output_map[j]["all"][output] = (
-                                        _identity(
+                                    if num_microbatches > 1:
+                                        output_map[j]["all"][output] = (
+                                            _identity(
+                                                mb_k_output,
+                                                transformed_function,
+                                                f"{output.name}_dp_{i}_hp_{hp_level}_pp_all_device_{mb_k_device.device_id}",
+                                            ),
+                                            mb_k_device,
+                                        )
+                                    else:
+                                        output_map[j]["all"][output] = (
                                             mb_k_output,
-                                            transformed_function,
-                                            f"{output.name}_dp_{i}_hp_{hp_level}_pp_all_device_{mb_k_device.device_id}",
-                                        ),
-                                        mb_k_device,
-                                    )
+                                            mb_k_device,
+                                        )
                                 else:
                                     assert output in output_map[j]["all"]
                                     mb_all_output, mb_all_device = output_map[j]["all"][
@@ -489,8 +513,42 @@ def parallel_transform_3d(
                                             ),
                                             mb_all_device,
                                         )
-        # Collect the pipeline-parallel aggregated function outputs to do data parallel aggregation.
+
+            # Forward any timestep outputs to the next pipeline parallel partition.
+            if pp_degree > 1:
+                for devices in zip(*tuple(sorted(ts.keys()) for ts in timesteps)):
+                    stage, microbatch_id = timesteps[0][devices[0]]
+                    for j, device in enumerate(devices):
+                        pp_devices = device_tree[device_tree_root][dp_device][
+                            hp_devices[j]
+                        ]
+                        for output in stage.outputs:
+                            transformed_output, d = output_map[j][microbatch_id][output]
+                            assert device == d
+                            consumers = function.consumers[output]
+                            consumer_stages = (op_to_stage_map[op] for op in consumers)
+                            consumer_devices = set(
+                                partition_maps[j][consumer_stage]
+                                for consumer_stage in consumer_stages
+                            ).intersection(set(pp_devices))
+                            for consumer_device in consumer_devices:
+                                if device != consumer_device:
+                                    logging.debug(
+                                        f"Sending value {output.name} to device {consumer_device.device_id}"
+                                    )
+
+                                    forwarded_value_map[
+                                        (transformed_output, consumer_device)
+                                    ] = _send_value(
+                                        transformed_output,
+                                        transformed_function,
+                                        consumer_device,
+                                        output_name=f"{output.name}_dp_{i}_hp_{j}_pp_{microbatch_id}_device_{consumer_device.device_id}",
+                                    )
+        # Collect the pipeline-parallel aggregated function outputs from horizontal parallel
+        # partitions to do data parallel aggregation.
         for output in function.outputs:
+            """
             if "dw" in output.name:
                 logging.debug(
                     f"Concatenating horizontal parallel values "
@@ -505,27 +563,49 @@ def parallel_transform_3d(
                         transformed_function,
                         dim=dim,
                         device=device_tree_root,
-                        output_name=f"{output.name}_dp_{i}_hp_all_pp_all_mb_device_{device_tree_root.device_id}",
+                        output_name=f"{output.name}_dp_{i}_hp_all_pp_all_device_{device_tree_root.device_id}",
                     )
                 else:
                     gathered_gradient = output_map[j]["all"][output][0]
-                dp_outputs[output].append(gathered_gradient)
             else:
                 # Values for each horizontal parallel partition will be equal due to allreduce.
                 value, _ = output_map[0]["all"][output]
                 dp_outputs[output].append(value)
+            """
+            dp_outputs[output].append(
+                tuple(output_map[j]["all"][output][0] for j in output_map)
+            )
 
     # Aggregate data parallel outputs.
     if dp_degree > 1:
         for output in dp_outputs:
-            logging.debug(f"Doing data parallel reduction for {dp_outputs[output]}")
-            if "dw" in output.name:
+            if hp_degree > 1:
+                logging.debug(f"Doing data parallel reduction for {dp_outputs[output]}")
+                if "dw" in output.name:
+                    for hp_outputs in dp_outputs[output]:
+                        _mpi_allreduce_values(
+                            hp_outputs,
+                            transformed_function,
+                            output_names=[f"{output.name}_dp_all_hp_all_pp_all"],
+                        )
+            elif "dw" in output.name:
+                outputs = tuple(
+                    dp_outputs[output][j][0] for j in range(len(dp_outputs[output]))
+                )
+                _mpi_allreduce_values(
+                    outputs,
+                    transformed_function,
+                    output_names=[f"{output.name}_dp_all_hp_all_pp_all"],
+                )
+                """
                 _mpi_reduce_values(
                     dp_outputs[output],
                     transformed_function,
                     device=device_tree_root,
                     output_name=output.name,
                 )
+                """
+            """
             else:
                 _mpi_gather_values(
                     dp_outputs[output],
@@ -534,4 +614,5 @@ def parallel_transform_3d(
                     device=device_tree_root,
                     output_name=output.name,
                 )
+            """
     return transformed_function.finalize()

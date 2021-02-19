@@ -22,19 +22,16 @@ from dist_ir.transforms import (
 
 DGX_BANDWIDTH_GBPS = 200
 
+
 def mlp(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, device):
     function = FunctionMaker(name="mlp")
     x = function.add_input_value(
         "x",
-        Tensor(
-            dtype=Float(), shape=(batch_size, input_dim), device=device
-        ),
+        Tensor(dtype=Float(), shape=(batch_size, input_dim), device=device),
     )
     z = function.add_input_value(
         "z",
-        Tensor(
-            dtype=Float(), shape=(batch_size, output_dim), device=device
-        ),
+        Tensor(dtype=Float(), shape=(batch_size, output_dim), device=device),
     )
     weights = []
     input_dim = input_dim
@@ -82,14 +79,16 @@ def mlp(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, device
         )
     return function.finalize()
 
+
 def add_devices_to_topology(topology, num_devices):
     for i in range(num_devices):
         topology.add_device("gpu")
     devices = topology.devices
     for i in range(0, len(devices)):
-        for j in range(i+1, len(devices)):
+        for j in range(i + 1, len(devices)):
             topology.set_bandwidth(devices[i], devices[j], DGX_BANDWIDTH_GBPS)
     return topology
+
 
 def get_all_degrees(n):
     all_degrees = []
@@ -118,15 +117,21 @@ def get_all_degrees(n):
 
 
 def run_experiment(config):
-    (batch_size, input_dim, num_hidden_layers, dp_degree, hp_degree, pp_degree, num_microbatches) = config
+    (
+        batch_size,
+        input_dim,
+        num_hidden_layers,
+        dp_degree,
+        hp_degree,
+        pp_degree,
+        num_microbatches,
+    ) = config
     hidden_dim = input_dim
     output_dim = hidden_dim
     topology = Topology()
     d0 = topology.add_device("gpu")
-    function = mlp(
-        batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, d0
-    )
-    function = infer_types(function, function.inputs) 
+    function = mlp(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, d0)
+    function = infer_types(function, function.inputs)
     world_size = dp_degree * hp_degree * pp_degree
     add_devices_to_topology(topology, world_size)
 
@@ -157,15 +162,16 @@ def run_experiment(config):
     distributed_running_time = max(
         [simulation.timestamps[d] for d in simulation.timestamps]
     )
-    #communication_overhead = measure_communication_overhead(simulation)
+    # communication_overhead = measure_communication_overhead(simulation)
     throughput = batch_size / distributed_running_time
     return throughput
+
 
 def grid_search():
     input_dim = 8192
     hidden_dim = input_dim
     output_dim = input_dim
-    all_cluster_sizes = [16]  # [64, 128, 512, 1024]
+    all_cluster_sizes = [1, 2, 4, 8, 16, 32]  # [64, 128, 512, 1024]
     all_num_hidden_layers = [64]  # [4, 8, 16, 32]
     all_batch_sizes = [8192]  # [512, 1024, 2048, 4096, 8192]
     configs = []
@@ -187,17 +193,52 @@ def grid_search():
                     for num_microbatches in all_num_microbatches:
                         if pp_degree == 1:
                             num_microbatches == 1
-                        configs.append((batch_size, input_dim, num_hidden_layers, dp_degree, hp_degree, pp_degree, num_microbatches))
+                        configs.append(
+                            (
+                                batch_size,
+                                input_dim,
+                                num_hidden_layers,
+                                dp_degree,
+                                hp_degree,
+                                pp_degree,
+                                num_microbatches,
+                            )
+                        )
 
     with Pool() as p:
         results = p.map(run_experiment, configs)
+        # results = map(run_experiment, configs)
 
-    with open("grid_search_results.csv", "w", newline='') as f:
-        fieldnames = ["dp_degree", "hp_degree", "pp_degree", "num_microbatches", "throughput"]
+    with open("grid_search_results.csv", "w", newline="") as f:
+        fieldnames = [
+            "dp_degree",
+            "hp_degree",
+            "pp_degree",
+            "num_microbatches",
+            "throughput",
+        ]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
         for config, throughput in zip(configs, results):
-            (batch_size, input_dim, num_hidden_layers, dp_degree, hp_degree, pp_degree, num_microbatches) = config
-            writer.writerow({"dp_degree": dp_degree, "hp_degree": hp_degree, "pp_degree": pp_degree, "num_microbatches": num_microbatches, "throughput": throughput})
+            (
+                batch_size,
+                input_dim,
+                num_hidden_layers,
+                dp_degree,
+                hp_degree,
+                pp_degree,
+                num_microbatches,
+            ) = config
+            writer.writerow(
+                {
+                    "dp_degree": dp_degree,
+                    "hp_degree": hp_degree,
+                    "pp_degree": pp_degree,
+                    "num_microbatches": num_microbatches,
+                    "throughput": throughput,
+                }
+            )
 
-if __name__=='__main__':
+
+if __name__ == "__main__":
     grid_search()

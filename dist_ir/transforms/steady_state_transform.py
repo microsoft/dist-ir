@@ -1,12 +1,18 @@
 from ..ir.function import FunctionMaker
 
 
-def steady_state_transform(function):
+def steady_state_transform(
+    function,
+    filter_set=set(["MPIBroadcast", "MPIScatter", "Send", "Split"]),
+    exception_set=set(),
+):
     """Removes any send ops from input values to isolate steady state behavior."""
 
     done = False
     inv_value_maps = []
     global_inv_value_map = {}
+    for inp in function.inputs:
+        global_inv_value_map[inp] = inp
     while not done:
         done = True
         transformed_function = FunctionMaker()
@@ -19,11 +25,12 @@ def steady_state_transform(function):
                 if set(consumer.inputs).issubset(function_inputs_set):
                     input_consumers.add(consumer)
         for op in function.ops:
-            if op in input_consumers and (
-                op.op_type == "MPIBroadcast"
-                or op.op_type == "MPIScatter"
-                or op.op_type == "Split"
-                or op.op_type == "Send"
+            if (
+                op in input_consumers
+                and op.op_type in filter_set
+                and not any(
+                    global_inv_value_map[inp] in exception_set for inp in op.inputs
+                )
             ):
                 for output in op.outputs:
                     v = transformed_function.add_input_value(output.name, output.type)

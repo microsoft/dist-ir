@@ -73,8 +73,8 @@ def shard_transform(
                 v = value_map[input_value]
                 if input_value in input_dims:
                     vs = transformed_function.add_op(
-                        "Scatter",
-                        name=f"Scatter/{v.name}",
+                        "MPIScatterToTupleType",
+                        name=f"MPIScatter/{v.name}",
                         inputs=[v],
                         attributes={
                             "devices": devices,
@@ -84,8 +84,8 @@ def shard_transform(
                     )
                 else:
                     vs = transformed_function.add_op(
-                        "Broadcast",
-                        name=f"Broadcast/{v.name}",
+                        "MPIBroadcastToTupleType",
+                        name=f"MPIBroadcast/{v.name}",
                         inputs=[v],
                         attributes={"devices": devices},
                         output_names=[f"{v.name}s"],
@@ -117,9 +117,9 @@ def shard_transform(
             #       source devices.
             for i, output_value in enumerate(subfunction.outputs):
                 reduction_op_type = reduction_params[output_value]["op_type"]
-                if reduction_op_type == "Allreduce":
+                if reduction_op_type == "MPIAllreduce":
                     pmap_output = transformed_function.add_op(
-                        "Allreduce",
+                        "MPIAllreduceFromTupleType",
                         name=f"Allreduce/{output_value.name}",
                         inputs=[pmap_output_values[i]],
                         output_names=[f"{output_value.name}s"],
@@ -127,7 +127,7 @@ def shard_transform(
                 elif reduction_op_type == "MPIReduce":
                     device = reduction_params[output_value]["device"]
                     pmap_output = transformed_function.add_op(
-                        "MPIReduce",
+                        "MPIReduceFromTupleType",
                         name=f"MPIReduce/{output_value.name}",
                         attributes={"device": device},
                         inputs=[pmap_output_values[i]],
@@ -137,7 +137,7 @@ def shard_transform(
                     dim = reduction_params[output_value]["dim"]
                     device = reduction_params[output_value]["device"]
                     pmap_output = transformed_function.add_op(
-                        "MPIGather",
+                        "MPIGatherFromTupleType",
                         name=f"MPIGather/{output_value.name}",
                         inputs=[pmap_output_values[i]],
                         attributes={"dim": dim, "device": device},

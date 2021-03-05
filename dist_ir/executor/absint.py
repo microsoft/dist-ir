@@ -1,4 +1,3 @@
-import numpy as np
 from typing import Any, Dict, Sequence
 
 from ..ir import Function, Op, Value
@@ -116,7 +115,7 @@ def convert_impls_to_semantics(impls):
     def convert_impl(impl_fn):
         def semantics(op: Op, state: AbstractState):
             # Find the op's inputs in state's environment
-            inputs = tuple(state.env[v] for v in op.inputs)
+            inputs = (state.env[v] for v in op.inputs)
             # Execute the implementation on the inputs
             outputs = impl_fn(op, *inputs)
             # Put the outputs back into the state's environment
@@ -124,11 +123,6 @@ def convert_impls_to_semantics(impls):
                 outputs = (outputs,)
             assert len(outputs) == len(op.outputs)
             for x, val in zip(op.outputs, outputs):
-                # if isinstance(val, np.ndarray) and x.type.shape != tuple(val.shape):
-                #    import pdb
-                #
-                #    pdb.set_trace()
-
                 state.env[x] = val
 
         return semantics

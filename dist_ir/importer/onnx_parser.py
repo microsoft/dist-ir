@@ -32,7 +32,7 @@ def _get_numpy_dtype_from_onnx_dtype(onnx_dtype):
     elif onnx_dtype == 7:
         return np.int64
     elif onnx_dtype == 9:
-        return np.bool_
+        return bool
     else:
         raise NotImplementedError(f"onnx_dtype {onnx_dtype}")
 

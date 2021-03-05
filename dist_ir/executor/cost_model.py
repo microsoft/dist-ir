@@ -25,6 +25,7 @@ class CostModel:
         def notImplemented(*args):
             raise NotImplementedError
 
+        # TODO: Add support for variadic inputs
         self.cost_functions = {
             ("Add", (Tensor, Tensor)): self._elementwise_cost_fn,
             ("Cast", (Tensor,)): self._cast_cost_fn,
@@ -46,6 +47,7 @@ class CostModel:
             ("MPIAllreduce", (Tensor,) * 4096): self._mpi_allreduce_cost_fn,
             ("MPIAllreduce", (Tensor,) * 8192): self._mpi_allreduce_cost_fn,
             ("MPIBroadcast", (Tensor,)): self._mpi_broadcast_cost_fn,
+            ("MPIBroadcastToTupleType", (Tensor,)): self._mpi_broadcast_cost_fn,
             ("MPIGather", (Tensor,) * 2): self._mpi_gather_cost_fn,
             ("MPIGather", (Tensor,) * 4): self._mpi_gather_cost_fn,
             ("MPIGather", (Tensor,) * 8): self._mpi_gather_cost_fn,
@@ -59,6 +61,7 @@ class CostModel:
             ("MPIGather", (Tensor,) * 2048): self._mpi_gather_cost_fn,
             ("MPIGather", (Tensor,) * 4096): self._mpi_gather_cost_fn,
             ("MPIGather", (Tensor,) * 8192): self._mpi_gather_cost_fn,
+            ("MPIGatherFromTupleType", (TupleType,)): lambda op, xs: self._mpi_gather_cost_fn(op, *xs.types),
             ("MPIReduce", (Tensor,) * 2): self._mpi_reduce_cost_fn,
             ("MPIReduce", (Tensor,) * 4): self._mpi_reduce_cost_fn,
             ("MPIReduce", (Tensor,) * 8): self._mpi_reduce_cost_fn,
@@ -73,6 +76,7 @@ class CostModel:
             ("MPIReduce", (Tensor,) * 4096): self._mpi_reduce_cost_fn,
             ("MPIReduce", (Tensor,) * 8192): self._mpi_reduce_cost_fn,
             ("MPIScatter", (Tensor,)): self._mpi_scatter_cost_fn,
+            ("MPIScatterToTupleType", (Tensor,)): self._mpi_scatter_cost_fn,
             # ("MPIAllreduce_v2", (TupleType,)): self._allreduce_cost_fn,
             ("Loss", (Tensor, Tensor)): self._elementwise_cost_fn,
             ("LossGrad", (Tensor, Tensor)): self._elementwise_cost_fn,

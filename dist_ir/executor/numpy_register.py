@@ -21,16 +21,6 @@ def allgather(op, xs):
     return (v for i in range(len(xs)))
 
 
-def allreduce(op, *xs):
-    # TODO: Add attribute for reduction operator
-    sum_ = np.sum(xs, axis=0)
-    return tuple(sum_ for i in range(len(xs)))
-
-
-def broadcast(op, x):
-    return tuple(x for _ in range(len(op.attributes["devices"])))
-
-
 def bias_fast_gelu_grad_dx(op, dy, x, b):
     kAlpha = np.sqrt(np.pi) * np.sqrt(0.5)
     kGamma = 0.044715
@@ -53,7 +43,7 @@ def cast(op, x):
         1: np.float32,
         6: np.int32,
         7: np.int64,
-        9: np.bool,
+        9: bool,
     }[proto_dtype]
     return x.astype(dtype)
 
@@ -296,6 +286,16 @@ def relu_grad(op, x, dy):
     dx = np.zeros(dy.shape)
     dx[dy > 0] = 1
     return dx
+
+
+def mpi_allreduce(op, *xs):
+    # TODO: Add attribute for reduction operator
+    sum_ = np.sum(xs, axis=0)
+    return tuple(sum_ for i in range(len(xs)))
+
+
+def mpi_broadcast(op, x):
+    return tuple(x for _ in range(len(op.attributes["devices"])))
 
 
 def mpi_gather(op, *xs):
@@ -570,7 +570,7 @@ def split(op, x):
     dim = op.attributes["dim"]
     if op.op_type == "Split":
         num_splits = op.attributes["num_splits"]
-    elif op.op_type == "MPIScatter":
+    elif op.op_type == "MPIScatter" or op.op_type == "MPIScatterToTupleType":
         num_splits = len(op.attributes["devices"])
     else:
         raise NotImplementedError(op.op_type)
@@ -640,19 +640,25 @@ NumPyRegister = {
     ("MatMul", (np.ndarray, np.ndarray)): matmul,
     ("MatMulGrad", (np.ndarray, np.ndarray, np.ndarray)): matmul_grad,
     ("Min", (np.ndarray, np.ndarray)): lambda op, x, y: np.minimum(x, y),
-    ("MPIAllreduce", (np.ndarray,) * 2): allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 4): allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 8): allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 16): allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 32): allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 64): allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 128): allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 256): allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 512): allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 1024): allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 2048): allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 4096): allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 8192): allreduce,
+    (
+        "MPIAllreduceFromTupleType",
+        (tuple,),
+    ): lambda op, *xs: mpi_allreduce(op, *xs[0]),
+    ("MPIAllreduce", (np.ndarray,) * 2): mpi_allreduce,
+    ("MPIAllreduce", (np.ndarray,) * 4): mpi_allreduce,
+    ("MPIAllreduce", (np.ndarray,) * 8): mpi_allreduce,
+    ("MPIAllreduce", (np.ndarray,) * 16): mpi_allreduce,
+    ("MPIAllreduce", (np.ndarray,) * 32): mpi_allreduce,
+    ("MPIAllreduce", (np.ndarray,) * 64): mpi_allreduce,
+    ("MPIAllreduce", (np.ndarray,) * 128): mpi_allreduce,
+    ("MPIAllreduce", (np.ndarray,) * 256): mpi_allreduce,
+    ("MPIAllreduce", (np.ndarray,) * 512): mpi_allreduce,
+    ("MPIAllreduce", (np.ndarray,) * 1024): mpi_allreduce,
+    ("MPIAllreduce", (np.ndarray,) * 2048): mpi_allreduce,
+    ("MPIAllreduce", (np.ndarray,) * 4096): mpi_allreduce,
+    ("MPIAllreduce", (np.ndarray,) * 8192): mpi_allreduce,
+    ("MPIBroadcast", (np.ndarray,)): mpi_broadcast,
+    ("MPIBroadcastToTupleType", (np.ndarray,)): mpi_broadcast,
     ("MPIGather", (np.ndarray,) * 2): mpi_gather,
     ("MPIGather", (np.ndarray,) * 4): mpi_gather,
     ("MPIGather", (np.ndarray,) * 8): mpi_gather,
@@ -666,7 +672,7 @@ NumPyRegister = {
     ("MPIGather", (np.ndarray,) * 2048): mpi_gather,
     ("MPIGather", (np.ndarray,) * 4096): mpi_gather,
     ("MPIGather", (np.ndarray,) * 8192): mpi_gather,
-    ("MPIBroadcast", (np.ndarray,)): broadcast,
+    ("MPIGatherFromTupleType", (tuple,)): lambda op, *xs: mpi_gather(op, *xs[0]),
     ("MPIReduce", (np.ndarray,) * 2): mpi_reduce,
     ("MPIReduce", (np.ndarray,) * 4): mpi_reduce,
     ("MPIReduce", (np.ndarray,) * 8): mpi_reduce,
@@ -681,6 +687,7 @@ NumPyRegister = {
     ("MPIReduce", (np.ndarray,) * 4096): mpi_reduce,
     ("MPIReduce", (np.ndarray,) * 8192): mpi_reduce,
     ("MPIScatter", (np.ndarray,)): split,
+    ("MPIScatterToTupleType", (np.ndarray,)): split,
     ("Mul", (np.ndarray, np.ndarray)): mul,
     ("ReduceAllL2", tuple(np.ndarray for i in range(60))): reduce_all_l2,
     ("ReduceAllL2", tuple(np.ndarray for i in range(61))): reduce_all_l2,

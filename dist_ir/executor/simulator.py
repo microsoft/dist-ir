@@ -81,13 +81,18 @@ def _simulate_op(
     for out_edge in op.outputs:
         state.consumers[out_edge] = len(state.function.consumers[out_edge])
 
+    # Update the live memory with any new activations.
+    for out_edge in op.outputs:
+        state.live_memory[out_edge.type.device] += out_edge.type.size()
+
     # Update the peak memory.
     for device in state.live_memory:
         state.peak_memory[device] = max(
             state.peak_memory[device], state.live_memory[device]
         )
 
-    # Update the live memory.
+    # Update the live memory to reflect any freed activations.
+    # TODO: Don't free live memory for function inputs.
     for in_edge in op.inputs:
         state.consumers[in_edge] -= 1
         if state.consumers[in_edge] == 0:

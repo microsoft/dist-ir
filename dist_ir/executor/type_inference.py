@@ -200,11 +200,11 @@ def _mpi_allreduce_prop_fn(op, *xs):
     return xs
 
 
-def _mpi_allreduce_v2_prop_fn(op, xs):
+def _mpi_allreduce_from_tuple_type_prop_fn(op, xs):
     devices = tuple(t.device for t in xs.types)
     if not (
-        isinstance(xs, tupletype)
-        and all(isinstance(t, tensor) for t in xs.types)
+        isinstance(xs, TupleType)
+        and all(isinstance(t, Tensor) for t in xs.types)
         and len(xs.types) > 0
         and all(t.shape == xs.types[0].shape for t in xs.types)
         and len(set(devices)) == len(devices)
@@ -213,22 +213,27 @@ def _mpi_allreduce_v2_prop_fn(op, xs):
     return xs
 
 
-def _mpi_broadcast_prop_fn(op, x):
+def _mpi_broadcast_prop_fn(op, x, to_tuple_type=False):
     if not isinstance(x, Tensor):
         _raise_type_error(op, x)
     devices = op.attributes["devices"]
-    return tuple(
-        Tensor(dtype=x.dtype, shape=x.shape, device=device) for device in devices
-    )
+    if to_tuple_type:
+        return TupleType(
+            tuple(
+                Tensor(dtype=x.dtype, shape=x.shape, device=device)
+                for device in devices
+            )
+        )
+    else:
+        return tuple(
+            Tensor(dtype=x.dtype, shape=x.shape, device=device) for device in devices
+        )
 
 
 def _mpi_broadcast_v2_prop_fn(op, x):
     if not isinstance(x, Tensor):
         _raise_type_error(op, x)
     devices = op.attributes["devices"]
-    return TupleType(
-        tuple(Tensor(dtype=x.dtype, shape=x.shape, device=device) for device in devices)
-    )
 
 
 def _mpi_gather_prop_fn(op, *xs):
@@ -254,7 +259,7 @@ def _mpi_gather_prop_fn(op, *xs):
     return Tensor(dtype=xs[0].dtype, shape=output_shape, device=device)
 
 
-def _mpi_gather_v2_prop_fn(op, x):
+def _mpi_gather_from_tuple_type_prop_fn(op, x):
     if not (
         isinstance(x, TupleType)
         and all(isinstance(t, Tensor) for t in x.types)
@@ -307,7 +312,7 @@ def _mpi_reduce_v2_prop_fn(op, x):
     return Tensor(dtype=x.types[0].dtype, shape=x.types[0].shape, device=device)
 
 
-def _mpi_scatter_prop_fn(op, x):
+def _mpi_scatter_prop_fn(op, x, to_tuple_type=False):
     if not isinstance(x, Tensor):
         _raise_type_error(op, x)
     devices = op.attributes["devices"]
@@ -321,31 +326,18 @@ def _mpi_scatter_prop_fn(op, x):
     output_shape = list(x.shape)
     output_shape[dim] //= len(devices)
     output_shape = tuple(output_shape)
-    return tuple(
-        Tensor(dtype=x.dtype, shape=output_shape, device=device) for device in devices
-    )
-
-
-def _mpi_scatter_v2_prop_fn(op, x):
-    if not isinstance(x, Tensor):
-        _raise_type_error(op, x)
-    devices = op.attributes["devices"]
-    # Check devices is a list of distinct Devices
-    assert isinstance(devices, Sequence) and all(isinstance(d, Device) for d in devices)
-    assert len(devices) == len(set(devices))
-    dim = op.attributes["dim"]
-    # TODO: Should we add another function to raise an attribute error?
-    assert dim >= 0 and dim < len(x.shape)
-    assert x.shape[dim] % len(devices) == 0
-    output_shape = list(x.shape)
-    output_shape[dim] //= len(devices)
-    output_shape = tuple(output_shape)
-    return TupleType(
-        tuple(
+    if to_tuple_type:
+        return TupleType(
+            tuple(
+                Tensor(dtype=x.dtype, shape=output_shape, device=device)
+                for device in devices
+            )
+        )
+    else:
+        return tuple(
             Tensor(dtype=x.dtype, shape=output_shape, device=device)
             for device in devices
         )
-    )
 
 
 def _relu_prop_fn(op, x):
@@ -471,6 +463,7 @@ TypePropRegister = {
             Tensor,
         ),
     ): _join_prop_fn,
+    ("MPIAllreduceFromTupleType", (TupleType,)): _mpi_allreduce_from_tuple_type_prop_fn,
     ("MPIAllreduce", (Tensor,) * 2): _mpi_allreduce_prop_fn,
     ("MPIAllreduce", (Tensor,) * 4): _mpi_allreduce_prop_fn,
     ("MPIAllreduce", (Tensor,) * 8): _mpi_allreduce_prop_fn,
@@ -485,6 +478,9 @@ TypePropRegister = {
     ("MPIAllreduce", (Tensor,) * 4096): _mpi_allreduce_prop_fn,
     ("MPIAllreduce", (Tensor,) * 8192): _mpi_allreduce_prop_fn,
     ("MPIBroadcast", (Tensor,)): _mpi_broadcast_prop_fn,
+    ("MPIBroadcastToTupleType", (Tensor,)): lambda op, x: _mpi_broadcast_prop_fn(
+        op, x, True
+    ),
     ("MPIGather", (Tensor,) * 2): _mpi_gather_prop_fn,
     ("MPIGather", (Tensor,) * 4): _mpi_gather_prop_fn,
     ("MPIGather", (Tensor,) * 8): _mpi_gather_prop_fn,
@@ -498,6 +494,7 @@ TypePropRegister = {
     ("MPIGather", (Tensor,) * 2048): _mpi_gather_prop_fn,
     ("MPIGather", (Tensor,) * 4096): _mpi_gather_prop_fn,
     ("MPIGather", (Tensor,) * 8192): _mpi_gather_prop_fn,
+    ("MPIGatherFromTupleType", (TupleType,)): _mpi_gather_from_tuple_type_prop_fn,
     ("MPIReduce", (Tensor,) * 2): _mpi_reduce_prop_fn,
     ("MPIReduce", (Tensor,) * 4): _mpi_reduce_prop_fn,
     ("MPIReduce", (Tensor,) * 8): _mpi_reduce_prop_fn,
@@ -512,11 +509,10 @@ TypePropRegister = {
     ("MPIReduce", (Tensor,) * 4096): _mpi_reduce_prop_fn,
     ("MPIReduce", (Tensor,) * 8192): _mpi_reduce_prop_fn,
     ("MPIScatter", (Tensor,)): _mpi_scatter_prop_fn,
-    ("MPIAllreduce_v2", (TupleType)): _mpi_allreduce_v2_prop_fn,
-    ("MPIBroadcast_v2", (Tensor,)): _mpi_broadcast_v2_prop_fn,
-    ("MPIGather_v2", (TupleType,)): _mpi_gather_v2_prop_fn,
+    ("MPIScatterToTupleType", (Tensor,)): lambda op, x: _mpi_scatter_prop_fn(
+        op, x, True
+    ),
     ("MPIReduce_v2", (TupleType,)): _mpi_reduce_v2_prop_fn,
-    ("MPIScatter_v2", (Tensor,)): _mpi_scatter_v2_prop_fn,
     ("Loss", (Tensor, Tensor)): _loss_prop_fn,
     ("LossGrad", (Tensor, Tensor)): _loss_grad_prop_fn,
     ("LayerNormalization", (Tensor, Tensor, Tensor)): _layer_norm_prop_fn,

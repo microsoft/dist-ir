@@ -12,28 +12,14 @@ def test_import_from_onnx():
     import_from_onnx(onnx_model_path)
 
 
-def test_parse_tensor_from_file():
-    for i in range(5):
-        for j in range(6):
-            tensor_proto_path = (
-                Path(__file__).parent.parent
-                / "examples"
-                / "bert_training_data"
-                / f"sample{i}"
-                / f"feature{j}.pb"
-            )
-            tensor = parse_tensor_from_file(tensor_proto_path)
-            print(tensor)
-
-
 def test_parser():
     mlir_str = """
     func @dp_inf(%wA: !dist.tensor<4x6xf32, 0>, %x: !dist.tensor<8x4xf32, 0>)
     -> (!dist.tensor<8x6xf32, 0>)
     {
-    %xs = "Scatter"(%x) {dim = 0, devices = [1, 2]}
+    %xs = "MPIScatterToTupleType"(%x) {dim = 0, devices = [1, 2]}
         : (!dist.tensor<8x4xf32, 0>) -> tuple<!dist.tensor<4x4xf32, 1>, !dist.tensor<4x4xf32, 2>>
-    %wAs = "Broadcast"(%wA) {devices = [1, 2]}
+    %wAs = "MPIBroadcastToTupleType"(%wA) {devices = [1, 2]}
         : (!dist.tensor<4x6xf32, 0>) -> tuple<!dist.tensor<4x6xf32, 1>, !dist.tensor<4x6xf32, 2>>
     %ys = "dist.pmap"(%xs, %wAs)
         ({
@@ -46,7 +32,7 @@ def test_parser():
         : (tuple<!dist.tensor<4x4xf32, 1>, !dist.tensor<4x4xf32, 2>>,
         tuple<!dist.tensor<4x6xf32, 1>, !dist.tensor<4x6xf32, 2>>)
         -> tuple<!dist.tensor<4x6xf32, 1>, !dist.tensor<4x6xf32, 2>>
-    %y = "Gather"(%ys) {device = 0, dim = 0}
+    %y = "MPIGatherFromTupleType"(%ys) {device = 0, dim = 0}
         : (tuple<!dist.tensor<4x6xf32, 1>, !dist.tensor<4x6xf32, 2>>) -> !dist.tensor<8x6xf32, 0>
     return %y: !dist.tensor<8x6xf32, 0>
     }

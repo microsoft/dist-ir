@@ -6,24 +6,18 @@ from ..ir.function import FunctionMaker
 from .pipedream_scheduler import PipeDreamScheduler
 
 
-def _scatter_value(v, function, dim, devices, parallelism_level):
-    output_names = [f"{v.name}_{parallelism_level}_{i}" for i in range(len(devices))]
+def _add_values(v1, v2, function, output_name):
+    return function.add_op("Add", inputs=[v1, v2], output_names=[output_name])
+
+
+def _concat_values(v1, v2, function, dim, output_name):
     return function.add_op(
-        "MPIScatter",
-        inputs=[v],
-        attributes={"dim": dim, "devices": devices},
-        output_names=output_names,
+        "Concat", inputs=[v1, v2], attributes={"dim": dim}, output_names=[output_name]
     )
 
 
-def _broadcast_value(v, function, devices, parallelism_level):
-    output_names = [f"{v.name}_{parallelism_level}_{i}" for i in range(len(devices))]
-    return function.add_op(
-        "MPIBroadcast",
-        inputs=[v],
-        attributes={"devices": devices},
-        output_names=output_names,
-    )
+def _identity(v, function, output_name):
+    return function.add_op("Identity", inputs=[v], output_names=[output_name])
 
 
 def _split_value(v, function, num_splits, parallelism_level):
@@ -54,6 +48,26 @@ def _mpi_allreduce_values(vs, function, output_names):
     )
 
 
+def _mpi_broadcast_value(v, function, devices, parallelism_level):
+    output_names = [f"{v.name}_{parallelism_level}_{i}" for i in range(len(devices))]
+    return function.add_op(
+        "MPIBroadcast",
+        inputs=[v],
+        attributes={"devices": devices},
+        output_names=output_names,
+    )
+
+
+def _mpi_scatter_value(v, function, dim, devices, parallelism_level):
+    output_names = [f"{v.name}_{parallelism_level}_{i}" for i in range(len(devices))]
+    return function.add_op(
+        "MPIScatter",
+        inputs=[v],
+        attributes={"dim": dim, "devices": devices},
+        output_names=output_names,
+    )
+
+
 def _send_value(v, function, device, output_name):
     return function.add_op(
         "Send",
@@ -61,20 +75,6 @@ def _send_value(v, function, device, output_name):
         attributes={"device": device},
         output_names=[output_name],
     )
-
-
-def _add_values(v1, v2, function, output_name):
-    return function.add_op("Add", inputs=[v1, v2], output_names=[output_name])
-
-
-def _concat_values(v1, v2, function, dim, output_name):
-    return function.add_op(
-        "Concat", inputs=[v1, v2], attributes={"dim": dim}, output_names=[output_name]
-    )
-
-
-def _identity(v, function, output_name):
-    return function.add_op("Identity", inputs=[v], output_names=[output_name])
 
 
 def _get_op_to_stage_map(stages):
@@ -93,14 +93,14 @@ def _partition_inputs_dp(function, device_tree):
     dp_devices = tuple(sorted(device_tree[device_tree_root].keys()))
     dp_inputs = {}
     if len(dp_devices) > 1:
-        dp_inputs[x] = _scatter_value(
+        dp_inputs[x] = _mpi_scatter_value(
             x, function, dim=0, devices=dp_devices, parallelism_level="dp"
         )
-        dp_inputs[z] = _scatter_value(
+        dp_inputs[z] = _mpi_scatter_value(
             z, function, dim=0, devices=dp_devices, parallelism_level="dp"
         )
         for weight in weights:
-            dp_inputs[weight] = _broadcast_value(
+            dp_inputs[weight] = _mpi_broadcast_value(
                 weight, function, devices=dp_devices, parallelism_level="dp"
             )
     else:
@@ -128,13 +128,13 @@ def _partition_inputs_hp(function, device_tree, dp_inputs):
     for i, dp_device in enumerate(dp_devices):
         hp_devices = tuple(sorted(device_tree[device_tree_root][dp_device].keys()))
         if len(hp_devices) > 1:
-            hp_inputs[dp_inputs[x][i]] = _broadcast_value(
+            hp_inputs[dp_inputs[x][i]] = _mpi_broadcast_value(
                 dp_inputs[x][i],
                 function,
                 devices=hp_devices,
                 parallelism_level="hp",
             )
-            hp_inputs[dp_inputs[z][i]] = _broadcast_value(
+            hp_inputs[dp_inputs[z][i]] = _mpi_broadcast_value(
                 dp_inputs[z][i],
                 function,
                 devices=hp_devices,
@@ -143,7 +143,7 @@ def _partition_inputs_hp(function, device_tree, dp_inputs):
             for j, weight in enumerate(weights):
                 dim = (j + 1) % 2
                 # dim = 1
-                hp_inputs[dp_inputs[weight][i]] = _scatter_value(
+                hp_inputs[dp_inputs[weight][i]] = _mpi_scatter_value(
                     dp_inputs[weight][i],
                     function,
                     dim=dim,

@@ -3,8 +3,6 @@ import logging
 import re
 
 from ..ir.function import FunctionMaker
-from ..ir.op import Op
-from ..ir import Device, cpprint
 from .pipedream_scheduler import PipeDreamScheduler
 
 
@@ -36,15 +34,6 @@ def _split_value(v, function, num_splits, parallelism_level):
         inputs=[v],
         attributes={"dim": 0, "num_splits": num_splits},
         output_names=output_names,
-    )
-
-
-def _gather_values(vs, function, dim, device, output_name):
-    return function.add_op(
-        "MPIGather",
-        inputs=[_join_tuple(vs, function, output_name=output_name)],
-        attributes={"dim": dim, "device": device},
-        output_names=[output_name],
     )
 
 
@@ -81,24 +70,6 @@ def _add_values(v1, v2, function, output_name):
 def _concat_values(v1, v2, function, dim, output_name):
     return function.add_op(
         "Concat", inputs=[v1, v2], attributes={"dim": dim}, output_names=[output_name]
-    )
-
-
-def _mpi_reduce_values(vs, function, device, output_name):
-    return function.add_op(
-        "MPIReduce",
-        inputs=vs,
-        attributes={"device": device},
-        output_names=[output_name],
-    )
-
-
-def _mpi_gather_values(vs, function, dim, device, output_name):
-    return function.add_op(
-        "MPIGather",
-        inputs=vs,
-        attributes={"dim": dim, "device": device},
-        output_names=[output_name],
     )
 
 

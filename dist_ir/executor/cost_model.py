@@ -33,6 +33,19 @@ class CostModel:
             ("Identity", (Tensor,)): self._identity_cost_fn,
             ("Join", (Tensor, Tensor)): self._join_cost_fn,
             ("Join", (Tensor, Tensor, Tensor, Tensor)): self._join_cost_fn,
+            ("MPIAllgather", (Tensor,) * 2): self._mpi_allgather_cost_fn,
+            ("MPIAllgather", (Tensor,) * 4): self._mpi_allgather_cost_fn,
+            ("MPIAllgather", (Tensor,) * 8): self._mpi_allgather_cost_fn,
+            ("MPIAllgather", (Tensor,) * 16): self._mpi_allgather_cost_fn,
+            ("MPIAllgather", (Tensor,) * 32): self._mpi_allgather_cost_fn,
+            ("MPIAllgather", (Tensor,) * 64): self._mpi_allgather_cost_fn,
+            ("MPIAllgather", (Tensor,) * 128): self._mpi_allgather_cost_fn,
+            ("MPIAllgather", (Tensor,) * 256): self._mpi_allgather_cost_fn,
+            ("MPIAllgather", (Tensor,) * 512): self._mpi_allgather_cost_fn,
+            ("MPIAllgather", (Tensor,) * 1024): self._mpi_allgather_cost_fn,
+            ("MPIAllgather", (Tensor,) * 2048): self._mpi_allgather_cost_fn,
+            ("MPIAllgather", (Tensor,) * 4096): self._mpi_allgather_cost_fn,
+            ("MPIAllgather", (Tensor,) * 8192): self._mpi_allgather_cost_fn,
             ("MPIAllreduce", (Tensor,) * 2): self._mpi_allreduce_cost_fn,
             ("MPIAllreduce", (Tensor,) * 4): self._mpi_allreduce_cost_fn,
             ("MPIAllreduce", (Tensor,) * 8): self._mpi_allreduce_cost_fn,
@@ -61,7 +74,10 @@ class CostModel:
             ("MPIGather", (Tensor,) * 2048): self._mpi_gather_cost_fn,
             ("MPIGather", (Tensor,) * 4096): self._mpi_gather_cost_fn,
             ("MPIGather", (Tensor,) * 8192): self._mpi_gather_cost_fn,
-            ("MPIGatherFromTupleType", (TupleType,)): lambda op, xs: self._mpi_gather_cost_fn(op, *xs.types),
+            (
+                "MPIGatherFromTupleType",
+                (TupleType,),
+            ): lambda op, xs: self._mpi_gather_cost_fn(op, *xs.types),
             ("MPIReduce", (Tensor,) * 2): self._mpi_reduce_cost_fn,
             ("MPIReduce", (Tensor,) * 4): self._mpi_reduce_cost_fn,
             ("MPIReduce", (Tensor,) * 8): self._mpi_reduce_cost_fn,
@@ -135,6 +151,22 @@ class CostModel:
     def _min_cost_fn(self, op, x, y):
         return {x.device: x.size()}
 
+    def _mpi_allgather_cost_fn(self, op, *xs):
+        # TODO: Verify correctness
+        devices = [x.device for x in xs]
+        all_bandwidths = []
+        for i in range(len(devices)):
+            for j in range(i + 1, len(devices)):
+                all_bandwidths.append(
+                    self._topology.get_bandwidth(devices[i], devices[j])
+                )
+        average_bandwidth = np.mean(all_bandwidths)
+        average_input_size = np.mean([x.size() for x in xs]) * xs[0].dtype.size
+        per_device_data = 2 * average_input_size * (len(devices) - 1) / len(devices)
+        per_device_data_gb = per_device_data / BYTES_IN_GB
+        cost = per_device_data_gb / average_bandwidth
+        return {device: cost for device in device}
+
     def _mpi_allreduce_cost_fn(self, op, *xs):
         input_size = xs[0].size()
         devices = [x.device for x in xs]
@@ -158,11 +190,11 @@ class CostModel:
         return {d: cost for d in op.attributes["devices"]}
 
     def _mpi_gather_cost_fn(self, op, *xs):
-        input_size = xs[0].size() * xs[0].dtype.size
-        input_size_gb = input_size / BYTES_IN_GB
         output_device = op.attributes["device"]
         costs = {output_device: 0}
         for x in xs:
+            input_size = x.size() * x.dtype.size
+            input_size_gb = input_size / BYTES_IN_GB
             bandwidth = self._topology.get_bandwidth(x.device, output_device)
             transfer_time = input_size_gb / bandwidth
             costs[x.device] = transfer_time

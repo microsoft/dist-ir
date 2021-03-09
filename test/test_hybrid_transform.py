@@ -33,14 +33,14 @@ def test_hybrid_transform():
     dp_config = {
         "input_dims": {function.inputs[0]: 0},
         "reduction_params": {
-            function.outputs[0]: {"op_type": "Gather", "dim": 0, "device": devices[0]}
+            function.outputs[0]: {"op_type": "MPIGather", "dim": 0, "device": devices[0]}
         },
         "devices": (devices[1], devices[5]),
         "verify_fn": None,
     }
     hp_config = {
         "input_dims": {function.inputs[1]: 1, function.inputs[2]: 0},
-        "reduction_params": {function.outputs[0]: {"op_type": "Allreduce"}},
+        "reduction_params": {function.outputs[0]: {"op_type": "MPIAllreduce"}},
         "devices": (devices[3], devices[7]),
         "verify_fn": None,
     }

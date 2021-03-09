@@ -144,13 +144,6 @@ def import_from_onnx(onnx_model, default_device=None, parse_input_data=True):
         if parse_input_data:
             input_data[v] = _parse_tensor_proto(value)
 
-    """
-    for value in onnx_model.graph.value_info:
-        print(f"Adding input {value.name} from graph.value_info")
-        add_input(value)
-    print()
-    """
-
     for value in onnx_model.graph.input:
         print(f"Adding input {value.name} from graph.input")
         add_input(value)

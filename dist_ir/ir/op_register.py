@@ -44,6 +44,7 @@ OpRegister = {
     "MatMulGrad": OpRegisterEntry(num_inputs=3, num_outputs=2),
     "Min": OpRegisterEntry(variadic_inputs=True, num_outputs=1),
     "MixedPrecisionScale": OpRegisterEntry(num_inputs=2, num_outputs=1),
+    "MPIAllgather": OpRegisterEntry(variadic_inputs=True, variadic_outputs=True),
     "MPIAllreduce": OpRegisterEntry(variadic_inputs=True, variadic_outputs=True),
     "MPIBroadcast": OpRegisterEntry(num_inputs=1, variadic_outputs=True),
     "MPIGather": OpRegisterEntry(variadic_inputs=True, num_outputs=1),

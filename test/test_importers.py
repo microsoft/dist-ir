@@ -52,4 +52,4 @@ def test_parser():
 
 
 if __name__ == "__main__":
-    test_parse_tensor_from_proto()
+    test_import_from_onnx()

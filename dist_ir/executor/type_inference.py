@@ -30,28 +30,6 @@ def _raise_type_error(op, *args):
     raise ValueError(f"Type error: op\n{op}\nwas given arguments\n{tuple(args)}")
 
 
-def _allgather_prop_fn(op, xs):
-    devices = tuple(t.device for t in xs.types)
-    dtypes = tuple(t.dtype for t in xs.types)
-    if not (
-        isinstance(xs, TupleType)
-        and all(isinstance(t, Tensor) for t in xs.types)
-        and len(xs.types) > 0
-        and len(set(dtypes)) == 1
-        and len(set(devices)) == len(devices)
-    ):
-        _raise_type_error(op, xs)
-    dim = op.attributes["dim"]
-    shape = list(xs.types[0].shape)
-    for typ in xs.types[1:]:
-        shape[dim] += typ.shape[dim]
-    return TupleType(
-        types=tuple(
-            Tensor(shape=tuple(shape), dtype=dtypes[0], device=d) for d in devices
-        )
-    )
-
-
 # TODO update the below prop functions to be as robust as _allreduce_prop_fn
 
 
@@ -188,12 +166,31 @@ def _min_prop_fn(op, x, y):
     return x
 
 
+def _mpi_allgather_prop_fn(op, *xs):
+    devices = tuple(x.device for x in xs)
+    dtypes = tuple(x.dtype for x in xs)
+    if not (
+        all(isinstance(x, Tensor) for x in xs)
+        and len(xs) > 0
+        and len(set(dtypes)) == 1
+        and len(set(devices)) == len(devices)
+    ):
+        _raise_type_error(op, xs)
+    dim = op.attributes["dim"]
+    shape = list(xs[0].shape)
+    for x in xs[1:]:
+        shape[dim] += x.shape[dim]
+    return tuple(Tensor(shape=tuple(shape), dtype=dtypes[0], device=d) for d in devices)
+
+
 def _mpi_allreduce_prop_fn(op, *xs):
     devices = tuple(x.device for x in xs)
+    dtypes = tuple(x.dtype for x in xs)
     if not (
         all(isinstance(x, Tensor) for x in xs)
         and len(xs) > 0
         and all(x.shape == xs[0].shape for x in xs)
+        and len(set(dtypes)) == 1
         and len(set(devices)) == len(devices)
     ):
         _raise_type_error(op, *xs)
@@ -439,7 +436,6 @@ def _transpose_prop_fn(op, x):
 
 TypePropRegister = {
     ("Add", (Tensor, Tensor)): _elementwise_tensor_op_prop_fn,
-    ("Allgather", (TupleType,)): _allgather_prop_fn,
     ("Cast", (Tensor,)): _cast_prop_fn,
     # ("Concat", (TupleType,)): _concat_prop_fn,
     ("Concat", (Tensor, Tensor)): _concat_prop_fn,
@@ -464,6 +460,19 @@ TypePropRegister = {
         ),
     ): _join_prop_fn,
     ("MPIAllreduceFromTupleType", (TupleType,)): _mpi_allreduce_from_tuple_type_prop_fn,
+    ("MPIAllgather", (Tensor,) * 2): _mpi_allgather_prop_fn,
+    ("MPIAllgather", (Tensor,) * 4): _mpi_allgather_prop_fn,
+    ("MPIAllgather", (Tensor,) * 8): _mpi_allgather_prop_fn,
+    ("MPIAllgather", (Tensor,) * 16): _mpi_allgather_prop_fn,
+    ("MPIAllgather", (Tensor,) * 32): _mpi_allgather_prop_fn,
+    ("MPIAllgather", (Tensor,) * 64): _mpi_allgather_prop_fn,
+    ("MPIAllgather", (Tensor,) * 128): _mpi_allgather_prop_fn,
+    ("MPIAllgather", (Tensor,) * 256): _mpi_allgather_prop_fn,
+    ("MPIAllgather", (Tensor,) * 512): _mpi_allgather_prop_fn,
+    ("MPIAllgather", (Tensor,) * 1024): _mpi_allgather_prop_fn,
+    ("MPIAllgather", (Tensor,) * 2048): _mpi_allgather_prop_fn,
+    ("MPIAllgather", (Tensor,) * 4096): _mpi_allgather_prop_fn,
+    ("MPIAllgather", (Tensor,) * 8192): _mpi_allgather_prop_fn,
     ("MPIAllreduce", (Tensor,) * 2): _mpi_allreduce_prop_fn,
     ("MPIAllreduce", (Tensor,) * 4): _mpi_allreduce_prop_fn,
     ("MPIAllreduce", (Tensor,) * 8): _mpi_allreduce_prop_fn,

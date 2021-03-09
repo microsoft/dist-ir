@@ -16,11 +16,6 @@ def add(op, x, y):
     return np.add(x, y)
 
 
-def allgather(op, xs):
-    v = mpi_gather(op, xs)
-    return (v for i in range(len(xs)))
-
-
 def bias_fast_gelu_grad_dx(op, dy, x, b):
     kAlpha = np.sqrt(np.pi) * np.sqrt(0.5)
     kGamma = 0.044715
@@ -286,6 +281,11 @@ def relu_grad(op, x, dy):
     dx = np.zeros(dy.shape)
     dx[dy > 0] = 1
     return dx
+
+
+def mpi_allgather(op, *xs):
+    v = mpi_gather(op, *xs)
+    return tuple(v for i in range(len(xs)))
 
 
 def mpi_allreduce(op, *xs):
@@ -605,7 +605,6 @@ def unsqueeze(op, x):
 
 NumPyRegister = {
     ("Add", (np.ndarray, np.ndarray)): add,
-    ("Allgather", (tuple,)): allgather,
     (
         "BiasFastGeluGrad_dX",
         (np.ndarray, np.ndarray, np.ndarray),
@@ -644,6 +643,19 @@ NumPyRegister = {
         "MPIAllreduceFromTupleType",
         (tuple,),
     ): lambda op, *xs: mpi_allreduce(op, *xs[0]),
+    ("MPIAllgather", (np.ndarray,) * 2): mpi_allgather,
+    ("MPIAllgather", (np.ndarray,) * 4): mpi_allgather,
+    ("MPIAllgather", (np.ndarray,) * 8): mpi_allgather,
+    ("MPIAllgather", (np.ndarray,) * 16): mpi_allgather,
+    ("MPIAllgather", (np.ndarray,) * 32): mpi_allgather,
+    ("MPIAllgather", (np.ndarray,) * 64): mpi_allgather,
+    ("MPIAllgather", (np.ndarray,) * 128): mpi_allgather,
+    ("MPIAllgather", (np.ndarray,) * 256): mpi_allgather,
+    ("MPIAllgather", (np.ndarray,) * 512): mpi_allgather,
+    ("MPIAllgather", (np.ndarray,) * 1024): mpi_allgather,
+    ("MPIAllgather", (np.ndarray,) * 2048): mpi_allgather,
+    ("MPIAllgather", (np.ndarray,) * 4096): mpi_allgather,
+    ("MPIAllgather", (np.ndarray,) * 8192): mpi_allgather,
     ("MPIAllreduce", (np.ndarray,) * 2): mpi_allreduce,
     ("MPIAllreduce", (np.ndarray,) * 4): mpi_allreduce,
     ("MPIAllreduce", (np.ndarray,) * 8): mpi_allreduce,

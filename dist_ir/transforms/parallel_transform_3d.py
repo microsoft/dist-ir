@@ -48,21 +48,13 @@ def _gather_values(vs, function, dim, device, output_name):
     )
 
 
-def _allgather_values(
-    vs, function, dim, output_name, expand_tuple=False, expanded_output_names=None
-):
-    gathered_vs = function.add_op(
-        "Allgather",
+def _mpi_allgather_values(vs, function, dim, output_names):
+    return function.add_op(
+        "MPIAllgather",
+        inputs=vs,
         attributes={"dim": dim},
-        inputs=[_join_tuple(vs, function, output_name=output_name)],
-        output_names=[output_name],
+        output_names=output_names,
     )
-    if expand_tuple:
-        return _expand_tuple(
-            gathered_vs, function, len(tuple(vs)), output_names=expanded_output_names
-        )
-    else:
-        return gathered_vs
 
 
 def _mpi_allreduce_values(vs, function, output_names):
@@ -127,7 +119,7 @@ def _partition_inputs_dp(function, device_tree):
 
     x, z, weights = function.inputs[0], function.inputs[1], function.inputs[2:]
     device_tree_root = tuple(device_tree.keys())[0]
-    dp_devices = tuple(device_tree[device_tree_root].keys())
+    dp_devices = tuple(sorted(device_tree[device_tree_root].keys()))
     dp_inputs = {}
     if len(dp_devices) > 1:
         dp_inputs[x] = _scatter_value(
@@ -160,7 +152,7 @@ def _partition_inputs_hp(function, device_tree, dp_inputs):
     """Partitions inputs using horizontal parallelism."""
     x, z, weights = function.inputs[0], function.inputs[1], function.inputs[2:]
     device_tree_root = tuple(device_tree.keys())[0]
-    dp_devices = tuple(device_tree[device_tree_root].keys())
+    dp_devices = tuple(sorted(device_tree[device_tree_root].keys()))
     hp_inputs = {}
     for i, dp_device in enumerate(dp_devices):
         hp_devices = tuple(sorted(device_tree[device_tree_root][dp_device].keys()))
@@ -205,7 +197,7 @@ def _partition_inputs_pp(
     """Partitions inputs using pipeline parallelism."""
     x, z, weights = function.inputs[0], function.inputs[1], function.inputs[2:]
     device_tree_root = tuple(device_tree.keys())[0]
-    dp_devices = tuple(device_tree[device_tree_root].keys())
+    dp_devices = tuple(sorted(device_tree[device_tree_root].keys()))
     pp_inputs = {}
     for i, dp_device in enumerate(dp_devices):
         hp_devices = tuple(sorted(device_tree[device_tree_root][dp_device].keys()))
@@ -287,6 +279,16 @@ def parallel_transform_3d(
 ):
     transformed_function = FunctionMaker(name=function.name)
     device_tree = _get_device_tree(dp_degree, hp_degree, pp_degree, devices)
+    device_tree_root = tuple(device_tree.keys())[0]
+    dp_devices = tuple(sorted(device_tree[device_tree_root].keys()))
+    hp_device_groups = list(
+        zip(
+            *[
+                tuple(sorted(device_tree[device_tree_root][dp_device].keys()))
+                for dp_device in dp_devices
+            ]
+        )
+    )
 
     # Add inputs to the transformed function.
     transformed_inputs = {}
@@ -305,7 +307,6 @@ def parallel_transform_3d(
         num_microbatches,
     )
 
-    device_tree_root = tuple(device_tree.keys())[0]
     dp_outputs = defaultdict(list)
     for i, dp_device in enumerate(device_tree[device_tree_root]):
         # pp_schedules is a list of pipeline parallel schedules, with one schedule
@@ -548,30 +549,6 @@ def parallel_transform_3d(
         # Collect the pipeline-parallel aggregated function outputs from horizontal parallel
         # partitions to do data parallel aggregation.
         for output in function.outputs:
-            """
-            if "dw" in output.name:
-                logging.debug(
-                    f"Concatenating horizontal parallel values "
-                    f"{tuple(output_map[j]['all'][output][0] for j in output_map)}"
-                )
-                match = re.search("dw(.)", output.name)
-                weight_id = ord(match.group(1)) - ord("A")
-                dim = (weight_id + 1) % 2
-                if hp_degree > 1:
-                    gathered_gradient = _mpi_gather_values(
-                        tuple(output_map[j]["all"][output][0] for j in output_map),
-                        transformed_function,
-                        dim=dim,
-                        device=device_tree_root,
-                        output_name=f"{output.name}_dp_{i}_hp_all_pp_all_device_{device_tree_root.device_id}",
-                    )
-                else:
-                    gathered_gradient = output_map[j]["all"][output][0]
-            else:
-                # Values for each horizontal parallel partition will be equal due to allreduce.
-                value, _ = output_map[0]["all"][output]
-                dp_outputs[output].append(value)
-            """
             dp_outputs[output].append(
                 tuple(output_map[j]["all"][output][0] for j in output_map)
             )
@@ -581,38 +558,40 @@ def parallel_transform_3d(
         for output in dp_outputs:
             if hp_degree > 1:
                 logging.debug(f"Doing data parallel reduction for {dp_outputs[output]}")
+                hp_groups = list(zip(*dp_outputs[output]))
                 if "dw" in output.name:
-                    for hp_outputs in dp_outputs[output]:
+                    for i, hp_group in enumerate(hp_groups):
                         _mpi_allreduce_values(
-                            hp_outputs,
+                            hp_group,
                             transformed_function,
+                            output_names=[
+                                f"{output.name}_dp_all_hp_{'-'.join([str(d.device_id) for d in hp_device_groups[i]])}_pp_all"
+                            ],
+                        )
+                else:
+                    for i, hp_group in enumerate(hp_groups):
+                        _mpi_allgather_values(
+                            hp_group,
+                            transformed_function,
+                            dim=0,
                             output_names=[f"{output.name}_dp_all_hp_all_pp_all"],
                         )
-            elif "dw" in output.name:
+
+            else:
                 outputs = tuple(
                     dp_outputs[output][j][0] for j in range(len(dp_outputs[output]))
                 )
-                _mpi_allreduce_values(
-                    outputs,
-                    transformed_function,
-                    output_names=[f"{output.name}_dp_all_hp_all_pp_all"],
-                )
-                """
-                _mpi_reduce_values(
-                    dp_outputs[output],
-                    transformed_function,
-                    device=device_tree_root,
-                    output_name=output.name,
-                )
-                """
-            """
-            else:
-                _mpi_gather_values(
-                    dp_outputs[output],
-                    transformed_function,
-                    dim=0,
-                    device=device_tree_root,
-                    output_name=output.name,
-                )
-            """
+                if "dw" in output.name:
+                    _mpi_allreduce_values(
+                        outputs,
+                        transformed_function,
+                        output_names=[f"{output.name}_dp_all_hp_all_pp_all"],
+                    )
+                else:
+                    _mpi_allgather_values(
+                        outputs,
+                        transformed_function,
+                        dim=0,
+                        output_names=[f"{output.name}_dp_all_hp_all_pp_all"],
+                    )
     return transformed_function.finalize()

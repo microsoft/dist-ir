@@ -6,7 +6,21 @@ def steady_state_transform(
     filter_set=set(["MPIBroadcast", "MPIScatter", "Send", "Split"]),
     exception_set=set(),
 ):
-    """Removes any send ops from input values to isolate steady state behavior."""
+    """Removes initial ops to isolate steady state behavior.
+
+    Removes ops from the given function and constructs a new function with the
+    removed ops' output values as input values. Runs this procedure iteratively
+    until reaching fixed point.
+
+    Args:
+      function: The function to transform.
+      filter_set: The set of op types to remove.
+      exception_set: A set of input values to keep regardless
+                     of the specified filter set.
+
+    Returns:
+      The transformed function.
+    """
 
     done = False
     inv_value_maps = []

@@ -368,7 +368,7 @@ def mlp_dhp_transform(
         # |-> horizontal parallel partition ID
         #     |-> microbatch ID
         #         |-> transformed intermediate value
-        output_map = defaultdict(lambda: defaultdict(dict))
+        intermediate_value_map = defaultdict(lambda: defaultdict(dict))
 
         # A map from microbatch ID to MatMul count. The count is incremented each time
         # a MatMul or MatMulGrad op is executed. Horizontal parallel synchronization
@@ -418,7 +418,7 @@ def mlp_dhp_transform(
                                 input_values.append(pp_v)
                                 input_devices.append(pp_devices[0])
                             else:
-                                output_value, output_device = output_map[j][
+                                output_value, output_device = intermediate_value_map[j][
                                     microbatch_id
                                 ][inp]
                                 input_values.append(output_value)
@@ -466,8 +466,10 @@ def mlp_dhp_transform(
                         for output, transformed_output in zip(
                             op.outputs, transformed_outputs
                         ):
-                            assert output not in output_map[j][microbatch_id]
-                            output_map[j][microbatch_id][output] = (
+                            assert (
+                                output not in intermediate_value_map[j][microbatch_id]
+                            )
+                            intermediate_value_map[j][microbatch_id][output] = (
                                 transformed_output,
                                 device,
                             )
@@ -488,7 +490,9 @@ def mlp_dhp_transform(
                                         continue
                                     # Batch-dependent values are allreduced.
                                     value_names = tuple(
-                                        output_map[j][microbatch_id][output][0]
+                                        intermediate_value_map[j][microbatch_id][
+                                            output
+                                        ][0]
                                         for j in range(len(devices))
                                     )
                                     logging.debug(
@@ -497,7 +501,9 @@ def mlp_dhp_transform(
                                     )
                                     reduced_outputs = _mpi_allreduce_values(
                                         tuple(
-                                            output_map[j][microbatch_id][output][0]
+                                            intermediate_value_map[j][microbatch_id][
+                                                output
+                                            ][0]
                                             for j in range(len(devices))
                                         ),
                                         transformed_function,
@@ -513,7 +519,9 @@ def mlp_dhp_transform(
                                     for k, (d, reduced_output) in enumerate(
                                         zip(devices, reduced_outputs)
                                     ):
-                                        output_map[k][microbatch_id][output] = (
+                                        intermediate_value_map[k][microbatch_id][
+                                            output
+                                        ] = (
                                             reduced_output,
                                             d,
                                         )
@@ -522,9 +530,9 @@ def mlp_dhp_transform(
                     for output in op.outputs:
                         if output in function.outputs:
                             for j, device in enumerate(devices):
-                                mb_k_output, mb_k_device = output_map[j][microbatch_id][
-                                    output
-                                ]
+                                mb_k_output, mb_k_device = intermediate_value_map[j][
+                                    microbatch_id
+                                ][output]
                                 assert mb_k_device == device
                                 match = re.search("hp\_(.*)\_pp", mb_k_output.name)
                                 hp_level = match.group(1)
@@ -532,7 +540,7 @@ def mlp_dhp_transform(
                                     # We clone the output from the first microbatch to create
                                     # the aggregated output.
                                     if num_microbatches > 1:
-                                        output_map[j]["all"][output] = (
+                                        intermediate_value_map[j]["all"][output] = (
                                             _identity(
                                                 mb_k_output,
                                                 transformed_function,
@@ -542,7 +550,7 @@ def mlp_dhp_transform(
                                             mb_k_device,
                                         )
                                     else:
-                                        output_map[j]["all"][output] = (
+                                        intermediate_value_map[j]["all"][output] = (
                                             mb_k_output,
                                             mb_k_device,
                                         )
@@ -551,10 +559,11 @@ def mlp_dhp_transform(
                                     # specially designated aggregation output. In particular,
                                     # we add weights together and concatenate batch-dependent
                                     # values together.
-                                    assert output in output_map[j]["all"]
-                                    mb_all_output, mb_all_device = output_map[j]["all"][
-                                        output
-                                    ]
+                                    assert output in intermediate_value_map[j]["all"]
+                                    (
+                                        mb_all_output,
+                                        mb_all_device,
+                                    ) = intermediate_value_map[j]["all"][output]
                                     assert mb_all_device == device
                                     assert (
                                         re.search(
@@ -567,7 +576,7 @@ def mlp_dhp_transform(
                                         f"and {mb_k_output} on device {device.device_id}"
                                     )
                                     if "dw" in output.name:
-                                        output_map[j]["all"][output] = (
+                                        intermediate_value_map[j]["all"][output] = (
                                             _add_values(
                                                 mb_all_output,
                                                 mb_k_output,
@@ -580,7 +589,7 @@ def mlp_dhp_transform(
                                             mb_all_device,
                                         )
                                     else:
-                                        output_map[j]["all"][output] = (
+                                        intermediate_value_map[j]["all"][output] = (
                                             _concat_values(
                                                 mb_all_output,
                                                 mb_k_output,
@@ -605,7 +614,9 @@ def mlp_dhp_transform(
                         for output in stage.outputs:
                             # An output is forwarded when its consumer devices reside
                             # on a different device than the current stage's device.
-                            transformed_output, d = output_map[j][microbatch_id][output]
+                            transformed_output, d = intermediate_value_map[j][
+                                microbatch_id
+                            ][output]
                             assert device == d
                             consumers = function.consumers[output]
                             consumer_stages = (op_to_stage_map[op] for op in consumers)
@@ -636,7 +647,10 @@ def mlp_dhp_transform(
         # from horizontal parallel partitions to do data parallel aggregation.
         for output in function.outputs:
             dp_outputs[output].append(
-                tuple(output_map[j]["all"][output][0] for j in output_map)
+                tuple(
+                    intermediate_value_map[j]["all"][output][0]
+                    for j in intermediate_value_map
+                )
             )
 
     # Aggregate data parallel outputs.

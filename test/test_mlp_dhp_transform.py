@@ -1,6 +1,5 @@
 from collections import defaultdict
 import numpy as np
-import pdb
 import re
 
 import dist_ir
@@ -10,7 +9,7 @@ from dist_ir.executor import infer_types, SequentialExecutor
 from dist_ir.executor.cost_model import CostModel
 from dist_ir.ir.type import Bool, Float, Int64, Tensor
 from dist_ir.transforms import (
-    parallel_transform_3d,
+    mlp_dhp_transform,
     steady_state_transform,
     PipeDreamScheduler,
 )
@@ -140,7 +139,7 @@ def _test_helper(
     world_size = dp_degree * hp_degree * pp_degree
     add_devices_to_topology(topology, world_size)
 
-    transformed_function = parallel_transform_3d(
+    transformed_function = mlp_dhp_transform(
         function,
         dp_degree,
         hp_degree,

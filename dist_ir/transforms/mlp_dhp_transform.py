@@ -305,10 +305,10 @@ def _get_device_tree(dp_degree, hp_degree, pp_degree, devices):
     return device_tree
 
 
-def parallel_transform_3d(
+def mlp_dhp_transform(
     function, dp_degree, hp_degree, pp_degree, devices, num_microbatches
 ):
-    """Automatically distributes the given function using D/H/P hybrid parallelism."""
+    """Automatically distributes an MLP function using D/H/P hybrid parallelism."""
     transformed_function = FunctionMaker(name=function.name)
     device_tree = _get_device_tree(dp_degree, hp_degree, pp_degree, devices)
     device_tree_root = tuple(device_tree.keys())[0]

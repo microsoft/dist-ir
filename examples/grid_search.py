@@ -146,14 +146,6 @@ def run_experiment(config):
     transformed_function = infer_types(
         transformed_function, transformed_function.inputs
     )
-    """
-    transformed_function, typed_input_values = steady_state_transform(
-        transformed_function
-    )
-    transformed_function = infer_types(
-        transformed_function, typed_input_values
-    )
-    """
     simulator = Simulator(CostModel(topology))
     simulation = simulator.interpret(
         transformed_function,
@@ -162,7 +154,6 @@ def run_experiment(config):
     distributed_running_time = max(
         [simulation.timestamps[d] for d in simulation.timestamps]
     )
-    # communication_overhead = measure_communication_overhead(simulation)
     throughput = batch_size / distributed_running_time
     return throughput
 
@@ -171,9 +162,9 @@ def grid_search():
     input_dim = 8192
     hidden_dim = input_dim
     output_dim = input_dim
-    all_cluster_sizes = [1, 2, 4, 8, 16, 32]  # [64, 128, 512, 1024]
-    all_num_hidden_layers = [64]  # [4, 8, 16, 32]
-    all_batch_sizes = [8192]  # [512, 1024, 2048, 4096, 8192]
+    all_cluster_sizes = [1, 2, 4, 8, 16, 32]
+    all_num_hidden_layers = [64]
+    all_batch_sizes = [8192]
     configs = []
     for num_hidden_layers in all_num_hidden_layers:
         for batch_size in all_batch_sizes:
@@ -207,7 +198,6 @@ def grid_search():
 
     with Pool() as p:
         results = p.map(run_experiment, configs)
-        # results = map(run_experiment, configs)
 
     with open("grid_search_results.csv", "w", newline="") as f:
         fieldnames = [

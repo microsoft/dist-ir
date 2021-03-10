@@ -117,9 +117,7 @@ def _verify_hp(function, transformed_function, outputs, transformed_outputs, dp=
         else:
             aggregated_output = aggregated_outputs[key][0]
         np.testing.assert_array_almost_equal(
-            aggregated_output,
-            indexed_outputs[output_name],
-            decimal=3
+            aggregated_output, indexed_outputs[output_name], decimal=3
         )
 
 

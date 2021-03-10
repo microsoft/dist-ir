@@ -50,4 +50,3 @@ def test_parser():
 
     # TODO fix concat's implementation in numpy register for this:
     # assert np.array_equal(res["%var4"], np.matmul(_x, _wA))
-

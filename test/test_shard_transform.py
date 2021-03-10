@@ -26,7 +26,9 @@ def test_single_variable_data_parallel():
         },
         devices=[d0, d1],
     )
-    transformed_function = infer_types(transformed_function, transformed_function.inputs)
+    transformed_function = infer_types(
+        transformed_function, transformed_function.inputs
+    )
 
     print("-" * 88)
     print("Original function")
@@ -193,7 +195,9 @@ def test_double_variable_horizontal_parallel():
         function=function,
         ops=function.ops,
         input_dims={function.inputs[1]: 1, function.inputs[2]: 0},
-        reduction_params={function.outputs[0]: {"op_type": "MPIAllreduce", "device": d0}},
+        reduction_params={
+            function.outputs[0]: {"op_type": "MPIAllreduce", "device": d0}
+        },
         devices=[d0, d1],
     )
 
@@ -305,6 +309,3 @@ def test_mnist_data_parallel():
     np.testing.assert_array_almost_equal(orig_res[1], transformed_res[1][0])
     np.testing.assert_array_almost_equal(orig_res[2], transformed_res[2])
     np.testing.assert_array_almost_equal(orig_res[3], transformed_res[3][0])
-
-if __name__=='__main__':
-    test_single_variable_data_parallel()

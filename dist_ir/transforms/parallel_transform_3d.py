@@ -252,7 +252,36 @@ def _pipeline_parallel_partition(function, pp_degree, devices):
 
 
 def _get_device_tree(dp_degree, hp_degree, pp_degree, devices):
-    """Constructs a hierarchical device tree given a D/H/P parallelism specification."""
+    """Constructs a hierarchical device tree given a D/H/P parallelism specification.
+
+    For a list of devices [0, 1, 2, 3, 4, 5, 6, 7, 8] and 2/2/2 D/H/P parallelism,
+    the returned device tree will be the following:
+
+    {
+      0: {
+        1: {
+          1: (1, 2),
+          3: (3, 4)
+        },
+        5: {
+          5: (5, 6),
+          7: (7, 8)
+        }
+      }
+    }
+
+    which represents the following hierarchical topology:
+
+                      0
+                   /     \
+                 /         \
+               /             \
+              1               5
+           /     \         /     \
+          1       3       5       7
+         / \     / \     / \     / \
+        1   2   3   4   5   6   7   8
+    """
     world_size = dp_degree * hp_degree * pp_degree
     dp_size = world_size // dp_degree
     hp_size = dp_size // hp_degree
@@ -336,8 +365,8 @@ def parallel_transform_3d(
 
         # A map with the following structure:
         # original intermediate value
-        # |-> horizontal parallel partition id
-        #     |-> microbatch id
+        # |-> horizontal parallel partition ID
+        #     |-> microbatch ID
         #         |-> transformed intermediate value
         output_map = defaultdict(lambda: defaultdict(dict))
 
@@ -614,46 +643,26 @@ def parallel_transform_3d(
     if dp_degree > 1:
         for output in dp_outputs:
             logging.debug(f"Doing data parallel reduction for {dp_outputs[output]}")
-            if hp_degree > 1:
-                # If we applied horizontal parallelism, we need to aggregate across
-                # horizontal parallel replicas.
-                hp_groups = list(zip(*dp_outputs[output]))
-                if "dw" in output.name:
-                    for i, hp_group in enumerate(hp_groups):
+            hp_groups = list(zip(*dp_outputs[output]))
+            if "dw" in output.name:
+                for i, hp_group in enumerate(hp_groups):
+                    if hp_degree > 1:
                         hp_device_group_str = ",".join(
                             [str(d.device_id) for d in hp_device_groups[i]]
                         )
-                        _mpi_allreduce_values(
-                            hp_group,
-                            transformed_function,
-                            output_names=[
-                                f"{output.name}_dp_all_hp_{hp_device_group_str}_pp_all"
-                            ],
-                        )
-                else:
-                    for i, hp_group in enumerate(hp_groups):
-                        _mpi_allgather_values(
-                            hp_group,
-                            transformed_function,
-                            dim=0,
-                            output_names=[f"{output.name}_dp_all_hp_all_pp_all"],
-                        )
-
-            else:
-                # If we did not apply horizontal parallelism, then we can directly
-                # aggregate across data parallel replicas.
-                outputs = tuple(
-                    dp_outputs[output][j][0] for j in range(len(dp_outputs[output]))
-                )
-                if "dw" in output.name:
+                    else:
+                        hp_device_group_str = "all"
                     _mpi_allreduce_values(
-                        outputs,
+                        hp_group,
                         transformed_function,
-                        output_names=[f"{output.name}_dp_all_hp_all_pp_all"],
+                        output_names=[
+                            f"{output.name}_dp_all_hp_{hp_device_group_str}_pp_all"
+                        ],
                     )
-                else:
+            else:
+                for i, hp_group in enumerate(hp_groups):
                     _mpi_allgather_values(
-                        outputs,
+                        hp_group,
                         transformed_function,
                         dim=0,
                         output_names=[f"{output.name}_dp_all_hp_all_pp_all"],

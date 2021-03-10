@@ -120,12 +120,13 @@ def _verify_hp(function, transformed_function, outputs, transformed_outputs, dp=
         np.testing.assert_array_almost_equal(
             aggregated_output,
             indexed_outputs[output_name],
+            decimal=3
         )
 
 
 def _test_helper(
     batch_size=BATCH_SIZE,
-    num_hidden_layers=2,
+    num_hidden_layers=8,
     input_dim=INPUT_DIM,
     dp_degree=1,
     hp_degree=1,

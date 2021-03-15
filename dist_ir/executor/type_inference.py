@@ -287,15 +287,16 @@ def _type_function(function: Function, type_map: Dict[Value, Type]) -> Function:
         # Invariant: inputs of op are already typed (as ops are toposorted)
         typed_inputs = tuple(value_map[inp] for inp in op.inputs)
 
-        # Recursively convert the subfunctions:
-        subfunctions = tuple(_type_function(fn, type_map) for fn in op.subfunctions)
+        # Recursively convert the subfunctions?
+        # TODO how to handle multiple calls to function with varying types/shapes?
+        # subfunctions = tuple(_type_function(fn, type_map) for fn in op.subfunctions)
 
         new_op = Op(
             op_type=op.op_type,
             name=op.name,
             inputs=typed_inputs,
             attributes=op.attributes,
-            subfunctions=subfunctions,
+            subfunctions=op.subfunctions,
             output_names=tuple(v.name for v in op.outputs),
             # Look up output types from type_map
             output_types=tuple(type_map[v] for v in op.outputs),

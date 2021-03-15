@@ -78,6 +78,31 @@ class AbstractInterpreter:
 
         return state
 
+    def interpret_function_call(self, op: Op, state: AbstractState):
+        # Find the op's inputs in state's environment and save environment
+        inputs = tuple(state.env[v] for v in op.inputs)
+        old_env = state.env
+        state.env = {}  # To enforce variable scoping
+
+        # Change state's function pointer to subfunction (TODO necessary?)
+        function = state.function
+        state.function = op.subfunctions[0]
+
+        # Interpret subfunction with appropriate inputs
+        self.interpret(op.subfunctions[0], inputs, state=state)
+
+        # Find the outputs from the state's env
+        results = tuple(state.env[v] for v in op.subfunctions[0].outputs)
+
+        # Put the results back into the state's environment
+        state.env = old_env
+        for x, val in zip(op.outputs, results):
+            state.env[x] = val
+        # Also reset state's function pointer
+        state.function = function
+
+        return state
+
     def interpret(
         self, function: Function, inputs: Sequence[Any], state: AbstractState = None
     ):
@@ -93,7 +118,9 @@ class AbstractInterpreter:
 
         # Execute ops in topological order:
         for op in function.ops:
-            if op.op_type == "Pmap":
+            if op.op_type == "FnCall":
+                self.interpret_function_call(op, state)
+            elif op.op_type == "Pmap":
                 self.interpret_pmap(op, state)
             else:
                 # Function dispatch:

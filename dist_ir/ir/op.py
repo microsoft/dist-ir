@@ -22,7 +22,17 @@ class Op:
     output_types: InitVar[Tuple[Type]] = None
 
     def __post_init__(self, output_names, output_types):
-        if self.op_type == "Pmap":
+        if self.op_type == "FnCall":
+            # Function calls. Subfunction 0 is the called function
+            assert len(self.subfunctions) == 1
+            # Number of inputs is arbitrary but positive
+            assert len(self.inputs) > 0
+            # Number of inputs matches subfunction
+            assert len(self.inputs) == len(self.subfunctions[0].inputs)
+            # Number of outputs is given by subfunction
+            num_outputs = len(self.subfunctions[0].outputs)
+
+        elif self.op_type == "Pmap":
             # Handle pmap specially
             assert len(self.subfunctions) == 1
             # Number of inputs is arbitrary but positive

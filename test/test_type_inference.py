@@ -201,5 +201,24 @@ def test_scatter():
     assert xs.type.types[1].device == d1
 
 
+def test_function_call():
+    layer = FunctionMaker()
+    x = layer.add_input_value("x", None)
+    w = layer.add_input_value("w", None)
+    _ = layer.add_op("MatMul", inputs=[x, w])
+    layer = layer.finalize()
+    fn = FunctionMaker()
+    x = fn.add_input_value("x", Tensor(Float(), (4, 5)))
+    w1 = fn.add_input_value("w1", Tensor(Float(), (5, 6)))
+    w2 = fn.add_input_value("w2", Tensor(Float(), (6, 2)))
+    a1 = fn.add_op("FnCall", inputs=[x, w1], subfunctions=[layer])
+    _ = fn.add_op("FnCall", inputs=[a1, w2], subfunctions=[layer])
+    fn = fn.finalize()
+
+    fn = infer_types(fn, [x, w1, w2])
+    y = fn.outputs[0]
+    assert y.type == Tensor(Float(), (4, 2))
+
+
 if __name__ == "__main__":
     test_pmap()

@@ -331,3 +331,26 @@ def test_pmap_dp():
     (res,) = ex.compute(function, [(x_0, x_1), (_wA, _wA), (_wB, _wB)])
     assert np.array_equal(res[0], np.matmul(np.matmul(x_0, _wA), _wB))
     assert np.array_equal(res[1], np.matmul(np.matmul(x_1, _wA), _wB))
+
+
+def test_function_call():
+    layer = FunctionMaker()
+    x = layer.add_input_value("x", None)
+    w = layer.add_input_value("w", None)
+    _ = layer.add_op("MatMul", inputs=[x, w])
+    layer = layer.finalize()
+    fn = FunctionMaker()
+    x = fn.add_input_value("x", None)
+    w1 = fn.add_input_value("w1", None)
+    w2 = fn.add_input_value("w2", None)
+    a1 = fn.add_op("FnCall", inputs=[x, w1], subfunctions=[layer])
+    _ = fn.add_op("FnCall", inputs=[a1, w2], subfunctions=[layer])
+    fn = fn.finalize()
+    cpprint(fn)
+
+    ex = SequentialExecutor("numpy")
+    _x = np.arange(16 * 4).reshape((16, 4))
+    _w1 = np.ones((4, 2))
+    _w2 = np.ones((2, 1))
+    (res,) = ex.compute(fn, [_x, _w1, _w2])
+    assert np.array_equal(res, np.matmul(np.matmul(_x, _w1), _w2))

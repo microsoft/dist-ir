@@ -104,3 +104,27 @@ def test_chrome_trace():
         transformed_function, (v.type for v in transformed_function.inputs)
     )
     simulation.dump_chrome_trace("test/trace.json")
+
+
+def test_function_call():
+    topology = Topology()
+    d0 = topology.add_device("gpu")
+
+    layer = FunctionMaker()
+    x = layer.add_input_value("x", None)
+    w = layer.add_input_value("w", None)
+    _ = layer.add_op("MatMul", inputs=[x, w])
+    layer = layer.finalize()
+    fn = FunctionMaker()
+    x = fn.add_input_value("x", Tensor(Float(), (4, 5), device=d0))
+    w1 = fn.add_input_value("w1", Tensor(Float(), (5, 6), device=d0))
+    w2 = fn.add_input_value("w2", Tensor(Float(), (6, 2), device=d0))
+    a1 = fn.add_op("FnCall", inputs=[x, w1], subfunctions=[layer])
+    _ = fn.add_op("FnCall", inputs=[a1, w2], subfunctions=[layer])
+    fn = fn.finalize()
+    fn = infer_types(fn, fn.inputs)
+
+    device_speeds = {"gpu": 1.0e13}
+    simulator = Simulator(CostModel(topology, device_speeds))
+    simulation = simulator.interpret(fn, (v.type for v in fn.inputs))
+    simulation.dump_chrome_trace("test/trace.json")

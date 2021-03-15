@@ -79,22 +79,22 @@ def _simulate_op(
 
     # Update the live memory.
     for out_val, conc_val in zip(op.outputs, outputs):
-        if isinstance(conc_val, Tensor):
-            state.consumers[out_val] = len(state.function.consumers[out_val])
+        if isinstance(conc_val, Type):
+            state.consumers[conc_val] = len(state.function.consumers[out_val])
             # Output value could live on multiple devices (e.g. scatter) so
             # update memory on all devices:
-            output_devices = conc_val.type.get_all_devices()
+            output_devices = conc_val.get_all_devices()
             for output_device in output_devices:
-                state.live_memory[output_device] += out_val.type.size()
+                state.live_memory[output_device] += conc_val.size()
     # TODO: Can we optimize this using a priority queue?
     for value in state.consumers:
         # TODO we are missing a decrement of state.consumers[value] somewhere
         if state.consumers[value] == 0 and all(
             value != v for v in state.function.inputs
         ):
-            value_devices = value.type.get_all_devices()
+            value_devices = value.get_all_devices()
             for device in value_devices:
-                state.live_memory[device] -= value.type.size()
+                state.live_memory[device] -= value.size()
 
     # Update the peak memory.
     for device in state.live_memory:

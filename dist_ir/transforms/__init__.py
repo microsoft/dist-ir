@@ -2,5 +2,7 @@ from .fifo_scheduler import FIFOScheduler
 from .filter_transform import filter_transform
 from .mlp_dhp_transform import mlp_dhp_transform
 from .pipeline_parallel_transform import PipelineParallelTransform
+from .pipeline_parallel_transform_v2 import pipeline_parallel_transform_v2
 from .pipedream_scheduler import PipeDreamScheduler
 from .shard_transform import shard_transform
+from .spmd_transform import spmd_transform

@@ -18,9 +18,7 @@ def test_single_device():
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b])
     function = function.finalize()
     function = infer_types(function, [a, b])
-    device_speeds = {"gpu": 1.0e13}
-    # TODO shouldn't device_speeds be set in the topology?
-    simulator = Simulator(CostModel(topology, device_speeds))
+    simulator = Simulator(CostModel(topology))
     state = simulator.interpret(function, (v.type for v in function.inputs))
     assert d in state.timestamps
     assert d in state.peak_memory
@@ -47,7 +45,7 @@ def test_data_parallel():
         ops=function.ops,
         input_dims={function.inputs[0]: 0},
         reduction_params={
-            function.outputs[0]: {"op_type": "Gather", "dim": 0, "device": d0}
+            function.outputs[0]: {"op_type": "MPIGather", "dim": 0, "device": d0}
         },
         devices=[d0, d1],
     )
@@ -56,8 +54,7 @@ def test_data_parallel():
     )
 
     cpprint(transformed_function)
-    device_speeds = {"gpu": 1.0e13}
-    simulator = Simulator(CostModel(topology, device_speeds))
+    simulator = Simulator(CostModel(topology))
     simulator_state = simulator.interpret(
         transformed_function, (v.type for v in transformed_function.inputs)
     )
@@ -84,15 +81,14 @@ def test_chrome_trace():
     function = function.finalize()
     function = infer_types(function, [a, b, c])
 
-    device_speeds = {"gpu": 1.0e13}
-    simulator = Simulator(CostModel(topology, device_speeds))
+    simulator = Simulator(CostModel(topology))
 
     transformed_function = shard_transform(
         function=function,
         ops=function.ops,
         input_dims={function.inputs[0]: 0},
         reduction_params={
-            function.outputs[0]: {"op_type": "Gather", "dim": 0, "device": d0}
+            function.outputs[0]: {"op_type": "MPIGather", "dim": 0, "device": d0}
         },
         devices=[d0, d1],
     )

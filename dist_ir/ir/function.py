@@ -52,7 +52,7 @@ class Function:
             for in_edge in op.inputs:
                 if in_edge not in seen:
                     raise ValueError(
-                        f"Ops are not in topological order: op {op.name} has "
+                        f"Ops are not in topological order: op {op} has "
                         f"unseen edge {in_edge}"
                     )
             for out_edge in op.outputs:
@@ -86,7 +86,7 @@ class Function:
         return value in self.outputs
 
     def get_subfunction(
-        self, ops: List[Op], deepcopy: bool = False, name: Optional[str] = None
+        self, ops: List[Op], deepcopy: bool = False, name: Optional[str] = "bar"
     ) -> Function:
         """Returns a Function comprised of the specified subset of ops."""
         assert not deepcopy  # TODO We shouldn't need this functionality anymore
@@ -124,8 +124,9 @@ class Function:
                 # We need to explicitly set the subfunction outputs because some output
                 # values might have consumers outside the subfunction (external).
                 has_external_output = False
-                if orig_output in self.outputs or any(
-                    [c not in ops for c in self.consumers[orig_output]]
+                if (
+                    orig_output in self.outputs
+                    or len(set(self.consumers[orig_output]).difference(ops)) > 0
                 ):
                     outputs.append(subfunction_output)
                 value_map[orig_output] = subfunction_output
@@ -217,6 +218,10 @@ class FunctionMaker:
             for in_edge in op.inputs:
                 is_output[in_edge] = False
             for out_edge in op.outputs:
+                if out_edge in is_output and not is_output[out_edge]:
+                    print(
+                        f"{out_edge.name} was not an output, but now is output of {op.op_type}"
+                    )
                 is_output[out_edge] = True
 
         self.outputs = [v for v in is_output if is_output[v]]

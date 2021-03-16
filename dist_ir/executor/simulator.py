@@ -22,11 +22,12 @@ class SimulatorState(AbstractState):
         self.live_memory = defaultdict(float)
         self.consumers = defaultdict(int)
         self.trace = []
+        self._function_inputs_set = set(function.inputs)
 
-    def add_trace_event(self, op_name, device, start_time, duration):
+    def add_trace_event(self, op_type, device, start_time, duration):
         self.trace.append(
             {
-                "name": op_name,
+                "name": op_type,
                 "ph": "X",
                 "ts": start_time,
                 "dur": duration,
@@ -70,36 +71,38 @@ def _simulate_op(
     # Update the trace and timestamps
     for device in costs:
         state.add_trace_event(
-            op.name,
+            op.op_type,
             device,
             state.timestamps[device],
             costs[device],
         )
         state.timestamps[device] += costs[device]
 
-    # Update the live memory.
+    # Update the live memory with any new activations.
     for out_edge in op.outputs:
         state.consumers[out_edge] = len(state.function.consumers[out_edge])
-        # Output value could live on multiple devices (e.g. scatter) so
-        # update memory on all devices:
         output_devices = out_edge.type.get_all_devices()
         for output_device in output_devices:
             state.live_memory[output_device] += out_edge.type.size()
-    # TODO: Can we optimize this using a priority queue?
-    for value in state.consumers:
-        # TODO we are missing a decrement of state.consumers[value] somewhere
-        if state.consumers[value] == 0 and all(
-            value != v for v in state.function.inputs
-        ):
-            value_devices = value.type.get_all_devices()
-            for device in value_devices:
-                state.live_memory[device] -= value.type.size()
 
     # Update the peak memory.
     for device in state.live_memory:
         state.peak_memory[device] = max(
             state.peak_memory[device], state.live_memory[device]
         )
+
+    # Update the live memory to reflect any freed activations.
+    function_inputs = set(state.function.inputs)
+    for in_edge in op.inputs:
+        # We don't free live memory for function inputs as these could be for weights
+        # or input data buffers that are active for the entire duration of execution.
+        if in_edge in function_inputs:
+            continue
+        state.consumers[in_edge] -= 1
+        if state.consumers[in_edge] == 0:
+            input_devices = in_edge.type.get_all_devices()
+            for input_device in input_devices:
+                state.live_memory[input_device] -= in_edge.type.size()
 
 
 def _create_semantics(cost_functions, implementations):

@@ -33,7 +33,7 @@ class PipelineParallelScheduler(ABC):
                 if input in function.inputs:
                     remaining_inputs -= 1
             for i in range(self._num_microbatches):
-                self._remaining_inputs[(stage, i)] = remaining_inputs
+                self._remaining_inputs[(stage.name, i)] = remaining_inputs
                 if remaining_inputs == 0:
                     self._ready_stages[device].append((stage, i))
 
@@ -42,6 +42,8 @@ class PipelineParallelScheduler(ABC):
         raise NotImplementedError()
 
     def schedule(self, function, partition_map):
+        # Verify that all stage names are unique
+        assert len(set([stage.name for stage in partition_map])) == len(partition_map)
         self._prepare_stages_to_schedule(function, partition_map)
         op_to_stage = utils.get_op_to_stage_map(list(partition_map.keys()))
         num_scheduled_stages = 0
@@ -61,16 +63,14 @@ class PipelineParallelScheduler(ABC):
                     outputs = stage.outputs
                     for output in outputs:
                         consumer_ops = function.consumers[output]
-                        consumer_stages = utils.get_stages_from_ops(
-                            op_to_stage, consumer_ops
-                        )
+                        consumer_stages = set([op_to_stage[op] for op in consumer_ops])
                         for consumer_stage in consumer_stages:
-                            consumer_stage_key = (consumer_stage, microbatch)
+                            consumer_stage_key = (consumer_stage.name, microbatch)
                             self._remaining_inputs[consumer_stage_key] -= 1
                             if self._remaining_inputs[consumer_stage_key] == 0:
                                 consumer_stage_device = partition_map[consumer_stage]
                                 self._ready_stages[consumer_stage_device].append(
-                                    consumer_stage_key
+                                    (consumer_stage, microbatch)
                                 )
             if len(per_timestep_schedule) == 0:
                 raise RuntimeError(

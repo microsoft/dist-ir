@@ -38,8 +38,8 @@ def test_allreduce():
         ),
     )
     op1 = Op(
-        "Allreduce",
-        "Allreduces/xis",
+        "MPIAllreduceFromTupleType",
+        "Allreduce/xis",
         inputs=[xis],
         output_names=["xs"],
     )
@@ -61,8 +61,8 @@ def test_broadcast():
 
     x = function.add_input_value("x", Tensor(Float(), (4, 4)))
     xs = function.add_op(
-        "Broadcast",
-        "Broadcast/x",
+        "MPIBroadcastToTupleType",
+        "MPIBroadcast/x",
         inputs=[x],
         attributes={"devices": [d0, d1]},
         output_names=["xs"],
@@ -184,8 +184,8 @@ def test_scatter():
 
     x = function.add_input_value("x", Tensor(Float(), (4, 4)))
     xs = function.add_op(
-        "Scatter",
-        "Scatter/x",
+        "MPIScatterToTupleType",
+        "MPIScatter/x",
         inputs=[x],
         attributes={"dim": 0, "devices": [d0, d1]},
         output_names=["xs"],

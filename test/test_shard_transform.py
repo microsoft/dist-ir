@@ -3,7 +3,7 @@ import numpy as np
 from dist_ir.ir import cpprint, Device, FunctionMaker
 from dist_ir.ir.type import Float, Tensor
 from dist_ir.transforms import shard_transform
-from dist_ir.executor import SequentialExecutor
+from dist_ir.executor import SequentialExecutor, infer_types
 
 
 def test_single_variable_data_parallel():
@@ -16,14 +16,18 @@ def test_single_variable_data_parallel():
     b = function.add_input_value("b", Tensor(Float(), (4, 4)))
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
     function = function.finalize()
+    function = infer_types(function, function.inputs)
     transformed_function = shard_transform(
         function=function,
         ops=function.ops,
         input_dims={function.inputs[0]: 0},
         reduction_params={
-            function.outputs[0]: {"op_type": "Gather", "dim": 0, "device": d0}
+            function.outputs[0]: {"op_type": "MPIGather", "dim": 0, "device": d0}
         },
         devices=[d0, d1],
+    )
+    transformed_function = infer_types(
+        transformed_function, transformed_function.inputs
     )
 
     print("-" * 88)
@@ -73,7 +77,7 @@ def test_double_variable_data_parallel():
         ops=function.ops,
         input_dims={function.inputs[0]: 0, function.inputs[2]: 0},
         reduction_params={
-            function.outputs[0]: {"op_type": "Gather", "dim": 0, "device": d0}
+            function.outputs[0]: {"op_type": "MPIGather", "dim": 0, "device": d0}
         },
         devices=[d0, d1],
     )
@@ -132,7 +136,7 @@ def test_single_variable_horizontal_parallel():
         ops=[function.ops[0]],
         input_dims={function.inputs[1]: 1},
         reduction_params={
-            function.ops[0].outputs[0]: {"op_type": "Gather", "dim": 1, "device": d0}
+            function.ops[0].outputs[0]: {"op_type": "MPIGather", "dim": 1, "device": d0}
         },
         devices=[d0, d1],
     )
@@ -191,7 +195,9 @@ def test_double_variable_horizontal_parallel():
         function=function,
         ops=function.ops,
         input_dims={function.inputs[1]: 1, function.inputs[2]: 0},
-        reduction_params={function.outputs[0]: {"op_type": "Allreduce", "device": d0}},
+        reduction_params={
+            function.outputs[0]: {"op_type": "MPIAllreduce", "device": d0}
+        },
         devices=[d0, d1],
     )
 
@@ -261,10 +267,10 @@ def test_mnist_data_parallel():
         ops=function.ops,
         input_dims={function.inputs[0]: 0, function.inputs[1]: 0},
         reduction_params={
-            function.outputs[0]: {"op_type": "Gather", "dim": 0, "device": d0},
-            function.outputs[1]: {"op_type": "Allreduce"},
-            function.outputs[2]: {"op_type": "Gather", "dim": 0, "device": d0},
-            function.outputs[3]: {"op_type": "Allreduce"},
+            function.outputs[0]: {"op_type": "MPIGather", "dim": 0, "device": d0},
+            function.outputs[1]: {"op_type": "MPIAllreduce"},
+            function.outputs[2]: {"op_type": "MPIGather", "dim": 0, "device": d0},
+            function.outputs[3]: {"op_type": "MPIAllreduce"},
         },
         devices=[d0, d1],
     )

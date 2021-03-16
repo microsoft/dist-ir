@@ -3,7 +3,7 @@ import json
 import re
 from typing import Any, Dict, List, Union
 
-# NOTE: Disabling to pass GitHub automated test
+# NOTE: Disabling until bug fixed: https://github.com/stellaraccident/mlir-py-release/issues/3
 # import mlir
 from ..ir import Function, FunctionMaker, Value
 from ..ir.device import Device

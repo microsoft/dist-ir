@@ -161,7 +161,7 @@ class CostModel:
         per_device_data = 2 * average_input_size * (len(devices) - 1) / len(devices)
         per_device_data_gb = per_device_data / BYTES_IN_GB
         cost = per_device_data_gb / average_bandwidth
-        return {device: cost for device in device}
+        return {device: cost for device in devices}
 
     def _mpi_allreduce_cost_fn(self, op, *xs):
         input_size = xs[0].size()

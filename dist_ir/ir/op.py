@@ -59,26 +59,27 @@ class Op:
             object.__setattr__(
                 self, "outputs", output_values
             )  # Can't assign to frozen field
-            return
-
-        # Create the correct number of output values with appropriate types
-        # if self.outputs is None:
-        if output_names is None:
-            output_names = [f"{self.name}_out_{i}" for i in range(num_outputs)]
-        elif len(output_names) != num_outputs:
-            raise ValueError(
-                f"Op {self.name} ({self.op_type}) has {len(output_names)} outputs; "
-                f"{num_outputs} expected"
+        else:
+            # Create the correct number of output values with appropriate types
+            # if self.outputs is None:
+            if output_names is None:
+                output_names = [f"{self.name}_out_{i}" for i in range(num_outputs)]
+            elif len(output_names) != num_outputs:
+                raise ValueError(
+                    f"Op {self.name} ({self.op_type}) has {len(output_names)} outputs; "
+                    f"{num_outputs} expected"
+                )
+            if output_types is None:
+                output_types = [None for i in range(num_outputs)]
+            elif len(output_types) != num_outputs:
+                raise ValueError(
+                    f"Op {self.name} ({self.op_type}) has {len(output_types)} outputs; "
+                    f"{num_outputs} expected"
+                )
+            output_values = tuple(
+                Value(out_name, out_type)
+                for out_name, out_type in zip(output_names, output_types)
             )
-        if output_types is None:
-            output_types = [None for i in range(num_outputs)]
-        elif len(output_types) != num_outputs:
-            raise ValueError(
-                f"Op {self.name} ({self.op_type}) has {len(output_types)} outputs; "
-                f"{num_outputs} expected"
-            )
-        outputs = tuple(
-            Value(out_name, out_type)
-            for out_name, out_type in zip(output_names, output_types)
-        )
-        object.__setattr__(self, "outputs", outputs)  # Can't assign to frozen field
+        object.__setattr__(
+            self, "outputs", output_values
+        )  # Can't assign to frozen field

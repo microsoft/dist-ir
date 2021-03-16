@@ -78,12 +78,12 @@ def _simulate_op(
         )
         state.timestamps[device] += costs[device]
 
-    for out_edge in op.outputs:
-        state.consumers[out_edge] = len(state.function.consumers[out_edge])
-
     # Update the live memory with any new activations.
     for out_edge in op.outputs:
-        state.live_memory[out_edge.type.device] += out_edge.type.size()
+        state.consumers[out_edge] = len(state.function.consumers[out_edge])
+        output_devices = out_edge.type.get_all_devices()
+        for output_device in output_devices:
+            state.live_memory[output_device] += out_edge.type.size()
 
     # Update the peak memory.
     for device in state.live_memory:
@@ -92,11 +92,17 @@ def _simulate_op(
         )
 
     # Update the live memory to reflect any freed activations.
-    # TODO: Don't free live memory for function inputs.
+    function_inputs = set(state.function.inputs)
     for in_edge in op.inputs:
+        # We don't free live memory for function inputs as these could be for weights
+        # or input data buffers that are active for the entire duration of execution.
+        if in_edge in function_inputs:
+            continue
         state.consumers[in_edge] -= 1
         if state.consumers[in_edge] == 0:
-            state.live_memory[in_edge.type.device] -= in_edge.type.size()
+            input_devices = in_edge.type.get_all_devices()
+            for input_device in input_devices:
+                state.live_memory[input_device] -= in_edge.type.size()
 
 
 def _create_semantics(cost_functions, implementations):

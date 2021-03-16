@@ -1,16 +1,23 @@
 from ..ir.function import FunctionMaker
 
 
-def steady_state_transform(
+def filter_transform(
     function,
     filter_set=set(["MPIBroadcast", "MPIScatter", "Send", "Split"]),
     exception_set=set(),
 ):
-    """Removes initial ops to isolate steady state behavior.
+    """Filters ops of specified op type(s) from the given function.
 
     Removes ops from the given function and constructs a new function with the
     removed ops' output values as input values. Runs this procedure iteratively
     until reaching fixed point.
+
+    This transform can be used to isolate steady state behavior after applying
+    parallel transforms.
+
+    Note that the filter set is a set of op types while the exception set is a set
+    of specific Values. This is useful, for example, in the case where we want to
+    only filter sends of weights and not input values when using pipeline parallelism.
 
     Args:
       function: The function to transform.

@@ -10,13 +10,14 @@ from dist_ir.executor.cost_model import CostModel
 from dist_ir.ir.type import Bool, Float, Int64, Tensor
 from dist_ir.transforms import (
     mlp_dhp_transform,
-    steady_state_transform,
     PipeDreamScheduler,
 )
 
 BATCH_SIZE = 64
 INPUT_DIM = 64
 DGX_BANDWIDTH_GBPS = 200
+
+np.random.seed(42)
 
 
 def mlp(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, device):
@@ -188,7 +189,3 @@ def test_hp_pp():
 
 def test_dp_hp_pp():
     _test_helper(dp_degree=2, hp_degree=2, pp_degree=2, num_microbatches=2)
-
-
-if __name__ == "__main__":
-    test_dp_hp_pp()

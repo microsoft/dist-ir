@@ -20,7 +20,7 @@ class Op:
     # These are not fields, just parameters to init and post_init:
     output_names: InitVar[Tuple[str]] = None
     output_types: InitVar[Tuple[Type]] = None
-    output_values: InitVar[Tuple[Type]] = None
+    output_values: InitVar[Tuple[Value]] = None
 
     def __post_init__(self, output_names, output_types, output_values):
         if self.op_type == "Pmap":
@@ -45,8 +45,7 @@ class Op:
                         f"{num_input_types} expected"
                     )
             # Number of outputs is given by OpRegister
-            variadic_outputs = OpRegister[self.op_type].variadic_outputs
-            if variadic_outputs:
+            if OpRegister[self.op_type].variadic_outputs:
                 if output_names is None:
                     raise ValueError(
                         f"Op {self.name} ({self.op_type}) has variadic "

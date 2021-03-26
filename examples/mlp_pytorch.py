@@ -28,42 +28,50 @@ class Mlp(torch.nn.Module):
 def setup(args):
     os.environ["MASTER_ADDR"] = args.master_addr
     os.environ["MASTER_PORT"] = args.master_port
-
-    torch.distributed.init_process_group(args.backend, rank=args.rank, world_size=args.world_size)
+    torch.distributed.init_process_group(args.backend, world_size=len(args.ranks), rank=args.local_rank)
 
 def cleanup():
     torch.distributed.destroy_process_group()
 
-def main(args):
+def run(config):
+    (args, rank) = config
+    args.local_rank = rank
+    torch.cuda.set_device(args.local_rank)
     setup(args)
-    model = Mlp(args.num_hidden_layers, args.hidden_dim).to(args.rank)
-    ddp_model = DDP(model, device_ids=[args.rank])
+    model = Mlp(args.num_hidden_layers, args.hidden_dim).to(args.local_rank)
+    ddp_model = DDP(model, device_ids=[args.local_rank], output_device=args.local_rank)
     loss_fn = torch.nn.MSELoss()
     #optimizer = torch.optim.SGD(ddp_model.parameters, lr=0.001)
     #optimizer.zero_grad()
-    x = torch.randn(size=(args.batch_size, args.hidden_dim)).to(args.rank)
-    labels = torch.randn(size=(args.batch_size, args.hidden_dim)).to(args.rank)
+    x = torch.randn(size=(args.batch_size // len(args.ranks), args.hidden_dim)).to(args.local_rank)
+    labels = torch.randn(size=(args.batch_size // len(args.ranks), args.hidden_dim)).to(args.local_rank)
     runtimes = []
     for i in range(args.num_warmup_steps + args.num_profiling_steps):
+        if i % 10 == 0:
+            print(f"rank {args.local_rank}: iter {i}")
         start = time.time()
         y = model(x)
         loss_fn(y, labels).backward()
         duration = time.time() - start
         runtimes.append(duration)
-
-    if args.rank == 0:
-        print(f"Median runtime: {np.median(runtimes[args.num_warmup_steps:]) * 1000} ms")
-    
     #optimizer.step()
     cleanup()
+
+    return np.median(runtimes[args.num_warmup_steps:])
+    #print(np.median(runtimes[args.num_warmup_steps:]))
+
+def main(args):
+    configs = [(args, rank) for rank in args.ranks]
+    with torch.multiprocessing.Pool(len(args.ranks)) as p:
+        results = p.map(run, configs)
+    print(results)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PyTorch distributed MLP")
     parser.add_argument("--master_addr", type=str, default="localhost", help="Master address")
     parser.add_argument("--master_port", type=str, default="12355", help="Master port") 
-    parser.add_argument("--world_size", type=int, required=True, help="World size")
-    parser.add_argument("--rank", type=int, required=True, help="Rank")
+    parser.add_argument("--ranks", nargs="+", type=int, help="Ranks")
     parser.add_argument("--backend", type=str, default="nccl", help="Backend")
     parser.add_argument("--num_warmup_steps", type=int, default=100, help="# profiling steps")
     parser.add_argument("--num_profiling_steps", type=int, default=1000, help="# profiling steps")

@@ -2,7 +2,7 @@ import numpy as np
 
 from ..ir.type import Tensor, TupleType
 
-BYTES_IN_GB = 8.0e9
+BYTES_IN_Gb = 1.25e8
 KERNEL_LAUNCH_OVERHEAD = 1.0e-6
 
 
@@ -159,7 +159,7 @@ class CostModel:
         average_bandwidth = np.mean(all_bandwidths)
         average_input_size = np.mean([x.size() for x in xs]) * xs[0].dtype.size
         per_device_data = 2 * average_input_size * (len(devices) - 1) / len(devices)
-        per_device_data_gb = per_device_data / BYTES_IN_GB
+        per_device_data_gb = per_device_data / BYTES_IN_Gb
         cost = per_device_data_gb / average_bandwidth
         return {device: cost for device in devices}
 
@@ -168,7 +168,7 @@ class CostModel:
         devices = [x.device for x in xs]
         num_devices = len(devices)
         per_device_data = 2 * input_size * (num_devices - 1) / num_devices
-        per_device_data_gb = per_device_data / BYTES_IN_GB
+        per_device_data_gb = per_device_data / BYTES_IN_Gb
         all_bandwidths = []
         for i in range(len(devices)):
             for j in range(i + 1, len(devices)):
@@ -190,7 +190,7 @@ class CostModel:
         costs = {output_device: 0}
         for x in xs:
             input_size = x.size() * x.dtype.size
-            input_size_gb = input_size / BYTES_IN_GB
+            input_size_gb = input_size / BYTES_IN_Gb
             bandwidth = self._topology.get_bandwidth(x.device, output_device)
             transfer_time = input_size_gb / bandwidth
             costs[x.device] = transfer_time
@@ -199,7 +199,7 @@ class CostModel:
 
     def _mpi_reduce_cost_fn(self, op, *xs):
         input_size = xs[0].size() * xs[0].dtype.size
-        input_size_gb = input_size / BYTES_IN_GB
+        input_size_gb = input_size / BYTES_IN_Gb
         output_device = op.attributes["device"]
         costs = {output_device: 0}
         for x in xs:
@@ -225,7 +225,7 @@ class CostModel:
         input_device = x.device
         # TODO send is synchronous; input device should do same work too
         input_size = x.size() * x.dtype.size
-        input_size_gb = input_size / BYTES_IN_GB
+        input_size_gb = input_size / BYTES_IN_Gb
         output_device = op.attributes["device"]
         bandwidth = self._topology.get_bandwidth(input_device, output_device)
         transfer_time = input_size_gb / bandwidth

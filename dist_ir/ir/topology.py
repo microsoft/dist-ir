@@ -11,10 +11,11 @@ class Topology:
     def devices(self):
         return self._devices
 
-    def add_device(self, device_type):
+    # TODO: Move throughput and dram_bandwidth to common constants file
+    def add_device(self, device_type, throughput=1.0e14, dram_bandwidth=1.2e12):
         device_id = self._device_id_counter
         self._device_id_counter += 1
-        device = Device(device_id, device_type)
+        device = Device(device_id, device_type, throughput, dram_bandwidth)
         self._devices.append(device)
         self._bandwidths[device] = {}
         return device

@@ -129,7 +129,7 @@ class CostModel:
         return {x.device: 0 for x in xs}
 
     def _matmul_cost_fn(self, op, x, y):
-        data_size = 2 * (x.shape[0] * x.shape[1] + y.shape[0] * y.shape[1])
+        data_size = x.dtype.size * (x.shape[0] * x.shape[1] + y.shape[0] * y.shape[1])
         flops = 2 * x.shape[0] * x.shape[1] * y.shape[1]
         communication_cost = data_size / x.device.dram_bandwidth
         computation_cost = flops / x.device.throughput

@@ -2,6 +2,7 @@ from functools import reduce
 from operator import add, mul
 import numpy as np
 import onnx
+from onnx import numpy_helper
 
 from ..ir import FunctionMaker, Value
 from ..ir.type import Bool, Float, Int32, Int64, Tensor
@@ -81,6 +82,7 @@ def _parse_attribute(attr):
 
 
 def _parse_tensor_proto(tensor_proto):
+    """
     numpy_dtype = _get_numpy_dtype_from_onnx_dtype(tensor_proto.data_type)
     if len(tensor_proto.float_data) > 0:
         assert numpy_dtype == np.float32
@@ -99,6 +101,10 @@ def _parse_tensor_proto(tensor_proto):
     else:
         assert len(data) == 1
     data = np.reshape(data, tensor_proto.dims)
+    """
+    data = numpy_helper.to_array(tensor_proto)
+    if tensor_proto.data_type == 7:
+        print(f"{tensor_proto.name}: {data}")
     return data
 
 

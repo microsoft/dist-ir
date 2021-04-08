@@ -43,9 +43,9 @@ def cast(op, x):
     return x.astype(dtype)
 
 
-def concat2(op, x, y):
+def concat2(op, *xs):
     axis = op.attributes["axis"]
-    return np.concatenate((x, y), axis=axis)
+    return np.concatenate(xs, axis=axis)
 
 
 def concat(op, xs):
@@ -55,11 +55,23 @@ def concat(op, xs):
 
 
 def constant(op):
-    return op.attributes["value"]
+    v = op.attributes["value"]
+    if v.shape == (1,):
+        return v[0]
+    else:
+        return v
+
+
+def constant_of_shape(op, x):
+    if "value" in op.attributes:
+        value = op.attributes["value"]
+    else:
+        value = 0.0
+    return np.full(shape=x.astype(np.int32), fill_value=value)
 
 
 def div(op, x, y):
-    return x / y
+    return np.divide(x, y)
 
 
 def dropout(op, x, ratio, training_mode):
@@ -91,8 +103,14 @@ def fast_gelu(op, x, y):
 
 
 def gather(op, x, y):
-    axis = op.attributes["axis"]
-    return np.take(x, y.astype(np.int64), axis=axis)
+    if "axis" in op.attributes:
+        axis = op.attributes["axis"]
+    else:
+        axis = 0
+    res = np.take(x, y.astype(np.int64), axis=axis)
+    if res.shape == (1,):
+        return res[0]
+    return res
 
 
 def gather_grad(op, shape, indices, grad):
@@ -224,11 +242,9 @@ def identity(op, x):
 def gemm(op, a, b, c):
     alpha = op.attributes["alpha"]
     beta = op.attributes["beta"]
-    transA = op.attributes["transA"]
-    transB = op.attributes["transB"]
-    if transA:
+    if "transA" in op.attributes and op.attributes["transA"]:
         a = a.T
-    if transB:
+    if "transB" in op.attributes and op.attributes["transB"]:
         b = b.T
     return np.matmul(alpha * a, beta * b) + c
 
@@ -319,6 +335,14 @@ def reduce_all_l2(op, *xs):
     return np.sqrt(sum([np.linalg.norm(x) for x in xs]))
 
 
+def reduce_mean(op, x):
+    if "keepdims" in op.attributes:
+        keepdims = op.attributes["keepdims"]
+    else:
+        keepdims = 1
+    return np.mean(x, axis=tuple(op.attributes["axes"]), keepdims=keepdims)
+
+
 def reduce_sum(op, x):
     if "keepdims" in op.attributes:
         keepdims = op.attributes["keepdims"]
@@ -348,9 +372,15 @@ def shape(op, x):
     return np.array(x.shape, dtype=np.int64)
 
 
-def slice_conc(op, x, starts, ends, axes):
+def slice_conc(op, x, starts, ends, axes, steps=None):
     # TODO handle the other cases, e.g. negative indices
-    slices = {axis: slice(s, e) for (s, e, axis) in zip(starts, ends, axes)}
+    if steps is None:
+        steps = [1] * len(starts)
+    elif isinstance(steps, np.int64):
+        steps = [steps] * len(starts)
+    else:
+        assert len(steps) == len(starts)
+    slices = {axis: slice(s, e, step) for (s, e, axis, step) in zip(starts, ends, axes, steps)}
     slices = tuple(slices.get(d, slice(None)) for d in range(x.ndim))
     return x[slices]
 
@@ -574,6 +604,8 @@ def softmax_cross_entropy_loss_grad(op, dy, log_prob, label, weight=None):
     return d_logit
 
 
+# NOTE: This is the DistIR version of Split
+# TODO: Merge split and split_v2
 def split(op, x):
     dim = op.attributes["dim"]
     if op.op_type == "Split":
@@ -585,6 +617,16 @@ def split(op, x):
 
     return tuple(y for y in np.split(x, num_splits, axis=dim))
 
+# NOTE: This is the ONNX version of Split
+def split_v2(op, x):
+    split = op.attributes["split"]
+    sections = []
+    n = 0
+    for s in split[:-1]:
+        sections.append(n + s)
+        n += s
+    axis = op.attributes["axis"]
+    return np.split(x, sections, axis=axis)
 
 def sub(op, x, y):
     return x - y
@@ -604,8 +646,6 @@ def transpose(op, x):
 
 
 def unsqueeze(op, x):
-    import pdb
-    pdb.set_trace()
     axes = op.attributes["axes"]
     # TODO: Does this need to be in reverse order?
     for i in axes[::-1]:
@@ -615,19 +655,29 @@ def unsqueeze(op, x):
 
 NumPyRegister = {
     ("Add", (np.ndarray, np.ndarray)): add,
+    ("Add", (np.ndarray, np.float32)): add,
     (
         "BiasFastGeluGrad_dX",
         (np.ndarray, np.ndarray, np.ndarray),
     ): bias_fast_gelu_grad_dx,
     ("Cast", (np.ndarray,)): cast,
+    ("Cast", (np.int64,)): cast,
+    ("Cast", (np.float64,)): cast,
     ("Concat", (tuple,)): concat,
     ("Concat", (np.ndarray, np.ndarray)): concat2,
+    ("Concat", (np.ndarray, np.ndarray, np.ndarray)): concat2,
+    ("Concat", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): concat2,
+    ("Concat", (np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray)): concat2,
     ("Constant", ()): constant,
+    ("ConstantOfShape", (np.ndarray,)): constant_of_shape,
     ("Div", (np.ndarray, np.ndarray)): div,
+    ("Div", (np.ndarray, np.float32)): div,
+    ("Div", (np.int64, np.int64)): div,
     ("Dropout", (np.ndarray, np.ndarray, bool)): dropout,
     ("DropoutGrad", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): dropout_grad,
     ("Expand", (np.ndarray, np.ndarray)): expand,
     ("Gather", (np.ndarray, np.ndarray)): gather,
+    ("Gather", (np.ndarray, np.int64)): gather,
     ("GatherND", (np.ndarray, np.ndarray)): gather_nd,
     ("GatherNDGrad", (np.ndarray, np.ndarray, np.ndarray)): gather_nd_grad,
     ("GatherGrad", (np.ndarray, np.ndarray, np.ndarray)): gather_grad,
@@ -712,11 +762,16 @@ NumPyRegister = {
     ("MPIScatter", (np.ndarray,)): split,
     ("MPIScatterToTupleType", (np.ndarray,)): split,
     ("Mul", (np.ndarray, np.ndarray)): mul,
+    ("Mul", (np.ndarray, np.float32)): mul,
+    ("Mul", (np.int64, np.int64)): mul,
+    ("NonZero", (np.ndarray,)): lambda op, x: np.array(np.nonzero(x)),
+    ("Pow", (np.ndarray, np.float32)): lambda op, x, y: pow(x, y), 
     ("ReduceAllL2", tuple(np.ndarray for i in range(60))): reduce_all_l2,
     ("ReduceAllL2", tuple(np.ndarray for i in range(61))): reduce_all_l2,
     ("ReduceAllL2", tuple(np.ndarray for i in range(62))): reduce_all_l2,
     ("ReduceAllL2", tuple(np.ndarray for i in range(63))): reduce_all_l2,
     ("ReduceAllL2", tuple(np.ndarray for i in range(64))): reduce_all_l2,
+    ("ReduceMean", (np.ndarray,)): reduce_mean,
     ("ReduceSum", (np.ndarray,)): reduce_sum,
     ("Relu", (np.ndarray,)): relu,
     ("ReluGrad", (np.ndarray, np.ndarray)): relu_grad,
@@ -725,7 +780,8 @@ NumPyRegister = {
     ("Send", (np.ndarray,)): identity,
     ("Shape", (np.ndarray,)): shape,
     ("Slice", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): slice_conc,
-    ("Split", (np.ndarray,)): split,
+    ("Slice", (np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.int64)): slice_conc,
+    ("Split", (np.ndarray,)): split_v2,
     ("Softmax", (np.ndarray,)): softmax,
     ("SoftmaxCrossEntropyLoss", (np.ndarray, np.ndarray)): softmax_cross_entropy_loss,
     (
@@ -737,10 +793,15 @@ NumPyRegister = {
         (np.ndarray, np.ndarray, np.ndarray, np.ndarray),
     ): softmax_cross_entropy_loss_grad,
     ("SoftmaxGrad", (np.ndarray, np.ndarray)): softmax_grad,
+    ("Sqrt", (np.ndarray,)): lambda op, x: np.sqrt(x),
+    ("Squeeze", (np.ndarray,)): lambda op, x: np.squeeze(x),
     ("Sub", (np.ndarray, np.ndarray)): sub,
+    ("Sub", (np.int64, np.int64)): sub,
+    ("Sub", (np.float32, np.ndarray)): sub,
     ("Sum", (np.ndarray, np.ndarray)): sum_,
     ("Sum", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): sum_,
     ("Tanh", (np.ndarray,)): tanh,
     ("Transpose", (np.ndarray,)): transpose,
+    ("Unsqueeze", (np.int64,)): unsqueeze,
     ("Unsqueeze", (np.ndarray,)): unsqueeze,
 }

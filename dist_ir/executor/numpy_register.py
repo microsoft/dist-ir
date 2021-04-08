@@ -44,14 +44,18 @@ def cast(op, x):
 
 
 def concat2(op, x, y):
-    dim = op.attributes["dim"]
-    return np.concatenate((x, y), axis=dim)
+    axis = op.attributes["axis"]
+    return np.concatenate((x, y), axis=axis)
 
 
 def concat(op, xs):
     # TODO make variadic
     dim = op.attributes["dim"]
     return np.concatenate(xs, axis=dim)
+
+
+def constant(op):
+    return op.attributes["value"]
 
 
 def div(op, x, y):
@@ -340,6 +344,10 @@ def select(op, xs):
     return xs[dim]
 
 
+def shape(op, x):
+    return np.array(x.shape, dtype=np.int64)
+
+
 def slice_conc(op, x, starts, ends, axes):
     # TODO handle the other cases, e.g. negative indices
     slices = {axis: slice(s, e) for (s, e, axis) in zip(starts, ends, axes)}
@@ -596,9 +604,11 @@ def transpose(op, x):
 
 
 def unsqueeze(op, x):
+    import pdb
+    pdb.set_trace()
     axes = op.attributes["axes"]
     # TODO: Does this need to be in reverse order?
-    for i in axes:
+    for i in axes[::-1]:
         x = np.expand_dims(x, axis=i)
     return x
 
@@ -612,6 +622,7 @@ NumPyRegister = {
     ("Cast", (np.ndarray,)): cast,
     ("Concat", (tuple,)): concat,
     ("Concat", (np.ndarray, np.ndarray)): concat2,
+    ("Constant", ()): constant,
     ("Div", (np.ndarray, np.ndarray)): div,
     ("Dropout", (np.ndarray, np.ndarray, bool)): dropout,
     ("DropoutGrad", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): dropout_grad,
@@ -712,7 +723,7 @@ NumPyRegister = {
     ("Reshape", (np.ndarray, np.ndarray)): reshape,
     ("Select", (tuple,)): select,
     ("Send", (np.ndarray,)): identity,
-    ("Shape", (np.ndarray,)): lambda op, x: np.array(x.shape, dtype=np.int64),
+    ("Shape", (np.ndarray,)): shape,
     ("Slice", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): slice_conc,
     ("Split", (np.ndarray,)): split,
     ("Softmax", (np.ndarray,)): softmax,

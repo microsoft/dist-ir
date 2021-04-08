@@ -52,7 +52,8 @@ def _parse_attribute(attr):
     elif attr_type == 3:
         value = str(attr.s)
     elif attr_type == 4:
-        raise NotImplementedError("Tensor attribute")
+        numpy_dtype = _get_numpy_dtype_from_onnx_dtype(attr.t.data_type)
+        value = np.frombuffer(attr.t.raw_data, dtype=numpy_dtype)
     elif attr_type == 5:
         raise NotImplementedError("Graph attribute")
     elif attr_type == 11:

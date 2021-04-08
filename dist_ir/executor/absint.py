@@ -115,9 +115,13 @@ def convert_impls_to_semantics(impls):
     def convert_impl(impl_fn):
         def semantics(op: Op, state: AbstractState):
             # Find the op's inputs in state's environment
-            inputs = (state.env[v] for v in op.inputs)
+            inputs = tuple(state.env[v] for v in op.inputs)
             # Execute the implementation on the inputs
+            print(f"Op: {op}")
+            print("Inputs:", *inputs)
             outputs = impl_fn(op, *inputs)
+            print("Outputs:", *outputs)
+            print()
             # Put the outputs back into the state's environment
             if len(op.outputs) == 1:
                 outputs = (outputs,)

@@ -19,6 +19,7 @@ This module contains a register mapping ops to type propagation functions:
 """
 
 from collections.abc import Sequence
+import numpy as np
 from typing import Dict, List, Tuple
 
 from ..ir import Device, Function, FunctionMaker, Op, Value
@@ -62,6 +63,10 @@ def _concat_prop_fn(op, x, y):
     return Tensor(dtype=x.dtype, shape=output_shape, device=x.device)
 
 
+def _constant_prop_fn(op):
+    return op.attributes["value"]
+
+
 def _dropout_prop_fn(op, x, y, z):
     # TODO
     return x
@@ -85,8 +90,13 @@ def _expand_prop_fn(op, x, y):
 
 
 def _gather_prop_fn(op, x, y):
-    # TODO
-    return Tensor(dtype=x.dtype, device=x.device)
+    # TODO: Compute the new shape directly instead of using numpy
+    if not (isinstance(x, Tensor) and x.shape is not None):
+        _raise_type_error(op, x, y)
+    temp = np.zeros(x.shape)
+    axis = op.attributes["axis"]
+    new_shape = np.take(temp, y, axis=axis).shape
+    return Tensor(dtype=x.dtype, shape=new_shape, device=x.device)
 
 
 def _identity_prop_fn(op, x):
@@ -385,7 +395,7 @@ def _send_prop_fn(op, x):
 def _shape_prop_fn(op, x):
     if not isinstance(x, Tensor):
         _raise_type_error(op, x)
-    return Tensor(dtype=Int64(), shape=None, device=x.device)
+    return x  # Tensor(dtype=Int64(), shape=None, device=x.device)
 
 
 def _slice_prop_fn(op, x, starts, ends, axes):
@@ -434,14 +444,29 @@ def _transpose_prop_fn(op, x):
     return Tensor(dtype=x.dtype, shape=x.shape[::-1], device=x.device)
 
 
+def _unsqueeze_prop_fn(op, x):
+    if not (isinstance(x, Tensor) and x.shape is not None):
+        _raise_type_error(op, x)
+    axes = op.attributes["axes"]
+    shape = list(x.shape)
+    new_shape = []
+    for i, d in enumerate(shape):
+        if i in axes:
+            new_shape.append(1)
+        new_shape.append(d)
+    return Tensor(shape=tuple(new_shape), dtype=x.dtype, device=x.device)
+
+
 TypePropRegister = {
     ("Add", (Tensor, Tensor)): _elementwise_tensor_op_prop_fn,
     ("Cast", (Tensor,)): _cast_prop_fn,
     # ("Concat", (TupleType,)): _concat_prop_fn,
     ("Concat", (Tensor, Tensor)): _concat_prop_fn,
+    ("Constant", ()): _constant_prop_fn,
     ("Dropout", (Tensor, Tensor, type(Bool()))): _dropout_prop_fn,
     ("Expand", (Tensor, Tensor)): _expand_prop_fn,
     ("Gather", (Tensor, Tensor)): _gather_prop_fn,
+    ("Gather", (Tensor, np.ndarray)): _gather_prop_fn,
     ("Identity", (Tensor,)): _identity_prop_fn,
     (
         "Join",
@@ -539,6 +564,7 @@ TypePropRegister = {
     # ("Shape", (Tensor,)): TODO
     ("Slice", (Tensor, Tensor, Tensor, Tensor)): _slice_prop_fn,
     ("Transpose", (Tensor,)): _transpose_prop_fn,
+    ("Unsqueeze", (Tensor,)): _unsqueeze_prop_fn,
 }
 
 

@@ -5,7 +5,7 @@ import pytest
 import torch
 
 from dist_ir.ir import Device, FunctionMaker, cpprint
-from dist_ir.ir.type import Float, Tensor, TupleType
+from dist_ir.ir.type import Float32, Tensor, TupleType
 from dist_ir.executor import SequentialExecutor
 
 
@@ -14,9 +14,9 @@ class Helper:
         self.backend = backend
         self.executor = SequentialExecutor(self.backend)
         self.function = FunctionMaker()
-        self.a = self.function.add_input_value("a", Tensor(Float(), (4, 4)))
-        self.b = self.function.add_input_value("b", Tensor(Float(), (4, 4)))
-        self.c = self.function.add_input_value("c", Tensor(Float(), (4, 4)))
+        self.a = self.function.add_input_value("a", Tensor(Float32(), (4, 4)))
+        self.b = self.function.add_input_value("b", Tensor(Float32(), (4, 4)))
+        self.c = self.function.add_input_value("c", Tensor(Float32(), (4, 4)))
         if self.backend == "numpy":
             a = np.random.normal(size=(4, 4))
             b = np.random.normal(size=(4, 4))
@@ -160,8 +160,8 @@ def test_pmap_on_executor():
     d1 = Device(1, "gpu")
     ex = SequentialExecutor("numpy")
 
-    x_type = lambda d: Tensor(Float(), (8, 4), device=d)
-    y_type = lambda d: Tensor(Float(), (4, 2), device=d)
+    x_type = lambda d: Tensor(Float32(), (8, 4), device=d)
+    y_type = lambda d: Tensor(Float32(), (4, 2), device=d)
 
     # Concrete inputs:
     _x = np.arange(16 * 4).reshape((16, 4))
@@ -287,26 +287,26 @@ def test_pmap_dp():
     xs = function.add_input_value(
         "xs",
         TupleType(
-            (Tensor(Float(), (8, 4), device=d0), Tensor(Float(), (8, 4), device=d1))
+            (Tensor(Float32(), (8, 4), device=d0), Tensor(Float32(), (8, 4), device=d1))
         ),
     )
     wAs = function.add_input_value(
         "wAs",
         TupleType(
-            (Tensor(Float(), (4, 2), device=d0), Tensor(Float(), (4, 2), device=d1))
+            (Tensor(Float32(), (4, 2), device=d0), Tensor(Float32(), (4, 2), device=d1))
         ),
     )
     wBs = function.add_input_value(
         "wBs",
         TupleType(
-            (Tensor(Float(), (2, 1), device=d0), Tensor(Float(), (2, 1), device=d1))
+            (Tensor(Float32(), (2, 1), device=d0), Tensor(Float32(), (2, 1), device=d1))
         ),
     )
 
     subfunction = FunctionMaker()
-    x = subfunction.add_input_value("x", Tensor(Float(), (8, 4)))
-    wA = subfunction.add_input_value("wA", Tensor(Float(), (4, 2)))
-    wB = subfunction.add_input_value("wB", Tensor(Float(), (2, 1)))
+    x = subfunction.add_input_value("x", Tensor(Float32(), (8, 4)))
+    wA = subfunction.add_input_value("wA", Tensor(Float32(), (4, 2)))
+    wB = subfunction.add_input_value("wB", Tensor(Float32(), (2, 1)))
     y = subfunction.add_op("MatMul", "MatMul0", inputs=[x, wA], output_names=["y"])
     _ = subfunction.add_op("MatMul", "MatMul1", inputs=[y, wB], output_names=["z"])
     subfunction = subfunction.finalize()

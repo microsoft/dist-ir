@@ -119,15 +119,11 @@ def convert_impls_to_semantics(impls):
             # Find the op's inputs in state's environment
             inputs = tuple(state.env[v] for v in op.inputs)
             # Execute the implementation on the inputs
-            print(f"Op: {op}")
-            print("Inputs:", *inputs)
             outputs = impl_fn(op, *inputs)
             # Put the outputs back into the state's environment
             if len(op.outputs) == 1:
                 outputs = (outputs,)
             assert len(outputs) == len(op.outputs)
-            print("Outputs:", outputs)#tuple(np.shape(output) for output in outputs))
-            print()
             for x, val in zip(op.outputs, outputs):
                 state.env[x] = val
 

@@ -1,5 +1,5 @@
 from dist_ir.ir import FunctionMaker
-from dist_ir.ir.type import Tensor, Float
+from dist_ir.ir.type import Tensor, Float32
 
 
 def test_subfunction():
@@ -9,7 +9,7 @@ def test_subfunction():
     outputs = []
     num_ops = 9
     for i in range(num_ops + 1):
-        inputs.append(function.add_input_value(f"x{i}", Tensor(Float(), (4, 4))))
+        inputs.append(function.add_input_value(f"x{i}", Tensor(Float32(), (4, 4))))
     for i in range(num_ops):
         if i == 0:
             input_values = inputs[:2]

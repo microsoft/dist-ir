@@ -1,3 +1,4 @@
+from collections import defaultdict
 from functools import reduce
 from operator import add, mul
 import numpy as np
@@ -5,20 +6,56 @@ import onnx
 from onnx import numpy_helper
 
 from ..ir import FunctionMaker, Value
-from ..ir.type import Bool, Float, Int32, Int64, Tensor
+from ..ir.type import Bool, Float16, Float32, Int32, Int64, Tensor
+
+
+def _topo_sort_util(nodes, adjacency_list, cur_node, visited, sorted_nodes):
+    visited[cur_node] = True
+    for next_node in adjacency_list[cur_node]:
+        if not visited[next_node]:
+            _topo_sort_util(nodes, adjacency_list, next_node, visited, sorted_nodes)
+    sorted_nodes.insert(0, cur_node)
+
+
+def _topo_sort(nodes, adjacency_list):
+    node_map = {node.name: node for node in nodes}
+    visited = {node.name: False for node in nodes}
+    sorted_nodes = []
+    for node in nodes:
+        if not visited[node.name]:
+            _topo_sort_util(nodes, adjacency_list, node.name, visited, sorted_nodes)
+    return [node_map[node] for node in sorted_nodes]
+
+
+def _get_adjacency_list(nodes):
+    consumers = defaultdict(set)
+    adjacency_list = defaultdict(set)
+
+    for node in nodes:
+        for inp in node.input:
+            consumers[inp].add(node.name)
+
+    for node in nodes:
+        for output in node.output:
+            for consumer in consumers[output]:
+                adjacency_list[node.name].add(consumer)
+
+    return adjacency_list
 
 
 def _get_dist_ir_dtype_from_onnx_dtype(onnx_dtype):
     if onnx_dtype == 0:
         raise ValueError("Undefined onnx_dtype")
     elif onnx_dtype == 1:
-        return Float()
+        return Float32()
     elif onnx_dtype == 6:
         return Int32()
     elif onnx_dtype == 7:
         return Int64()
     elif onnx_dtype == 9:
         return Bool()
+    elif onnx_dtype == 10:
+        return Float16()
     else:
         raise NotImplementedError(f"onnx_dtype {onnx_dtype}")
 
@@ -161,7 +198,17 @@ def import_from_onnx(onnx_model, default_device=None, parse_input_data=True):
         add_tensor(value)
     print()
 
-    for node in onnx_model.graph.node:
+    nodes = list(onnx_model.graph.node)
+    type_count = defaultdict(lambda: 0)
+    for node in nodes:
+        if node.name == "":
+            node.name = f"{node.op_type}_{type_count[node.op_type]}"
+        type_count[node.op_type] += 1
+    adjacency_list = _get_adjacency_list(nodes)
+    nodes = _topo_sort(nodes, adjacency_list)
+    for node in nodes:
+        print(node.name)
+    for node in nodes:
         per_node_inputs = []
         print(f"Getting inputs for node {node.name} ({node.op_type})...")
         for value in node.input:

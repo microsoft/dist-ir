@@ -76,7 +76,7 @@ OpRegister = {
     "SGDOptimizer": OpRegisterEntry(num_inputs=3, num_outputs=2),
     "Shape": OpRegisterEntry(num_inputs=1, num_outputs=1),
     # TODO allow optional inputs for things like slice
-    "Slice": OpRegisterEntry(num_inputs=4, num_outputs=1),
+    #"Slice": OpRegisterEntry(num_inputs=4, num_outputs=1),
     "Slice": OpRegisterEntry(num_inputs=5, num_outputs=1),
     "Softmax": OpRegisterEntry(num_inputs=1, num_outputs=1),
     "SoftmaxGrad": OpRegisterEntry(num_inputs=2, num_outputs=1),

@@ -1,27 +1,27 @@
 from dist_ir.ir import FunctionMaker
-from dist_ir.ir.type import Float, Tensor
+from dist_ir.ir.type import Float32, Tensor
 
 
 def mlp(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, device):
     function = FunctionMaker(name="mlp")
     x = function.add_input_value(
         "x",
-        Tensor(dtype=Float(), shape=(batch_size, input_dim), device=device),
+        Tensor(dtype=Float32(), shape=(batch_size, input_dim), device=device),
     )
     z = function.add_input_value(
         "z",
-        Tensor(dtype=Float(), shape=(batch_size, output_dim), device=device),
+        Tensor(dtype=Float32(), shape=(batch_size, output_dim), device=device),
     )
     weights = []
     for i in range(num_hidden_layers - 1):
         w = function.add_input_value(
             f"w{chr(ord('A')+i)}",
-            Tensor(dtype=Float(), shape=(input_dim, hidden_dim), device=device),
+            Tensor(dtype=Float32(), shape=(input_dim, hidden_dim), device=device),
         )
         weights.append(w)
     w = function.add_input_value(
         f"w{chr(ord('A')+i+1)}",
-        Tensor(dtype=Float(), shape=(hidden_dim, output_dim), device=device),
+        Tensor(dtype=Float32(), shape=(hidden_dim, output_dim), device=device),
     )
     weights.append(w)
 

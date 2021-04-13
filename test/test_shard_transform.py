@@ -1,7 +1,7 @@
 import numpy as np
 
 from dist_ir.ir import cpprint, Device, FunctionMaker
-from dist_ir.ir.type import Float, Tensor
+from dist_ir.ir.type import Float32, Tensor
 from dist_ir.transforms import shard_transform
 from dist_ir.executor import SequentialExecutor, infer_types
 
@@ -12,8 +12,8 @@ def test_single_variable_data_parallel():
     d0 = Device(0, "gpu")
     d1 = Device(1, "gpu")
 
-    a = function.add_input_value("a", Tensor(Float(), (4, 4)))
-    b = function.add_input_value("b", Tensor(Float(), (4, 4)))
+    a = function.add_input_value("a", Tensor(Float32(), (4, 4)))
+    b = function.add_input_value("b", Tensor(Float32(), (4, 4)))
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
     function = function.finalize()
     function = infer_types(function, function.inputs)
@@ -66,9 +66,9 @@ def test_double_variable_data_parallel():
     d0 = Device(0, "gpu")
     d1 = Device(1, "gpu")
 
-    a = function.add_input_value("a", Tensor(Float(), (4, 4)))
-    b = function.add_input_value("b", Tensor(Float(), (4, 4)))
-    c = function.add_input_value("c", Tensor(Float(), (4, 4)))
+    a = function.add_input_value("a", Tensor(Float32(), (4, 4)))
+    b = function.add_input_value("b", Tensor(Float32(), (4, 4)))
+    c = function.add_input_value("c", Tensor(Float32(), (4, 4)))
     x = function.add_op("MatMul", "MatMul", inputs=[a, b], output_names=["x"])
     y = function.add_op("Add", "Add", inputs=[x, c], output_names=["y"])
     function = function.finalize()
@@ -125,9 +125,9 @@ def test_single_variable_horizontal_parallel():
     d0 = Device(0, "gpu")
     d1 = Device(1, "gpu")
 
-    x = function.add_input_value("x", Tensor(Float(), (batch_size, input_dim)))
-    wA = function.add_input_value("wA", Tensor(Float(), (input_dim, hidden_dim)))
-    wB = function.add_input_value("wB", Tensor(Float(), (hidden_dim, output_dim)))
+    x = function.add_input_value("x", Tensor(Float32(), (batch_size, input_dim)))
+    wA = function.add_input_value("wA", Tensor(Float32(), (input_dim, hidden_dim)))
+    wB = function.add_input_value("wB", Tensor(Float32(), (hidden_dim, output_dim)))
     a = function.add_op("MatMul", "MatMul0", inputs=[x, wA], output_names=["a"])
     y = function.add_op("MatMul", "MatMul1", inputs=[a, wB], output_names=["y"])
     function = function.finalize()
@@ -184,9 +184,9 @@ def test_double_variable_horizontal_parallel():
     d0 = Device(0, "gpu")
     d1 = Device(1, "gpu")
 
-    x = function.add_input_value("x", Tensor(Float(), (batch_size, input_dim)))
-    wA = function.add_input_value("wA", Tensor(Float(), (input_dim, hidden_dim)))
-    wB = function.add_input_value("wB", Tensor(Float(), (hidden_dim, output_dim)))
+    x = function.add_input_value("x", Tensor(Float32(), (batch_size, input_dim)))
+    wA = function.add_input_value("wA", Tensor(Float32(), (input_dim, hidden_dim)))
+    wB = function.add_input_value("wB", Tensor(Float32(), (hidden_dim, output_dim)))
     a = function.add_op("MatMul", "MatMul0", inputs=[x, wA], output_names=["a"])
     y = function.add_op("MatMul", "MatMul1", inputs=[a, wB], output_names=["y"])
     function = function.finalize()
@@ -239,10 +239,10 @@ def test_mnist_data_parallel():
     d1 = Device(1, "gpu")
 
     batch_size = 16
-    x = function.add_input_value("x", Tensor(Float(), (batch_size, 4)))
-    z = function.add_input_value("z", Tensor(Float(), (batch_size, 1)))
-    wA = function.add_input_value("wA", Tensor(Float(), (4, 2)))
-    wB = function.add_input_value("wB", Tensor(Float(), (2, 1)))
+    x = function.add_input_value("x", Tensor(Float32(), (batch_size, 4)))
+    z = function.add_input_value("z", Tensor(Float32(), (batch_size, 1)))
+    wA = function.add_input_value("wA", Tensor(Float32(), (4, 2)))
+    wB = function.add_input_value("wB", Tensor(Float32(), (2, 1)))
     a = function.add_op("MatMul", "MatMul0", inputs=[x, wA], output_names=["a"])
     y = function.add_op("MatMul", "MatMul1", inputs=[a, wB], output_names=["y"])
     l = function.add_op(

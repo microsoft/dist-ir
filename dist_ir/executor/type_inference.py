@@ -23,7 +23,7 @@ import numpy as np
 from typing import Dict, List, Tuple
 
 from ..ir import Device, Function, FunctionMaker, Op, Value
-from ..ir.type import Bool, Float, Int32, Int64, Type, Tensor, TupleType
+from ..ir.type import Bool, Float32, Int32, Int64, Type, Tensor, TupleType
 from .absint import AbstractInterpreter, AbstractState
 
 
@@ -37,7 +37,7 @@ def _raise_type_error(op, *args):
 def _cast_prop_fn(op, x):
     proto_dtype = op.attributes["to"]
     dtype = {
-        1: Float(),
+        1: Float32(),
         6: Int32(),
         7: Int64(),
         9: Bool(),

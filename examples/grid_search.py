@@ -13,7 +13,6 @@ from dist_ir.importer import import_from_onnx, parse_tensor_from_file
 from dist_ir.ir import FunctionMaker, cpprint, pformat, Device, Topology, Value
 from dist_ir.executor import infer_types, SequentialExecutor, Simulator
 from dist_ir.executor.cost_model import CostModel
-from dist_ir.ir.type import Bool, Float, Int64, Tensor
 from dist_ir.transforms import (
     parallel_transform_3d,
     PipeDreamScheduler,

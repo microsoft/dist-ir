@@ -24,9 +24,6 @@ class Type:
         return set()
 
 
-# TODO might want to have f32, i32 etc instead?
-
-
 class Int32(Type):
     """The 32-bit integer type. A singleton class."""
 
@@ -49,18 +46,38 @@ class Int64(Type):
     def size(self):
         return 8
 
-
 @singleton
-class Float(Type):
-    """The float type. A singleton class."""
+class Float16(Type):
+    """The 16-bit float type. A singleton class."""
 
     def __repr__(self):
-        return "Float"
+        return "Float16"
+
+    @property
+    def size(self):
+        return 2
+
+@singleton
+class Float32(Type):
+    """The 32-bit float type. A singleton class."""
+
+    def __repr__(self):
+        return "Float32"
 
     @property
     def size(self):
         return 4
 
+@singleton
+class Float64(Type):
+    """The 64-bit float type. A singleton class."""
+
+    def __repr__(self):
+        return "Float64"
+
+    @property
+    def size(self):
+        return 8
 
 @singleton
 class Bool(Type):

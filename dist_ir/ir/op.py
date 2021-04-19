@@ -44,6 +44,13 @@ class Op:
                         f"Op {self.name} ({self.op_type}) has {len(self.inputs)} inputs; "
                         f"{num_input_types} expected"
                     )
+
+        if output_values is not None:
+            object.__setattr__(
+                self, "outputs", output_values
+            )  # Can't assign to frozen field
+        else:
+            # Create the correct number of output values with appropriate types
             # Number of outputs is given by OpRegister
             if OpRegister[self.op_type].variadic_outputs:
                 if output_names is None:
@@ -54,14 +61,6 @@ class Op:
                 num_outputs = len(output_names)
             else:
                 num_outputs = OpRegister[self.op_type].num_outputs
-
-        if output_values is not None:
-            object.__setattr__(
-                self, "outputs", output_values
-            )  # Can't assign to frozen field
-        else:
-            # Create the correct number of output values with appropriate types
-            # if self.outputs is None:
             if output_names is None:
                 output_names = [f"{self.name}_out_{i}" for i in range(num_outputs)]
             elif len(output_names) != num_outputs:

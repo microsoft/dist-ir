@@ -25,6 +25,8 @@ class SimulatorState(AbstractState):
         self._function_inputs_set = set(function.inputs)
 
     def add_trace_event(self, op_type, device, start_time, duration):
+        if device is None:
+            return
         self.trace.append(
             {
                 "name": op_type,
@@ -180,4 +182,38 @@ def Simulator(cost_model):
             cost_model.cost_functions,
             {**NumPyRegister, **MixedImplementations, **TypePropRegister},
         ),
+    )
+
+
+def _create_post_type_inference_semantics(cost_functions):
+    """Creates a semantics (dictionary mapping op signatures to abstract state
+    modifiers) given a dictionary of cost functions (input values -> costs) and
+    a dictionary of implementations (input values -> output values).
+    """
+
+    def convert_impl(cost_fn):
+        def semantics(op: Op, state: SimulatorState):
+            # Find the op's inputs in state's environment
+            inputs = tuple(state.env[v] for v in op.inputs)
+            outputs = tuple(x.type for x in op.outputs)
+
+            # Run the cost function
+            costs = cost_fn(op, *inputs)
+
+            for x in op.outputs:
+                state.env[x] = x.type
+
+            _simulate_op(state, op, costs, inputs, outputs)
+
+        return semantics
+
+    signatures = cost_functions.keys()
+
+    return {f: convert_impl(cost_functions[f]) for f in signatures}
+
+
+def PostTypeInferenceSimulator(cost_model):
+    return AbstractInterpreter(
+        SimulatorState,
+        _create_post_type_inference_semantics(cost_model.cost_functions),
     )

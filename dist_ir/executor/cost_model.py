@@ -1,9 +1,11 @@
 import numpy as np
+from functools import reduce
+from operator import mul
 
-from ..ir.type import Tensor, TupleType
+from ..ir.type import Float32, Float64, Int64, Tensor, TupleType
 
 BYTES_IN_Gb = 1.25e8
-KERNEL_LAUNCH_OVERHEAD = 1.0e-6
+KERNEL_LAUNCH_OVERHEAD = 10e-6
 
 
 class CostModel:
@@ -28,11 +30,25 @@ class CostModel:
         # TODO: Add support for variadic inputs
         self.cost_functions = {
             ("Add", (Tensor, Tensor)): self._elementwise_cost_fn,
-            ("Cast", (Tensor,)): self._cast_cost_fn,
+            ("Add", (Tensor, type(Float32()))): self._elementwise_cost_fn,
+            ("Cast", (Tensor,)): self._elementwise_cost_fn,
+            ("Cast", (type(Float64()),)): lambda op, x: {},
+            ("Cast", (type(Int64()),)): lambda op, x: {},
             ("Concat", (Tensor, Tensor)): self._concat_cost_fn,
+            ("Concat", (Tensor, Tensor, Tensor)): self._concat_cost_fn,
+            ("Concat", (Tensor, Tensor, Tensor, Tensor)): self._concat_cost_fn,
+            ("Constant", ()): lambda op: {},
+            ("ConstantOfShape", (Tensor,)): self._constant_of_shape_cost_fn,
+            ("Div", (type(Int64()), type(Int64()))): lambda op, x, y: {},
+            ("Div", (Tensor, type(Float32()))): self._elementwise_cost_fn,
+            ("Div", (Tensor, Tensor)): self._elementwise_cost_fn,
+            ("Gather", (Tensor, type(Int64()))): self._gather_cost_fn,
+            ("Gather", (Tensor, Tensor)): self._gather_cost_fn,
+            ("Gemm", (Tensor, Tensor, Tensor)): self._gemm_cost_fn,
             ("Identity", (Tensor,)): self._identity_cost_fn,
             ("Join", (Tensor, Tensor)): self._join_cost_fn,
             ("Join", (Tensor, Tensor, Tensor, Tensor)): self._join_cost_fn,
+            ("NonZero", (Tensor,)): self._nonzero_cost_fn,
             ("MPIAllgather", (Tensor,) * 2): self._mpi_allgather_cost_fn,
             ("MPIAllgather", (Tensor,) * 4): self._mpi_allgather_cost_fn,
             ("MPIAllgather", (Tensor,) * 8): self._mpi_allgather_cost_fn,
@@ -99,27 +115,67 @@ class CostModel:
             ("MatMul", (Tensor, Tensor)): self._matmul_cost_fn,
             ("MatMulGrad", (Tensor, Tensor, Tensor)): self._matmul_grad_cost_fn,
             ("Min", (Tensor, Tensor)): self._min_cost_fn,
+            ("Mul", (Tensor, Tensor)): self._elementwise_cost_fn,
+            ("Mul", (Tensor, type(Float32()))): self._elementwise_cost_fn,
+            ("Mul", (type(Int64()), type(Int64()))): lambda op, x, y: {},
+            ("Pow", (Tensor, type(Float32()))): self._elementwise_cost_fn,
+            ("ReduceMean", (Tensor,)): self._reduce_mean_cost_fn,
             ("Relu", (Tensor,)): self._elementwise_cost_fn,
             ("ReluGrad", (Tensor, Tensor)): self._elementwise_cost_fn,
+            ("Reshape", (Tensor, Tensor)): self._reshape_cost_fn,
             ("Select", (TupleType,)): self._select_cost_fn,
             ("Send", (Tensor,)): self._send_cost_fn,
             ("Split", (Tensor,)): self._split_cost_fn,
             ("Shape", (Tensor,)): self._shape_cost_fn,
             ("Slice", (Tensor, Tensor, Tensor, Tensor)): self._slice_cost_fn,
+            (
+                "Slice",
+                (Tensor, Tensor, Tensor, Tensor, type(Int64())),
+            ): self._slice_cost_fn,
+            ("Softmax", (Tensor,)): self._softmax_cost_fn,
+            ("Sqrt", (Tensor,)): self._elementwise_cost_fn,
+            ("Squeeze", (Tensor,)): self._squeeze_cost_fn,
+            ("Sub", (type(Float32()), Tensor)): lambda op, x, y: {},
+            ("Sub", (Tensor, Tensor)): self._elementwise_cost_fn,
+            ("Sub", (type(Int64()), type(Int64()))): lambda op, x, y: {},
+            ("Tanh", (Tensor,)): self._elementwise_cost_fn,
+            ("Transpose", (Tensor,)): self._transpose_cost_fn,
+            ("Unsqueeze", (type(Int64()),)): self._unsqueeze_cost_fn,
+            ("Unsqueeze", (Tensor,)): self._unsqueeze_cost_fn,
         }
 
     def _elementwise_cost_fn(self, op, x, y=None):
-        flops = x.size()
-        runtime = flops / x.device.throughput
-        return {x.device: runtime}
-
-    def _cast_cost_fn(self, op, x):
-        return {x.device: x.size()}
+        if x.device is None:
+            return {}
+        n = reduce(mul, [x.shape[i] for i in range(len(x.shape))])
+        data_size = x.dtype.size * n
+        if y is not None:
+            data_size *= 2
+        flops = n
+        communication_cost = data_size / x.device.dram_bandwidth
+        computation_cost = flops / x.device.throughput
+        latency = KERNEL_LAUNCH_OVERHEAD + communication_cost + computation_cost
+        return {x.device: latency}
 
     def _concat_cost_fn(self, op, *xs):
         # TODO: Compute cost properly
         devices = [x.device for x in xs]
-        return {device: 0 for device in devices}
+        return {device: KERNEL_LAUNCH_OVERHEAD for device in devices}
+
+    def _constant_of_shape_cost_fn(self, op, x):
+        return {x.device: KERNEL_LAUNCH_OVERHEAD}
+
+    def _gather_cost_fn(self, op, x, y):
+        # TODO: Compute cost properly
+        return {x.device: KERNEL_LAUNCH_OVERHEAD}
+
+    def _gemm_cost_fn(self, op, x, y, z):
+        gemm_costs = self._matmul_cost_fn(op, x, y)
+        p = Tensor(shape=(x.shape[0], y.shape[1]), dtype=x.dtype, device=x.device)
+        add_costs = self._elementwise_cost_fn(op, p, z)
+        for d in gemm_costs:
+            gemm_costs[d] += add_costs[d]
+        return gemm_costs
 
     def _identity_cost_fn(self, op, x):
         # TODO: Compute cost properly
@@ -133,7 +189,7 @@ class CostModel:
         flops = 2 * x.shape[0] * x.shape[1] * y.shape[1]
         communication_cost = data_size / x.device.dram_bandwidth
         computation_cost = flops / x.device.throughput
-        latency = communication_cost + computation_cost
+        latency = KERNEL_LAUNCH_OVERHEAD + communication_cost + computation_cost
         return {x.device: latency}
 
     def _matmul_grad_cost_fn(self, op, x, y, dz):
@@ -214,6 +270,16 @@ class CostModel:
         cost = 0
         return {d: cost for d in op.attributes["devices"]}
 
+    def _nonzero_cost_fn(self, op, x):
+        return {x.device: KERNEL_LAUNCH_OVERHEAD}
+
+    def _reduce_mean_cost_fn(self, op, x):
+        # TODO: Repace with more accurate function?
+        return self._elementwise_cost_fn(op, x)
+
+    def _reshape_cost_fn(self, op, x, y):
+        return {x.device: KERNEL_LAUNCH_OVERHEAD}
+
     def _select_cost_fn(self, op, xs):
         costs = {}
         for typ in xs.types:
@@ -237,10 +303,24 @@ class CostModel:
         return costs
 
     def _shape_cost_fn(self, op, x):
-        return {x.device: 0}
+        return {x.device: KERNEL_LAUNCH_OVERHEAD}
 
-    def _slice_cost_fn(self, op, x, starts, ends, axes):
+    def _slice_cost_fn(self, op, x, starts, ends, axes, steps=None):
         return {x.device: KERNEL_LAUNCH_OVERHEAD}  # TODO is this accurate?
 
+    def _softmax_cost_fn(self, op, x):
+        # TODO: Repace with more accurate function?
+        return self._elementwise_cost_fn(op, x)
+
     def _split_cost_fn(self, op, x):
+        return {x.device: KERNEL_LAUNCH_OVERHEAD}
+
+    def _squeeze_cost_fn(self, op, x):
+        return {x.device: KERNEL_LAUNCH_OVERHEAD}
+
+    def _transpose_cost_fn(self, op, x):
+        # TODO: Repace with more accurate function?
+        return self._elementwise_cost_fn(op, x)
+
+    def _unsqueeze_cost_fn(self, op, x):
         return {x.device: KERNEL_LAUNCH_OVERHEAD}

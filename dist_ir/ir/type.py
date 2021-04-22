@@ -24,6 +24,7 @@ class Type:
         return set()
 
 
+@singleton
 class Int32(Type):
     """The 32-bit integer type. A singleton class."""
 

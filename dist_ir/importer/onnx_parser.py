@@ -140,8 +140,6 @@ def _parse_tensor_proto(tensor_proto):
     data = np.reshape(data, tensor_proto.dims)
     """
     data = numpy_helper.to_array(tensor_proto)
-    if tensor_proto.data_type == 7:
-        print(f"{tensor_proto.name}: {data}")
     return data
 
 
@@ -152,7 +150,9 @@ def parse_tensor_from_file(path):
     return _parse_tensor_proto(tensor_proto)
 
 
-def import_from_onnx(onnx_model, default_device=None, parse_input_data=True):
+def import_from_onnx(
+    onnx_model, default_device=None, parse_input_data=True, verbose=False
+):
     # TODO: Remove prints?
     # TODO: Support types beyond Tensor
     onnx_model = onnx.load(onnx_model)
@@ -164,7 +164,8 @@ def import_from_onnx(onnx_model, default_device=None, parse_input_data=True):
 
     def add_input(value):
         if value.name in inputs:
-            print(f"Skipping adding {value.name}; already an input value")
+            if verbose:
+                print(f"Skipping adding {value.name}; already an input value")
             return
         assert "ValueInfoProto" in str(type(value))
         assert hasattr(value, "type")
@@ -176,7 +177,8 @@ def import_from_onnx(onnx_model, default_device=None, parse_input_data=True):
 
     def add_tensor(value):
         if value.name in inputs:
-            print(f"Skipping adding {value.name}; already an input value")
+            if verbose:
+                print(f"Skipping adding {value.name}; already an input value")
             return
         assert "TensorProto" in str(type(value))
         dist_ir_dtype = _get_dist_ir_dtype_from_onnx_dtype(value.data_type)
@@ -189,14 +191,18 @@ def import_from_onnx(onnx_model, default_device=None, parse_input_data=True):
             input_data[v] = _parse_tensor_proto(value)
 
     for value in onnx_model.graph.input:
-        print(f"Adding input {value.name} from graph.input")
+        if verbose:
+            print(f"Adding input {value.name} from graph.input")
         add_input(value)
-    print()
+    if verbose:
+        print()
 
     for value in onnx_model.graph.initializer:
-        print(f"Adding input {value.name} from graph.initializer")
+        if verbose:
+            print(f"Adding input {value.name} from graph.initializer")
         add_tensor(value)
-    print()
+    if verbose:
+        print()
 
     nodes = list(onnx_model.graph.node)
     type_count = defaultdict(lambda: 0)
@@ -207,19 +213,20 @@ def import_from_onnx(onnx_model, default_device=None, parse_input_data=True):
     adjacency_list = _get_adjacency_list(nodes)
     nodes = _topo_sort(nodes, adjacency_list)
     for node in nodes:
-        print(node.name)
-    for node in nodes:
         per_node_inputs = []
-        print(f"Getting inputs for node {node.name} ({node.op_type})...")
+        if verbose:
+            print(f"Getting inputs for node {node.name} ({node.op_type})...")
         for value in node.input:
             if value == "":
                 assert "Optimizer" in node.name
                 continue
             if value in inputs:
-                print(f"Found input {value} in inputs")
+                if verbose:
+                    print(f"Found input {value} in inputs")
                 per_node_inputs.append(inputs[value])
             elif value in output_src:
-                print(f"Found input {value} in output_src")
+                if verbose:
+                    print(f"Found input {value} in output_src")
                 per_node_inputs.append(output_src[value])
             else:
                 raise ValueError(f"Could not find input {value}!")
@@ -245,7 +252,9 @@ def import_from_onnx(onnx_model, default_device=None, parse_input_data=True):
             assert out_name == value.name
             assert out_name not in output_src
             output_src[out_name] = value
-            print(f"Found output {out_name}")
-        print()
+            if verbose:
+                print(f"Found output {out_name}")
+        if verbose:
+            print()
 
     return dist_ir_function.finalize(), input_data

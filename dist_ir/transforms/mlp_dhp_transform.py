@@ -12,7 +12,7 @@ def _add_values(v1, v2, function, output_name):
 
 def _concat_values(v1, v2, function, dim, output_name):
     return function.add_op(
-        "Concat", inputs=[v1, v2], attributes={"dim": dim}, output_names=[output_name]
+        "Concat", inputs=[v1, v2], attributes={"axis": dim}, output_names=[output_name]
     )
 
 
@@ -24,7 +24,7 @@ def _split_value(v, function, num_splits, parallelism_level):
     assert parallelism_level == "pp"
     output_names = [f"{v.name}_{parallelism_level}_{i}" for i in range(num_splits)]
     return function.add_op(
-        "Split",
+        "SplitDistIR",
         inputs=[v],
         attributes={"dim": 0, "num_splits": num_splits},
         output_names=output_names,

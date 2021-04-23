@@ -43,14 +43,9 @@ def cast(op, x):
     return x.astype(dtype)
 
 
-def concat2(op, *xs):
-    axis = op.attributes["axis"]
-    return np.concatenate(xs, axis=axis)
-
-
-def concat(op, xs):
+def concat(op, *xs):
     # TODO make variadic
-    dim = op.attributes["dim"]
+    dim = op.attributes["axis"]
     return np.concatenate(xs, axis=dim)
 
 
@@ -608,7 +603,7 @@ def softmax_cross_entropy_loss_grad(op, dy, log_prob, label, weight=None):
 # TODO: Merge split and split_v2
 def split(op, x):
     dim = op.attributes["dim"]
-    if op.op_type == "Split":
+    if op.op_type == "Split" or op.op_type == "SplitDistIR":
         num_splits = op.attributes["num_splits"]
     elif op.op_type == "MPIScatter" or op.op_type == "MPIScatterToTupleType":
         num_splits = len(op.attributes["devices"])
@@ -664,10 +659,10 @@ NumPyRegister = {
     ("Cast", (np.int64,)): cast,
     ("Cast", (np.float64,)): cast,
     ("Concat", (tuple,)): concat,
-    ("Concat", (np.ndarray, np.ndarray)): concat2,
-    ("Concat", (np.ndarray, np.ndarray, np.ndarray)): concat2,
-    ("Concat", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): concat2,
-    ("Concat", (np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray)): concat2,
+    ("Concat", (np.ndarray, np.ndarray)): concat,
+    ("Concat", (np.ndarray, np.ndarray, np.ndarray)): concat,
+    ("Concat", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): concat,
+    ("Concat", (np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray)): concat,
     ("Constant", ()): constant,
     ("ConstantOfShape", (np.ndarray,)): constant_of_shape,
     ("Div", (np.ndarray, np.ndarray)): div,
@@ -781,6 +776,7 @@ NumPyRegister = {
     ("Shape", (np.ndarray,)): shape,
     ("Slice", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): slice_conc,
     ("Slice", (np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.int64)): slice_conc,
+    ("SplitDistIR", (np.ndarray,)): split,
     ("Split", (np.ndarray,)): split_v2,
     ("Softmax", (np.ndarray,)): softmax,
     ("SoftmaxCrossEntropyLoss", (np.ndarray, np.ndarray)): softmax_cross_entropy_loss,

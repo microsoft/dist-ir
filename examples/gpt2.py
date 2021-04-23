@@ -76,6 +76,8 @@ def main(args):
             inputs.append(input_data[i])
     ex = SequentialExecutor("numpy")
     function = ex.infer_types(function, input_data)
+    cpprint(function)
+
     function = gpt2_dhp_transform(
         function,
         args.dp_degree,
@@ -84,10 +86,9 @@ def main(args):
         topology.devices,
         args.num_microbatches,
     )
-    # function = ex.infer_types(function, input_data)
-    # cpprint(function)
+    function = ex.infer_types(function, input_data)
+    cpprint(function)
     # output = ex.compute(function, input_data)
-
     """
     simulator = PostTypeInferenceSimulator(CostModel(topology))
     simulation = simulator.interpret(function, (v.type for v in function.inputs))

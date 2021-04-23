@@ -85,6 +85,7 @@ OpRegister = {
     "SoftmaxCrossEntropyLoss": OpRegisterEntry(num_inputs=2, num_outputs=2),
     "SoftmaxCrossEntropyLossGrad": OpRegisterEntry(num_inputs=3, num_outputs=1),
     "Split": OpRegisterEntry(num_inputs=1, variadic_outputs=True),
+    "SplitDistIR": OpRegisterEntry(num_inputs=1, variadic_outputs=True),
     "Split_v2": OpRegisterEntry(num_inputs=1, num_outputs=1),
     "Sqrt": OpRegisterEntry(num_inputs=1, num_outputs=1),
     "Squeeze": OpRegisterEntry(num_inputs=1, num_outputs=1),

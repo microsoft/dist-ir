@@ -1,5 +1,6 @@
 from collections import defaultdict, Hashable
 from frozendict import frozendict
+import math
 import logging
 import re
 
@@ -13,7 +14,7 @@ def _add_values(v1, v2, function, output_name):
 
 def _concat_values(v1, v2, function, dim, output_name):
     return function.add_op(
-        "Concat", inputs=[v1, v2], attributes={"dim": dim}, output_names=[output_name]
+        "Concat", inputs=[v1, v2], attributes={"axis": dim}, output_names=[output_name]
     )
 
 
@@ -25,7 +26,7 @@ def _split_value(v, function, num_splits, parallelism_level):
     assert parallelism_level == "pp"
     output_names = [f"{v.name}_{parallelism_level}_{i}" for i in range(num_splits)]
     return function.add_op(
-        "Split",
+        "SplitDistIR",
         inputs=[v],
         attributes={"dim": 0, "num_splits": num_splits},
         output_names=output_names,
@@ -103,7 +104,6 @@ def _partition_inputs_dp(function, device_tree):
                     inp, function, dim=0, devices=dp_devices, parallelism_level="dp"
                 )
             else:
-                print(f"Broadcasting input {inp}")
                 dp_inputs[inp] = _mpi_broadcast_value(
                     inp, function, devices=dp_devices, parallelism_level="dp"
                 )
@@ -128,7 +128,10 @@ def _partition_inputs_hp(function, device_tree, dp_inputs):
         hp_devices = tuple(sorted(device_tree[device_tree_root][dp_device].keys()))
         if len(hp_devices) > 1:
             # TODO: Fix this for GPT-2
-            raise ValueError("Only data parallelism is currently supported")
+            raise ValueError(
+                "Only data parallelism and pipeline parallelism are "
+                "currently supported"
+            )
             # If using horizontal parallelism, replicate the inputs and labels
             # and partition the weights. We do this once for each
             # data parallel partition.
@@ -177,30 +180,21 @@ def _partition_inputs_pp(
         hp_devices = tuple(sorted(device_tree[device_tree_root][dp_device].keys()))
         for j, hp_device in enumerate(hp_devices):
             pp_devices = device_tree[device_tree_root][dp_device][hp_device]
-            if len(pp_devices) > 1:
-                # TODO: Fix this for GPT-2
-                raise ValueError("Only data parallelism is currently supported")
-
-                # If using pipeline parallelism, split the inputs and labels along the
-                # batch dimension. No action is necessary for the weights. We do this
-                # once for every horizontal parallel partition (and corresponding data
-                # parallel partition).
-                pp_inputs[hp_x] = _split_value(
-                    hp_x,
-                    function,
-                    num_splits=num_microbatches,
-                    parallelism_level="pp",
-                )
-                pp_inputs[hp_z] = _split_value(
-                    hp_z,
-                    function,
-                    num_splits=num_microbatches,
-                    parallelism_level="pp",
-                )
-            else:
-                # If not using pipeline parallelism, no action necessary here.
-                for inp in function.inputs:
-                    hp_input = hp_inputs[dp_inputs[inp][i]][j]
+            for inp in function.inputs:
+                hp_input = hp_inputs[dp_inputs[inp][i]][j]
+                if len(pp_devices) > 1 and inp.name == "input1":
+                    # If using pipeline parallelism, split the input along the
+                    # batch dimension. No action is necessary for the weights. We do this
+                    # once for every horizontal parallel partition (and corresponding data
+                    # parallel partition).
+                    pp_inputs[hp_input] = _split_value(
+                        hp_input,
+                        function,
+                        num_splits=num_microbatches,
+                        parallelism_level="pp",
+                    )
+                else:
+                    # If not using pipeline parallelism, no action necessary here.
                     pp_inputs[hp_input] = [hp_input]
     return pp_inputs
 
@@ -217,37 +211,89 @@ def _pipeline_parallel_partition(function, pp_degree, devices):
 
     Returns a map from stage to device.
     """
-    # TODO: Remove this block
-    if pp_degree > 1:
-        raise ValueError("Only data parallelism is currently supported")
-    else:
-        assert len(devices) == 1
-        partition_map = {function: devices[0]}
-        return partition_map
 
-    num_blocks = len(function.inputs) - 2
-    assert num_blocks % pp_degree == 0
-    num_blocks_per_device = num_blocks // pp_degree
+    def _get_producers(function):
+        producers = {}
+        for op in function.ops:
+            for output in op.outputs:
+                producers[output] = op
+        return producers
+
+    def _get_subgraph_from_sink(producers, output):
+        subgraph = set()
+        queue = [producers[output]]
+        while len(queue) > 0:
+            cur = queue.pop(0)
+            subgraph.add(cur)
+            for inp in cur.inputs:
+                if inp in producers:
+                    producer = producers[inp]
+                    if producer not in subgraph:
+                        queue.append(producer)
+        return subgraph
+
+    # Verify that all op names are unique.
+    # assert len(set([op.name for op in function.ops])) == len(function.ops)
+
+    # Create a map from value to producer op.
+    producers = _get_producers(function)
+
+    # Get a list of subgraphs, with one subgraph for each Transformer block
+    # and additional subgraphs for initialization and output aggregation.
+    outputs = sorted(function.outputs, key=lambda x: int(x.name[len("output") :]))
+    subgraphs = []
+    for i, output in enumerate(outputs):
+        subgraph = _get_subgraph_from_sink(producers, output)
+        if i == 0:
+            subgraphs.append(subgraph)
+        else:
+            for prev in subgraphs[1:]:
+                subgraph = subgraph.difference(prev)
+            subgraphs.append(subgraph)
+    for subgraph in subgraphs[1:]:
+        subgraphs[0] = subgraphs[0].difference(subgraph)
+
+    # The first subgraph might have both initialization and output
+    # aggregation ops, in which we must separate these into distinct subgraphs.
+    final_stage_ops = set()
+    for op in subgraphs[0]:
+        for output in op.outputs:
+            for consumer in function.consumers[output]:
+                if consumer not in subgraphs[0] and consumer not in subgraphs[1]:
+                    print(f"Adding {consumer} to final stage ops")
+                    final_stage_ops.add(consumer)
+    if len(final_stage_ops) > 0:
+        for final_stage_op in final_stage_ops:
+            subgraphs[0].remove(final_stage_op)
+        subgraphs.append(final_stage_ops)
+        num_transformer_stages = len(subgraphs) - 2
+    else:
+        num_transformer_stages = len(subgraphs) - 1
+
+    # Assemble the stages according to the subgraphs.
+    op_to_stage_map = {}
+    for i, subgraph in enumerate(subgraphs):
+        for op in subgraph:
+            op_to_stage_map[op] = i
+    assert len(op_to_stage_map) == len(function.ops)
+    stage_ops = defaultdict(list)
+    for op in function.ops:
+        stage = op_to_stage_map[op]
+        stage_ops[stage].append(op)
+    stages = [
+        function.get_subfunction(stage_ops[stage], name=f"Stage {stage}")
+        for stage in sorted(stage_ops.keys())
+    ]
+
+    # Places stages on each device.
+    num_stages_per_device = num_transformer_stages // pp_degree
     partition_map = {}
-    # Split the function into forward and backward stages. Every matching pair of forward
-    # and backward stages will be placed onto the same device. Note that the last forward
-    # pass stage also has the Loss / LossGrad ops.
-    for i, device in enumerate(devices):
-        # TODO: Fix this for GPT-2
-        fwd_start = i * num_blocks_per_device * 2
-        fwd_end = (i + 1) * num_blocks_per_device * 2 + (2 if i == pp_degree - 1 else 0)
-        bwd_start = len(function.ops) - ((i + 1) * num_blocks_per_device * 2)
-        bwd_end = bwd_start + num_blocks_per_device * 2
-        fwd_stage = function.get_subfunction(
-            function.ops[fwd_start:fwd_end],
-            name=f"fwd_stage{i}",
-        )
-        bwd_stage = function.get_subfunction(
-            function.ops[bwd_start:bwd_end],
-            name=f"bwd_stage{i}",
-        )
-        partition_map[fwd_stage] = device
-        partition_map[bwd_stage] = device
+    partition_map[stages[0]] = devices[0]
+    if len(final_stage_ops) > 0:
+        partition_map[stages[-1]] = devices[-1]
+    for i in range(num_transformer_stages):
+        partition_map[stages[i + 1]] = devices[i // num_stages_per_device]
+
     return partition_map
 
 
@@ -381,13 +427,16 @@ def gpt2_dhp_transform(
     function, dp_degree, hp_degree, pp_degree, devices, num_microbatches
 ):
     """Automatically distributes a GPT-2 function using D/H/P hybrid parallelism."""
-    if hp_degree > 1 or pp_degree > 1:
-        raise NotImplementedError("Only data parallelism currently supported")
+    if hp_degree > 1:
+        raise NotImplementedError(
+            "Only data parallelism and pipeline parallelism currently supported"
+        )
 
     # Hack to get around unhashable numpy array attributes
     # TODO: Fix this more gracefully?
     orig_function = function
     (function, attribute_map) = _sanitize_unhashable_attributes(function)
+
     transformed_function = FunctionMaker(name=function.name)
     device_tree = _get_device_tree(dp_degree, hp_degree, pp_degree, devices)
     device_tree_root = tuple(device_tree.keys())[0]
@@ -487,10 +536,7 @@ def gpt2_dhp_transform(
                                 v = transformed_inputs[inp]
                                 dp_v = dp_inputs[v][i]
                                 hp_v = hp_inputs[dp_v][j]
-                                if (
-                                    inp == function.inputs[0]
-                                    or inp == function.inputs[1]
-                                ):
+                                if inp.name == "input1":
                                     pp_v = pp_inputs[hp_v][microbatch_id]
                                 else:
                                     pp_v = pp_inputs[hp_v][0]

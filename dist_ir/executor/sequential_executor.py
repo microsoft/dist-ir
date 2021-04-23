@@ -122,6 +122,12 @@ class SequentialExecutor:
                 type_map[key] = Tensor(
                     shape=value.shape, dtype=dtype, device=device_map[key]
                 )
+            elif isinstance(value, tuple):
+                dtype = _numpy_dtype_to_dist_ir_dtype(value[0].dtype)
+                type_map[key] = tuple(
+                    Tensor(shape=value[0].shape, dtype=dtype, device=device_map[key][i])
+                    for i in range(len(value))
+                )
             else:
                 raise ValueError(f"Found value {value} of type {type(value)}!")
 

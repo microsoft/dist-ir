@@ -151,12 +151,17 @@ def parse_tensor_from_file(path):
 
 
 def import_from_onnx(
-    onnx_model, default_device=None, parse_input_data=True, verbose=False
+    onnx_model,
+    name="foo",
+    default_device=None,
+    function_output_names=None,
+    parse_input_data=True,
+    verbose=False,
 ):
     # TODO: Remove prints?
     # TODO: Support types beyond Tensor
     onnx_model = onnx.load(onnx_model)
-    dist_ir_function = FunctionMaker("foo")  # TODO get name?
+    dist_ir_function = FunctionMaker(name)
 
     inputs = {}
     input_data = {}
@@ -256,5 +261,13 @@ def import_from_onnx(
                 print(f"Found output {out_name}")
         if verbose:
             print()
+
+    if function_output_names is not None:
+        dist_ir_function.set_outputs_auto()
+        function_output_values = []
+        for output in dist_ir_function.outputs:
+            if output.name in function_output_names:
+                function_output_values.append(output)
+        dist_ir_function.set_outputs(function_output_values)
 
     return dist_ir_function.finalize(), input_data

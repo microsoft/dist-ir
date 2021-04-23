@@ -220,7 +220,8 @@ class FunctionMaker:
             for out_edge in op.outputs:
                 if out_edge in is_output and not is_output[out_edge]:
                     print(
-                        f"{out_edge.name} was not an output, but now is output of {op.op_type}"
+                        f"{out_edge.name} was not an output, but now is "
+                        f"output of {op.op_type}"
                     )
                 is_output[out_edge] = True
 

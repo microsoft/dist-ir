@@ -14,6 +14,9 @@ from dist_ir.executor import (
 from dist_ir.importer import import_from_onnx
 from dist_ir.ir import cpprint, Device, Topology, Value
 from dist_ir.ir.type import Float32, Tensor
+from dist_ir.transforms import gpt2_dhp_transform
+
+NETWORK_BANDWIDTH_Gbps = 200
 
 
 def to_numpy(x):
@@ -24,17 +27,29 @@ def to_numpy(x):
 
 def main(args):
     topology = Topology()
+    world_size = args.dp_degree * args.hp_degree * args.pp_degree
     d0 = topology.add_device("gpu")
+    for i in range(world_size):
+        topology.add_device("gpu")
+        for j in range(i):
+            topology.set_bandwidth(
+                topology.devices[i], topology.devices[j], NETWORK_BANDWIDTH_Gbps
+            )
     function, input_data = import_from_onnx(
-        args.model_path, default_device=d0, parse_input_data=True
+        args.model_path,
+        name="GPT-2",
+        default_device=d0,
+        function_output_names=set(["output1"]),
+        parse_input_data=True,
     )
 
     tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
     tokens = tokenizer.encode(
         "Here is some text to encode Hello World", add_special_tokens=True
     )
-    input_ids = torch.tensor([[tokens for _ in range(args.batch_size)]])
+    input_ids = torch.tensor([[tokens] for _ in range(args.batch_size)])
     input_ids = to_numpy(input_ids)
+    print(input_ids.shape)
 
     inputs_with_shapes = [
         Value(
@@ -59,11 +74,21 @@ def main(args):
         else:
             assert inputs_with_shapes[i].type.shape == (1,)
             inputs.append(input_data[i])
-    """
-    function = infer_types_with_mixed_inputs(function, inputs)
-    """
     ex = SequentialExecutor("numpy")
     function = ex.infer_types(function, input_data)
+    function = gpt2_dhp_transform(
+        function,
+        args.dp_degree,
+        args.hp_degree,
+        args.pp_degree,
+        topology.devices,
+        args.num_microbatches,
+    )
+    # function = ex.infer_types(function, input_data)
+    # cpprint(function)
+    # output = ex.compute(function, input_data)
+
+    """
     simulator = PostTypeInferenceSimulator(CostModel(topology))
     simulation = simulator.interpret(function, (v.type for v in function.inputs))
 
@@ -72,6 +97,7 @@ def main(args):
         op_costs[event["name"]].append(event["dur"])
     for op_type in op_costs:
         print(f"{op_type}: {np.median(op_costs[op_type]) * 1e6} us")
+    """
 
 
 if __name__ == "__main__":
@@ -80,5 +106,17 @@ if __name__ == "__main__":
         "--model_path", type=str, required=True, help="Path to ONNX model"
     )
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
+    parser.add_argument(
+        "-d", "--dp_degree", type=int, default=1, help="Data parallel degree"
+    )
+    parser.add_argument(
+        "-t", "--hp_degree", type=int, default=1, help="Horizontal parallel degree"
+    )
+    parser.add_argument(
+        "-p", "--pp_degree", type=int, default=1, help="Pipeline parallel degree"
+    )
+    parser.add_argument(
+        "-k", "--num_microbatches", type=int, default=1, help="Num microbatches"
+    )
     args = parser.parse_args()
     main(args)

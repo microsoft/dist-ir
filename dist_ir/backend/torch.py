@@ -50,12 +50,15 @@ def function_to_module(fn: Function) -> torch.nn.Module:
 
 
 def run_multiprocesses(
-    per_rank_modules: Tuple[torch.nn.Module],
-    per_rank_inputs: Tuple[Any],
-    backend="gloo",
+    per_rank_functions: Tuple[Function], per_rank_inputs: Tuple[Any], backend="gloo"
 ):
-    assert len(per_rank_modules) == len(per_rank_inputs)
-    world_size = len(per_rank_modules)
+    assert len(per_rank_functions) == len(per_rank_inputs)
+    world_size = len(per_rank_functions)
+
+    # Convert per-rank DistIR functions to torch.nn.Modules:
+    per_rank_modules = list(map(function_to_module, per_rank_functions))
+    for d, gm in enumerate(per_rank_modules):
+        print(f"{d}\n{gm.graph}\n")
 
     io_dir = TemporaryDirectory()
     # print("run_multiprocess: saving I/O to:", io_dir.name)

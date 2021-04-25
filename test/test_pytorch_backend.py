@@ -125,8 +125,8 @@ def test_owt(num_devices, num_layers):
     assert all(np.allclose(y, o) for y, o in zip(ys, output_arrays))
 
     # Per-rank projection:
-    proj = project(fn, tuple(v.type for v in input_vals))
-    for d, f_d in proj.items():
+    per_rank_fns = project(fn, tuple(v.type for v in input_vals))
+    for d, f_d in per_rank_fns.items():
         print()
         print(d)
         cpprint(f_d)
@@ -136,13 +136,8 @@ def test_owt(num_devices, num_layers):
     for v, a in zip(fn.inputs, input_arrays):
         per_rank_inputs[v.type.device.device_id - 1].append(torch.tensor(a))
 
-    # Translate per-rank functions into torch GraphModules:
-    per_rank_modules = [function_to_module(f_d) for d, f_d in proj.items()]
-    for d, gm in enumerate(per_rank_modules):
-        print(f"\n{d}\n{gm.graph}")
-
     # Run per-rank modules using PyTorch backend:
-    per_rank_outputs = run_multiprocesses(per_rank_modules, per_rank_inputs)
+    per_rank_outputs = run_multiprocesses(per_rank_fns.values(), per_rank_inputs)
 
     # Check outputs:
     assert all(np.allclose(y, o) for y, o in zip(per_rank_outputs, output_arrays))

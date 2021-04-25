@@ -1,5 +1,5 @@
 import os
-from tempfile import mkdtemp
+from tempfile import TemporaryDirectory
 from typing import Any, Tuple
 
 import torch
@@ -49,20 +49,6 @@ def function_to_module(fn: Function) -> torch.nn.Module:
     return fx.GraphModule({}, g)
 
 
-def _init_process(rank, size, module, io_dir, backend):
-    """ Initialize the distributed environment. """
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
-    os.environ["MASTER_PORT"] = "29500"
-    dist.init_process_group(backend, rank=rank, world_size=size)
-
-    per_rank_inputs = torch.load(os.path.join(io_dir, f"in.{rank}.pt"))
-
-    # TODO time the next line only
-    res = module(*per_rank_inputs)
-
-    torch.save(res, os.path.join(io_dir, f"out.{rank}.pt"))
-
-
 def run_multiprocesses(
     per_rank_modules: Tuple[torch.nn.Module],
     per_rank_inputs: Tuple[Any],
@@ -71,19 +57,30 @@ def run_multiprocesses(
     assert len(per_rank_modules) == len(per_rank_inputs)
     world_size = len(per_rank_modules)
 
-    io_dir = mkdtemp()
-    print("run_multiprocess: saving I/O to:", io_dir)
+    io_dir = TemporaryDirectory()
+    # print("run_multiprocess: saving I/O to:", io_dir.name)
+
+    def run_process(rank, module):
+        """ Initialize the distributed environment. """
+        os.environ["MASTER_ADDR"] = "127.0.0.1"
+        os.environ["MASTER_PORT"] = "29500"
+        dist.init_process_group(backend, rank=rank, world_size=world_size)
+
+        per_rank_inputs = torch.load(os.path.join(io_dir.name, f"in.{rank}.pt"))
+
+        # TODO time the next line only
+        res = module(*per_rank_inputs)
+
+        torch.save(res, os.path.join(io_dir.name, f"out.{rank}.pt"))
+
     # Save inputs for each per-rank function:
     # TODO lowered pytorch file numbers devices 0...num_devices-1
     for d, inps in enumerate(per_rank_inputs):
-        torch.save(inps, os.path.join(io_dir, f"in.{d}.pt"))
+        torch.save(inps, os.path.join(io_dir.name, f"in.{d}.pt"))
 
     processes = []
     for rank, per_rank_module in enumerate(per_rank_modules):
-        p = Process(
-            target=_init_process,
-            args=(rank, world_size, per_rank_module, io_dir, backend),
-        )
+        p = Process(target=run_process, args=(rank, per_rank_module))
         p.start()
         processes.append(p)
 
@@ -92,7 +89,8 @@ def run_multiprocesses(
 
     # Load outputs:
     per_rank_outputs = [
-        torch.load(os.path.join(io_dir, f"out.{d}.pt")) for d in range(world_size)
+        torch.load(os.path.join(io_dir.name, f"out.{d}.pt")) for d in range(world_size)
     ]
+    io_dir.cleanup()
 
     return per_rank_outputs

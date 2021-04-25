@@ -1,5 +1,5 @@
 frozendict >= 1.2 
 numpy >= 1.19
 onnx >= 1.7.0
-torch >= 1.6.0
+torch >= 1.8.0
 prettyprinter >= 0.18.0

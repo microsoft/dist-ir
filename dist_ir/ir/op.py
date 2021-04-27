@@ -23,6 +23,20 @@ class Op:
     output_values: InitVar[Tuple[Value]] = None
 
     def __post_init__(self, output_names, output_types, output_values):
+        # Check output_{names,types,values} have same length
+        given_num_outputs = set(
+            len(x) for x in [output_names, output_types, output_values] if x is not None
+        )
+        if len(given_num_outputs) == 0:
+            given_num_outputs = None
+        elif len(given_num_outputs) == 1:
+            given_num_outputs = list(given_num_outputs)[0]
+        else:
+            raise ValueError(
+                "output_{names,types,values} must have same length. Got:\n"
+                f"{output_names}\n{output_types}\n{output_values}"
+            )
+
         if self.op_type == "Pmap":
             # Handle pmap specially
             assert len(self.subfunctions) == 1
@@ -46,22 +60,18 @@ class Op:
                     )
             # Number of outputs is given by OpRegister
             if OpRegister[self.op_type].variadic_outputs:
-                if output_names is None:
+                if given_num_outputs is None:
                     raise ValueError(
                         f"Op {self.name} ({self.op_type}) has variadic "
-                        f"outputs, so output names must be specified"
+                        "outputs, so one of output_{names,values} must be specified"
                     )
-                num_outputs = len(output_names)
+                num_outputs = given_num_outputs
             else:
                 num_outputs = OpRegister[self.op_type].num_outputs
+                assert given_num_outputs is None or num_outputs == given_num_outputs
 
-        if output_values is not None:
-            object.__setattr__(
-                self, "outputs", output_values
-            )  # Can't assign to frozen field
-        else:
+        if output_values is None:
             # Create the correct number of output values with appropriate types
-            # if self.outputs is None:
             if output_names is None:
                 output_names = [f"{self.name}_out_{i}" for i in range(num_outputs)]
             elif len(output_names) != num_outputs:

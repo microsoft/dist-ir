@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import torch
 
 from dist_ir.backend.torch import function_to_module, run_multiprocesses
@@ -69,6 +70,7 @@ def create_owt_model(num_devices, num_layers):
     return fn.finalize()
 
 
+@pytest.mark.parametrize(["num_devices", "num_layers"], [(2, 4)])
 def test_owt(num_devices, num_layers):
     fn = create_owt_model(num_devices, num_layers)
 

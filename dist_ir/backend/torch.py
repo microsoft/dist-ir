@@ -64,7 +64,7 @@ def run_multiprocesses(
     # print("run_multiprocess: saving I/O to:", io_dir.name)
 
     def run_process(rank, module):
-        """ Initialize the distributed environment. """
+        """Initialize the distributed environment."""
         os.environ["MASTER_ADDR"] = "127.0.0.1"
         os.environ["MASTER_PORT"] = "29500"
         dist.init_process_group(backend, rank=rank, world_size=world_size)

@@ -20,6 +20,7 @@ def _allgather(x_i, world_size=None, dim=0):
 
 _op_to_torch = {
     "MatMul": torch.matmul,
+    "Relu": torch.relu,
     "MPIAllgather": _allgather,
 }
 

@@ -48,6 +48,7 @@ def _mpi_allgather_projector(op: Op, state: ProjectorState):
 
 ProjectorRegister = {
     ("MatMul", (Tensor, Tensor)): _identity_projector,
+    ("Relu", (Tensor,)): _identity_projector,
     ("MPIAllgather", (Tensor,) * 2): _mpi_allgather_projector,
     ("MPIAllgather", (Tensor,) * 4): _mpi_allgather_projector,
     ("MPIAllgather", (Tensor,) * 8): _mpi_allgather_projector,

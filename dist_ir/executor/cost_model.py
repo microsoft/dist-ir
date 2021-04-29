@@ -126,6 +126,7 @@ class CostModel:
             ("Select", (TupleType,)): self._select_cost_fn,
             ("Send", (Tensor,)): self._send_cost_fn,
             ("Split", (Tensor,)): self._split_cost_fn,
+            ("SplitDistIR", (Tensor,)): self._split_cost_fn,
             ("Shape", (Tensor,)): self._shape_cost_fn,
             ("Slice", (Tensor, Tensor, Tensor, Tensor)): self._slice_cost_fn,
             (

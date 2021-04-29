@@ -47,6 +47,7 @@ class Int64(Type):
     def size(self):
         return 8
 
+
 @singleton
 class Float16(Type):
     """The 16-bit float type. A singleton class."""
@@ -57,6 +58,7 @@ class Float16(Type):
     @property
     def size(self):
         return 2
+
 
 @singleton
 class Float32(Type):
@@ -69,6 +71,7 @@ class Float32(Type):
     def size(self):
         return 4
 
+
 @singleton
 class Float64(Type):
     """The 64-bit float type. A singleton class."""
@@ -79,6 +82,7 @@ class Float64(Type):
     @property
     def size(self):
         return 8
+
 
 @singleton
 class Bool(Type):
@@ -115,6 +119,8 @@ class Tensor(Type):
         return f"Tensor[shape={self.shape}, dtype={self.dtype}, device={self.device}]"
 
     def size(self):
+        if not isinstance(self.shape, tuple):
+            return 0
         return reduce(mul, self.shape) * self.dtype.size
 
 
@@ -148,4 +154,7 @@ class TupleType(Type):
         return devices
 
     def size(self):
-        return reduce(add, [typ.size() for typ in self.types])
+        size_ = 0.0
+        for typ in self.types:
+            size_ += typ.size()
+        return size_

@@ -1,11 +1,15 @@
 from collections import defaultdict, Hashable
-from frozendict import frozendict
 import math
 import logging
 import re
 
+from ..ir import cpprint
 from ..ir.function import Function, FunctionMaker
 from .pipedream_scheduler import PipeDreamScheduler
+from .sanitize_attributes_transform import (
+    sanitize_unhashable_attributes,
+    restore_unhashable_attributes,
+)
 
 
 def _add_values(v1, v2, function, output_name):
@@ -285,6 +289,11 @@ def _pipeline_parallel_partition(function, pp_degree, devices):
         for stage in sorted(stage_ops.keys())
     ]
 
+    for i, stage in enumerate(stages):
+        print(f"Stage {i+1}:")
+        cpprint(stage)
+        print()
+
     # Places stages on each device.
     num_stages_per_device = num_transformer_stages // pp_degree
     partition_map = {}
@@ -351,78 +360,6 @@ def _get_device_tree(dp_degree, hp_degree, pp_degree, devices):
     return device_tree
 
 
-def _sanitize_unhashable_attributes(function):
-    import numpy as np
-
-    assert isinstance(function, Function)
-    attribute_map = {}
-    value_map = {}
-    sanitized_function = FunctionMaker(function.name)
-    for inp in function.inputs:
-        sanitized_input = sanitized_function.add_input_value(inp.name, inp.type)
-        value_map[inp] = sanitized_input
-    for op in function.ops:
-        inputs = [value_map[inp] for inp in op.inputs]
-        sanitized_attributes = {}
-        for attr, value in op.attributes.items():
-            if isinstance(value, Hashable):
-                sanitized_attributes[attr] = value
-            else:
-                if not isinstance(value, np.ndarray):
-                    raise NotImplementedError(
-                        f"Unhashable type {type(value)} for op {op.name} "
-                        f"attribute {attr}"
-                    )
-                sanitized_value = value.tobytes()
-                sanitized_attributes[attr] = sanitized_value
-                attribute_map[(attr, sanitized_value)] = value
-        outputs = sanitized_function.add_op(
-            op_type=op.op_type,
-            inputs=inputs,
-            attributes=sanitized_attributes,
-            subfunctions=op.subfunctions,
-            output_names=[output.name for output in op.outputs],
-        )
-        if not isinstance(outputs, tuple):
-            outputs = (outputs,)
-        for orig_output, sanitized_output in zip(op.outputs, outputs):
-            value_map[orig_output] = sanitized_output
-    return sanitized_function.finalize(), attribute_map
-
-
-def _restore_unhashable_attributes(function, attribute_map):
-    assert isinstance(function, FunctionMaker)
-
-    restored_function = FunctionMaker(function.name)
-    value_map = {}
-    for inp in function.inputs:
-        restored_input = restored_function.add_input_value(inp.name, inp.type)
-        value_map[inp] = restored_input
-
-    for op in function.ops:
-        inputs = [value_map[inp] for inp in op.inputs]
-        restored_attributes = {}
-        if op.attributes is not None:
-            for attr, value in op.attributes.items():
-                if (attr, value) in attribute_map:
-                    restored_attributes[attr] = attribute_map[(attr, value)]
-                else:
-                    restored_attributes[attr] = value
-        restored_outputs = restored_function.add_op(
-            op.op_type,
-            inputs=inputs,
-            attributes=restored_attributes,
-            subfunctions=op.subfunctions,
-            output_names=[output.name for output in op.outputs],
-        )
-        if not isinstance(restored_outputs, tuple):
-            restored_outputs = (restored_outputs,)
-        for (output, restored_output) in zip(op.outputs, restored_outputs):
-            value_map[output] = restored_output
-
-    return restored_function
-
-
 def gpt2_dhp_transform(
     function, dp_degree, hp_degree, pp_degree, devices, num_microbatches
 ):
@@ -435,7 +372,7 @@ def gpt2_dhp_transform(
     # Hack to get around unhashable numpy array attributes
     # TODO: Fix this more gracefully?
     orig_function = function
-    (function, attribute_map) = _sanitize_unhashable_attributes(function)
+    (function, attribute_map) = sanitize_unhashable_attributes(function)
 
     transformed_function = FunctionMaker(name=function.name)
     device_tree = _get_device_tree(dp_degree, hp_degree, pp_degree, devices)
@@ -816,7 +753,7 @@ def gpt2_dhp_transform(
 
     # Hack to get around unhashable numpy array attributes
     # TODO: Fix this more gracefully?
-    transformed_function = _restore_unhashable_attributes(
+    transformed_function = restore_unhashable_attributes(
         transformed_function, attribute_map
     )
 

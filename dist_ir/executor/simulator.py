@@ -18,11 +18,16 @@ class SimulatorState(AbstractState):
     def __init__(self, function: Function, inputs: Sequence[Any]):
         AbstractState.__init__(self, function, inputs)
         self.timestamps = defaultdict(float)
-        self.peak_memory = defaultdict(float)
-        self.live_memory = defaultdict(float)
+        self.peak_memory = defaultdict(lambda: 0)
+        self.live_memory = defaultdict(lambda: [(0, 0)])
         self.consumers = defaultdict(int)
         self.trace = []
         self._function_inputs_set = set(function.inputs)
+
+        for inp in function.inputs:
+            self.peak_memory[inp.type.device] += inp.type.size()
+        for device in self.peak_memory:
+            self.live_memory[device][0] = (0, self.peak_memory[device])
 
     def add_trace_event(self, op_type, device, start_time, duration):
         if device is None:
@@ -81,30 +86,46 @@ def _simulate_op(
         state.timestamps[device] += costs[device]
 
     # Update the live memory with any new activations.
+    new_live_memory = defaultdict(lambda: 0)
     for out_edge in op.outputs:
         state.consumers[out_edge] = len(state.function.consumers[out_edge])
         output_devices = out_edge.type.get_all_devices()
         for output_device in output_devices:
-            state.live_memory[output_device] += out_edge.type.size()
+            new_live_memory[output_device] += out_edge.type.size()
+    for device in new_live_memory:
+        state.live_memory[device].append(
+            (
+                state.timestamps[device],
+                state.live_memory[device][-1][1] + new_live_memory[device],
+            )
+        )
 
     # Update the peak memory.
     for device in state.live_memory:
         state.peak_memory[device] = max(
-            state.peak_memory[device], state.live_memory[device]
+            state.peak_memory[device], state.live_memory[device][-1][1]
         )
 
     # Update the live memory to reflect any freed activations.
-    function_inputs = set(state.function.inputs)
+    freed_live_memory = defaultdict(lambda: 0)
     for in_edge in op.inputs:
         # We don't free live memory for function inputs as these could be for weights
         # or input data buffers that are active for the entire duration of execution.
-        if in_edge in function_inputs:
+        if in_edge in state._function_inputs_set:
             continue
+        assert state.consumers[in_edge] > 0
         state.consumers[in_edge] -= 1
         if state.consumers[in_edge] == 0:
             input_devices = in_edge.type.get_all_devices()
             for input_device in input_devices:
-                state.live_memory[input_device] -= in_edge.type.size()
+                freed_live_memory[input_device] += in_edge.type.size()
+    for device in freed_live_memory:
+        state.live_memory[device].append(
+            (
+                state.timestamps[device],
+                state.live_memory[device][-1][1] - freed_live_memory[device],
+            )
+        )
 
 
 def _create_semantics(cost_functions, implementations):

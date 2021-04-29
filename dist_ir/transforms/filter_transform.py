@@ -1,4 +1,9 @@
+from ..ir import Op
 from ..ir.function import FunctionMaker
+from .sanitize_attributes_transform import (
+    sanitize_unhashable_attributes,
+    restore_unhashable_attributes,
+)
 
 
 def filter_transform(
@@ -28,6 +33,8 @@ def filter_transform(
     Returns:
       The transformed function.
     """
+
+    function, attribute_map = sanitize_unhashable_attributes(function)
 
     done = False
     inv_value_maps = []
@@ -64,15 +71,17 @@ def filter_transform(
                     v = transformed_function.add_input_value(inp.name, inp.type)
                     value_map[inp] = v
                 inputs.append(value_map[inp])
-            outputs = transformed_function.add_op(
-                op.op_type,
-                inputs=inputs,
+            new_op = Op(
+                name=op.name,
+                op_type=op.op_type,
+                inputs=tuple(inputs),
                 attributes=op.attributes,
-                output_names=[output.name for output in op.outputs],
+                subfunctions=op.subfunctions,
+                output_names=tuple(output.name for output in op.outputs),
+                output_types=tuple(output.type for output in op.outputs),
             )
-            if not isinstance(outputs, tuple):
-                outputs = (outputs,)
-            for output, transformed_output in zip(op.outputs, outputs):
+            transformed_function.ops.append(new_op)
+            for output, transformed_output in zip(op.outputs, new_op.outputs):
                 value_map[output] = transformed_output
         inv_value_maps.append({v: k for k, v in value_map.items()})
         for inp in transformed_function.inputs:
@@ -81,10 +90,12 @@ def filter_transform(
                 v = inv_value_map[v]
             global_inv_value_map[inp] = v
         assert len(transformed_function.ops) <= len(function.ops)
+        function = restore_unhashable_attributes(transformed_function, attribute_map)
         function = transformed_function.finalize()
     typed_input_values = [
         global_inv_value_map[inp] for inp in transformed_function.inputs
     ]
     for v in typed_input_values:
-        assert v.type is not None
+        if v.type is None:
+            raise ValueError(f"Input value {v} has no type!")
     return function, typed_input_values

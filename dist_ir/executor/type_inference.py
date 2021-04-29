@@ -602,7 +602,7 @@ TypeInferrer = AbstractInterpreter(
 
 def _type_function(function: Function, type_map: Dict[Value, Type]) -> Function:
     """Create a typed version of function, using the types given in type map."""
-    new_function = FunctionMaker()
+    new_function = FunctionMaker(name=function.name)
     # A Map from function's values to new_function's (typed) values:
     value_map: Dict[Value, Value] = {}
 

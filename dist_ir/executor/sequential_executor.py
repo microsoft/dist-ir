@@ -55,7 +55,7 @@ class SequentialExecutor:
         state = self.interpreter.interpret(function, inputs)
         return tuple(state.env[v] for v in function.outputs)
 
-    def infer_types(self, function: Function, inputs: Sequence[Any]) -> Function:
+    def infer_types(self, function: Function, inputs: Sequence[Any], debug: bool) -> Function:
         """Given a function and a list of input values, returns a new function where
         all values are typed.
 
@@ -76,7 +76,7 @@ class SequentialExecutor:
                 raise NotImplementedError(f"Unrecognized NumPy dtype {dtype}")
 
         # Run reference execution to get the output shapes.
-        state = self.interpreter.interpret(function, inputs)
+        state = self.interpreter.interpret(function, inputs, debug=debug)
 
         # Propagate devices seperately from shapes.
         device_map = {}

@@ -130,38 +130,35 @@ def _partition_inputs_hp(function, device_tree, dp_inputs):
     hp_inputs = {}
     for i, dp_device in enumerate(dp_devices):
         hp_devices = tuple(sorted(device_tree[device_tree_root][dp_device].keys()))
+        # If using horizontal parallelism, replicate the inputs and labels
+        # and partition the weights. We do this once for each
+        # data parallel partition.
         if len(hp_devices) > 1:
-            # TODO: Fix this for GPT-2
-            raise ValueError(
-                "Only data parallelism and pipeline parallelism are "
-                "currently supported"
-            )
-            # If using horizontal parallelism, replicate the inputs and labels
-            # and partition the weights. We do this once for each
-            # data parallel partition.
-            hp_inputs[dp_inputs[x][i]] = _mpi_broadcast_value(
-                dp_inputs[x][i],
-                function,
-                devices=hp_devices,
-                parallelism_level="hp",
-            )
-            hp_inputs[dp_inputs[z][i]] = _mpi_broadcast_value(
-                dp_inputs[z][i],
-                function,
-                devices=hp_devices,
-                parallelism_level="hp",
-            )
-            for j, weight in enumerate(weights):
-                # To adhere to Megatron-style horizontal parallelism, alternate the
-                # partition dimensions between weight tensors.
-                dim = (j + 1) % 2
-                hp_inputs[dp_inputs[weight][i]] = _mpi_scatter_value(
-                    dp_inputs[weight][i],
-                    function,
-                    dim=dim,
-                    devices=hp_devices,
-                    parallelism_level="hp",
-                )
+            # TODO: Partition weights for GPT-2
+            for inp in function.inputs:
+                if "c_attn.weight" in inp.name:
+                    hp_inputs[dp_inputs[inp][i]] = _mpi_scatter_value(
+                        dp_inputs[inp][i],
+                        function,
+                        devices=hp_devices,
+                        dim=1,
+                        parallelism_level="hp",
+                    )
+                elif "c_attn.bias" in inp.name or "attn.c_proj.weight" in inp.name:
+                    hp_inputs[dp_inputs[inp][i]] = _mpi_scatter_value(
+                        dp_inputs[inp][i],
+                        function,
+                        devices=hp_devices,
+                        dim=0,
+                        parallelism_level="hp",
+                    )
+                else:
+                    hp_inputs[dp_inputs[inp][i]] = _mpi_broadcast_value(
+                        dp_inputs[inp][i],
+                        function,
+                        devices=hp_devices,
+                        parallelism_level="hp",
+                    )
         else:
             # If not using horizontal parallelism, no action necessary here.
             for inp in function.inputs:
@@ -289,11 +286,6 @@ def _pipeline_parallel_partition(function, pp_degree, devices):
         for stage in sorted(stage_ops.keys())
     ]
 
-    for i, stage in enumerate(stages):
-        print(f"Stage {i+1}:")
-        cpprint(stage)
-        print()
-
     # Places stages on each device.
     num_stages_per_device = num_transformer_stages // pp_degree
     partition_map = {}
@@ -364,10 +356,6 @@ def gpt2_dhp_transform(
     function, dp_degree, hp_degree, pp_degree, devices, num_microbatches
 ):
     """Automatically distributes a GPT-2 function using D/H/P hybrid parallelism."""
-    if hp_degree > 1:
-        raise NotImplementedError(
-            "Only data parallelism and pipeline parallelism currently supported"
-        )
 
     # Hack to get around unhashable numpy array attributes
     # TODO: Fix this more gracefully?
@@ -511,10 +499,25 @@ def gpt2_dhp_transform(
                                     )
                                 input_values[idx] = forwarded_value_map[(v, device)]
                         # Add the op once for each device to the transformed function.
+                        attributes = op.attributes
+                        if op.op_type == "Split":
+                            if "split" in attributes and attributes["split"] == (
+                                768,
+                                768,
+                                768,
+                            ):
+                                assert len(attributes) == 2
+                                new_dim = 768 // hp_degree
+                                attributes = {
+                                    "axis": attributes["axis"],
+                                    "split": (new_dim, new_dim, new_dim),
+                                }
+
                         transformed_outputs = transformed_function.add_op(
                             op.op_type,
+                            name=op.name,
                             inputs=input_values,
-                            attributes=op.attributes,
+                            attributes=attributes,
                             output_names=[
                                 (
                                     f"{v.name}_dp_{i}_hp_{j}_pp_{microbatch_id}"
@@ -543,51 +546,42 @@ def gpt2_dhp_transform(
                     # Aggregate horizontal parallel outputs.
                     if hp_degree > 1:
                         # TODO: Fix this for GPT-2
-                        if op.op_type == "MatMul" or op.op_type == "MatMulGrad":
-                            matmul_counter[microbatch_id] += 1
-                            if matmul_counter[microbatch_id] % 2 == 0:
-                                for output in op.outputs:
-                                    if "dw" in output.name:
-                                        # Weight gradients do not need to be aggregated
-                                        # across model parallel partitions.
-                                        continue
-                                    # Batch-dependent values are allreduced.
-                                    value_names = tuple(
+                        if op.op_type == "Gemm" and any(
+                            ["attn.c_proj.weight" in inp.name for inp in op.inputs]
+                        ):
+                            for output in op.outputs:
+                                value_names = tuple(
+                                    intermediate_value_map[j][microbatch_id][output][0]
+                                    for j in range(len(devices))
+                                )
+                                logging.debug(
+                                    f"Doing horizontal parallel reduction for "
+                                    f"microbatch {microbatch_id} for {value_names}"
+                                )
+                                reduced_outputs = _mpi_allreduce_values(
+                                    tuple(
                                         intermediate_value_map[j][microbatch_id][
                                             output
                                         ][0]
                                         for j in range(len(devices))
-                                    )
-                                    logging.debug(
-                                        f"Doing horizontal parallel reduction for "
-                                        f"microbatch {microbatch_id} for {value_names}"
-                                    )
-                                    reduced_outputs = _mpi_allreduce_values(
-                                        tuple(
-                                            intermediate_value_map[j][microbatch_id][
-                                                output
-                                            ][0]
-                                            for j in range(len(devices))
-                                        ),
-                                        transformed_function,
-                                        output_names=[
-                                            (
-                                                f"{output.name}_dp_{i}_hp_all_pp_"
-                                                f"{microbatch_id}_device_{device.device_id}"
-                                            )
-                                            for j, device in enumerate(devices)
-                                        ],
-                                    )
-                                    assert len(reduced_outputs) == len(devices)
-                                    for k, (d, reduced_output) in enumerate(
-                                        zip(devices, reduced_outputs)
-                                    ):
-                                        intermediate_value_map[k][microbatch_id][
-                                            output
-                                        ] = (
-                                            reduced_output,
-                                            d,
+                                    ),
+                                    transformed_function,
+                                    output_names=[
+                                        (
+                                            f"{output.name}_dp_{i}_hp_all_pp_"
+                                            f"{microbatch_id}_device_{device.device_id}"
                                         )
+                                        for j, device in enumerate(devices)
+                                    ],
+                                )
+                                assert len(reduced_outputs) == len(devices)
+                                for k, (d, reduced_output) in enumerate(
+                                    zip(devices, reduced_outputs)
+                                ):
+                                    intermediate_value_map[k][microbatch_id][output] = (
+                                        reduced_output,
+                                        d,
+                                    )
 
                     # Aggregate pipeline parallel outputs.
                     for output in op.outputs:
@@ -638,33 +632,19 @@ def gpt2_dhp_transform(
                                         f"Doing pipeline parallel aggregation for {mb_all_output} "
                                         f"and {mb_k_output} on device {device.device_id}"
                                     )
-                                    if "dw" in output.name:
-                                        intermediate_value_map[j]["all"][output] = (
-                                            _add_values(
-                                                mb_all_output,
-                                                mb_k_output,
-                                                transformed_function,
-                                                output_name=(
-                                                    f"{output.name}_dp_{i}_hp_{hp_level}_"
-                                                    f"pp_all_device_{mb_all_device.device_id}"
-                                                ),
+                                    intermediate_value_map[j]["all"][output] = (
+                                        _concat_values(
+                                            mb_all_output,
+                                            mb_k_output,
+                                            transformed_function,
+                                            dim=0,
+                                            output_name=(
+                                                f"{output.name}_dp_{i}_hp_{hp_level}_"
+                                                f"pp_all_device_{mb_all_device.device_id}"
                                             ),
-                                            mb_all_device,
-                                        )
-                                    else:
-                                        intermediate_value_map[j]["all"][output] = (
-                                            _concat_values(
-                                                mb_all_output,
-                                                mb_k_output,
-                                                transformed_function,
-                                                dim=0,
-                                                output_name=(
-                                                    f"{output.name}_dp_{i}_hp_{hp_level}_"
-                                                    f"pp_all_device_{mb_all_device.device_id}"
-                                                ),
-                                            ),
-                                            mb_all_device,
-                                        )
+                                        ),
+                                        mb_all_device,
+                                    )
 
             # Forward any timestep outputs to the next pipeline parallel partition.
             if pp_degree > 1:

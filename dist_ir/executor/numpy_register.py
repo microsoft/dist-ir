@@ -610,7 +610,11 @@ def split(op, x):
     else:
         raise NotImplementedError(op.op_type)
 
-    return tuple(y for y in np.split(x, num_splits, axis=dim))
+    try:
+        return tuple(y for y in np.split(x, num_splits, axis=dim))
+    except Exception as e:
+        import pdb
+        pdb.set_trace()
 
 # NOTE: This is the ONNX version of Split
 def split_v2(op, x):

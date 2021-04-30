@@ -49,7 +49,6 @@ def main(args):
     )
     input_ids = torch.tensor([[tokens] for _ in range(args.batch_size)])
     input_ids = to_numpy(input_ids)
-    print(input_ids.shape)
 
     inputs_with_shapes = [
         Value(
@@ -75,8 +74,7 @@ def main(args):
             assert inputs_with_shapes[i].type.shape == (1,)
             inputs.append(input_data[i])
     ex = SequentialExecutor("numpy")
-    function = ex.infer_types(function, input_data)
-
+    function = ex.infer_types(function, input_data, debug=args.debug)
     function = gpt2_dhp_transform(
         function,
         args.dp_degree,
@@ -85,8 +83,14 @@ def main(args):
         topology.devices,
         args.num_microbatches,
     )
-    #function = ex.infer_types(function, input_data)
-    #cpprint(function)
+
+    # Manual adjustments for horizontal parallelism
+    for i in range(len(input_data)):
+        if input_data[i].shape == (1,) and input_data[i][0] == 2304:
+            input_data[i] = np.array([input_data[i][0] // args.hp_degree])
+
+    function = ex.infer_types(function, input_data, debug=args.debug)
+    cpprint(function)
     # output = ex.compute(function, input_data)
     """
     simulator = PostTypeInferenceSimulator(CostModel(topology))
@@ -118,5 +122,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "-k", "--num_microbatches", type=int, default=1, help="Num microbatches"
     )
+    parser.add_argument("--debug", action="store_true", default=False, help="Debug")
     args = parser.parse_args()
     main(args)

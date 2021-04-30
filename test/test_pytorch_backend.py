@@ -193,12 +193,17 @@ def test_dp_mlp():
     per_rank_inputs = [[] for _ in range(num_devices)]
     for v, a in zip(fn.inputs, convert_inputs_dp(weights, x)):
         per_rank_inputs[v.type.device.device_id - 1].append(a)
-    per_rank_outputs = run_multiprocesses(per_rank_fns.values(), per_rank_inputs)
+    per_rank_outputs, runtimes = run_multiprocesses(
+        per_rank_fns.values(), per_rank_inputs
+    )
 
     # Check outputs:
     assert torch.allclose(y, torch.cat(per_rank_outputs, 0))
 
+    return runtimes
+
 
 if __name__ == "__main__":
     # test_owt(2, 4)
-    test_dp_mlp()
+    # test_dp_mlp()
+    pass

@@ -6,6 +6,7 @@ from ..ir.type import TupleType
 
 import numpy as np
 
+
 class AbstractState:
     """An abstract state. env is an environment, i.e. a mapping from Value
     objects to abstract values.
@@ -81,7 +82,11 @@ class AbstractInterpreter:
         return state
 
     def interpret(
-        self, function: Function, inputs: Sequence[Any], state: AbstractState = None
+        self,
+        function: Function,
+        inputs: Sequence[Any],
+        state: AbstractState = None,
+        debug: bool = False,
     ):
         """
         The result of the interpretation will be the final abstract state.
@@ -104,29 +109,49 @@ class AbstractInterpreter:
                 # a symbol table, somthing like _convert_impls_to_semantics
                 input_types = tuple(type(state.env[inp]) for inp in op.inputs)
                 # Execute this op's semantics on the state
-                self.semantics[op.op_type, input_types](op, state)
+                self.semantics[op.op_type, input_types](op, state, debug)
 
         return state
 
 
-def convert_impls_to_semantics(impls):
+def convert_impls_to_semantics(impls, debug=False):
     """Converts a dictionary of semantics functions that take in input values
     and spit out output values to one that modifies an abstract state in place.
     """
 
-    def convert_impl(impl_fn):
-        def semantics(op: Op, state: AbstractState):
+    def convert_impl(impl_fn, debug=False):
+        def semantics(op: Op, state: AbstractState, debug: bool):
             # Find the op's inputs in state's environment
             inputs = tuple(state.env[v] for v in op.inputs)
+            if debug:
+                print(f"{op.name} ({op.op_type})")
+                print("Inputs:")
+                for inp, data in zip(op.inputs, inputs):
+                    if (isinstance(data, np.ndarray) and len(data.shape) > 1) or (
+                        "bias" in inp.name or "weight" in inp.name
+                    ):
+                        print(inp.name, data.shape)
+                    else:
+                        print(inp.name, data)
             # Execute the implementation on the inputs
             outputs = impl_fn(op, *inputs)
             # Put the outputs back into the state's environment
             if len(op.outputs) == 1:
                 outputs = (outputs,)
             assert len(outputs) == len(op.outputs)
+            if debug:
+                print("Outputs:")
+                for output, data in zip(op.outputs, outputs):
+                    if (isinstance(data, np.ndarray) and len(data.shape) > 1) or (
+                        "bias" in output.name or "weight" in output.name
+                    ):
+                        print(output.name, data.shape)
+                    else:
+                        print(output.name, data)
+                print()
             for x, val in zip(op.outputs, outputs):
                 state.env[x] = val
 
         return semantics
 
-    return {signature: convert_impl(impl) for signature, impl in impls.items()}
+    return {signature: convert_impl(impl, debug) for signature, impl in impls.items()}

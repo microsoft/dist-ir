@@ -4,12 +4,15 @@ import torch
 
 from dist_ir.backend.torch import run_multiprocesses
 from dist_ir.executor import SequentialExecutor
+from dist_ir.executor.cost_model import CostModel
 from dist_ir.executor.rank_projector import project
+from dist_ir.executor.simulator import Simulator
 from dist_ir.executor.type_inference import infer_types
 from dist_ir.ir import Device, FunctionMaker, cpprint, Value
 from dist_ir.ir.type import Float, Tensor
-from dist_ir.transforms import mlp_dhp_transform
-from examples.mlp import mlp_inference, mlp_inference_dp
+from dist_ir.ir.topology import Topology
+from examples.grid_search import add_devices_to_topology, gen_configurations, mlp_dist
+from examples.mlp import mlp, mlp_inference_dp
 
 
 def create_owt_model(num_devices, num_layers):
@@ -42,7 +45,7 @@ def create_owt_model(num_devices, num_layers):
         "MPIAllgather",
         inputs=hs,
         output_names=as_names,
-        attributes={"dim": 0, "world_size": num_devices},
+        attributes={"dim": 0},
     )
 
     # Model parallel fully-connected layers: (again, MatMuls for now)
@@ -65,7 +68,7 @@ def create_owt_model(num_devices, num_layers):
                 "MPIAllgather",
                 inputs=h_is,
                 output_names=out_names,
-                attributes={"dim": 1, "world_size": num_devices},
+                attributes={"dim": 1},
             )
 
     fn.set_outputs(hs)
@@ -128,33 +131,104 @@ def test_owt(num_devices, num_layers):
     ys = np.split(y, num_devices, axis=1)
     assert all(np.allclose(y, o) for y, o in zip(ys, output_arrays))
 
-    # Per-rank projection:
-    per_rank_fns = project(fn, tuple(v.type for v in input_vals))
-    for d, f_d in per_rank_fns.items():
-        print()
-        print(d)
-        cpprint(f_d)
-
-    # Make inputs for each per-rank function:
-    per_rank_inputs = [[] for _ in range(num_devices)]
-    for v, a in zip(fn.inputs, input_arrays):
-        per_rank_inputs[v.type.device.device_id - 1].append(torch.tensor(a))
-
     # Run per-rank modules using PyTorch backend:
-    per_rank_outputs = run_multiprocesses(per_rank_fns.values(), per_rank_inputs)
+    per_rank_outputs, _ = run_pytorch(
+        num_devices, fn, [torch.tensor(a) for a in input_arrays]
+    )
 
     # Check outputs:
-    assert all(np.allclose(y, o) for y, o in zip(per_rank_outputs, output_arrays))
+    assert all(np.allclose(y[0], o) for y, o in zip(per_rank_outputs, output_arrays))
 
 
-# TODO get DHP transform to work on mlp_inference and try running on backend
-# def test_mlp_grid_search():
-#     devices = [Device(d, "gpu") for d in range(3)]
-#
-#     f = mlp_inference(4, 6, 6, 6, 4, devices[0])
-#     f = infer_types(f, f.inputs)
-#
-#     f_dist = mlp_dhp_transform(f, 2, 1, 1, devices, 1)
+def test_mlp_grid_search():
+    batch_size = 64
+    hidden_dim = 64
+    num_layers = 2
+    world_size = 2
+
+    topology = Topology()
+    d0 = topology.add_device("gpu")
+    add_devices_to_topology(topology, world_size)
+    simulator = Simulator(CostModel(topology))
+    seq_executor = SequentialExecutor("numpy")
+
+    seq_mlp = mlp(batch_size, hidden_dim, hidden_dim, hidden_dim, num_layers, d0)
+    seq_mlp = infer_types(seq_mlp, seq_mlp.inputs)
+    configs = list(
+        gen_configurations([hidden_dim], [world_size], [num_layers], [batch_size])
+    )
+    dist_mlp_fns = [
+        mlp_dist(seq_mlp, d, h, p, m, topology) for (_, _, _, d, h, p, m) in configs
+    ]
+    print(len(dist_mlp_fns))
+
+    # Create random input data
+    input_data = tuple(
+        np.random.randn(*v.type.shape).astype(np.float32) for v in seq_mlp.inputs
+    )
+
+    for init_fn, fn in dist_mlp_fns:
+        # Simulate
+        simulation = simulator.interpret(fn, (v.type for v in fn.inputs))
+        simulated_time = max([simulation.timestamps[d] for d in simulation.timestamps])
+
+        # Reference-execute init_fn to get inputs for fn
+        dist_input_data = seq_executor.compute(init_fn, input_data)
+        dist_input_data = tuple(torch.tensor(t) for t in dist_input_data)
+        assert all(
+            t.shape == v.type.shape for (t, v) in zip(dist_input_data, fn.inputs)
+        )
+
+        # Measure actual execution time
+        # TODO check outputs match?
+        _, runtimes = run_pytorch(world_size, fn, dist_input_data)
+        actual_time = max(np.median(times) for times in runtimes)
+
+        print(fn.name, simulated_time, actual_time)
+
+
+def run_pytorch(num_devices, fn, inputs):
+    """Project `fn` and run on `inputs` using PyTorch backend."""
+    # TODO add to backend.torch?
+    # TODO check that fn uses devices [0...num_devices)
+    per_rank_fns = project(fn, tuple(v.type for v in fn.inputs), num_devices)
+    per_rank_inputs = [[] for _ in range(num_devices)]
+    for v, a in zip(fn.inputs, inputs):
+        per_rank_inputs[v.type.device.device_id - 1].append(a)
+    return run_multiprocesses(per_rank_fns, per_rank_inputs)
+
+
+def test_empty_device():
+    d1 = Device(1, "gpu")
+    d2 = Device(2, "gpu")
+    fn = FunctionMaker()
+    x = fn.add_input_value("x", Tensor(Float(), (4, 4), d1))
+    y = fn.add_op("MatMul", inputs=(x, x))
+    fn.set_outputs((y,))
+    fn = fn.finalize()
+    cpprint(fn)
+
+    x = torch.randn(4, 4)
+    inputs = (x,)
+    outputs, _ = run_pytorch(2, fn, inputs)
+    print(outputs)
+    assert torch.allclose(torch.matmul(x, x), outputs[0][0])
+
+
+def test_send_recv():
+    d1 = Device(1, "gpu")
+    d2 = Device(2, "gpu")
+    fn = FunctionMaker()
+    x = fn.add_input_value("x", Tensor(Float(), (4, 4), d1))
+    y = fn.add_op("Send", inputs=(x,), attributes={"device": d2})
+    fn.set_outputs((x, y))
+    fn = fn.finalize()
+    cpprint(fn)
+
+    x = torch.randn(4, 4)
+    inputs = (x,)
+    outputs, _ = run_pytorch(2, fn, inputs)
+    assert torch.allclose(x, outputs[1][0])
 
 
 def test_dp_mlp():
@@ -189,16 +263,12 @@ def test_dp_mlp():
         y = torch.relu(y)
 
     # Project and run on backend:
-    per_rank_fns = project(fn, tuple(v.type for v in fn.inputs))
-    per_rank_inputs = [[] for _ in range(num_devices)]
-    for v, a in zip(fn.inputs, convert_inputs_dp(weights, x)):
-        per_rank_inputs[v.type.device.device_id - 1].append(a)
-    per_rank_outputs, runtimes = run_multiprocesses(
-        per_rank_fns.values(), per_rank_inputs
+    per_rank_outputs, runtimes = run_pytorch(
+        num_devices, fn, convert_inputs_dp(weights, x)
     )
 
     # Check outputs:
-    assert torch.allclose(y, torch.cat(per_rank_outputs, 0))
+    assert torch.allclose(y, torch.cat([o[0] for o in per_rank_outputs], 0))
 
     return runtimes
 
@@ -206,4 +276,6 @@ def test_dp_mlp():
 if __name__ == "__main__":
     # test_owt(2, 4)
     # test_dp_mlp()
-    pass
+    # test_send_recv()
+    # test_empty_device()
+    test_mlp_grid_search()

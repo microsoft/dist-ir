@@ -165,8 +165,8 @@ def run_multiprocesses(
     per_rank_functions: Tuple[Function],
     per_rank_inputs: Tuple[Any],
     use_gpu=False,
-    num_repetitions=100,
-    num_warmup=10,
+    num_repetitions=1,
+    num_warmup=0,
 ):
     assert len(per_rank_functions) == len(per_rank_inputs)
     world_size = len(per_rank_functions)

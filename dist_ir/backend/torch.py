@@ -1,4 +1,5 @@
 from functools import partial
+from operator import getitem
 import os
 from tempfile import TemporaryDirectory
 from time import perf_counter
@@ -8,7 +9,6 @@ import numpy as np
 import torch
 import torch.distributed as dist
 from torch import fx
-from torch.multiprocessing import Process
 
 from ..ir import Function
 
@@ -21,9 +21,55 @@ def _allgather(x_i, world_size=None, dim=0):
     return x
 
 
+def _identity(x):
+    return x
+
+
+def _loss(x, y, N=None):
+    return torch.square(x - y) / N
+
+
+def _loss_grad(x, y, N=None):
+    return 2 * (x - y) / N
+
+
+def _matmul_grad(x, y, dz):
+    return (torch.matmul(dz, y.T), torch.matmul(x.T, dz))
+
+
+@torch.fx.wrap
+def _recv(shape=None, device=None):
+    x = torch.zeros(shape)
+    # TODO pytorch rank = device_id - 1
+    dist.recv(x, device - 1)
+
+
+def _relu_grad(x, dy):
+    # TODO: fix
+    dx = torch.zeros(dy.shape)
+    dx[dy > 0] = 1
+    return dx
+
+
+@torch.fx.wrap
+def _send(x, device=None):
+    print("_send input type", type(x))
+    # TODO pytorch rank = device_id - 1
+    dist.send(x, device - 1)
+
+
 _op_to_torch = {
+    "Add": torch.add,
+    "Concat": torch.cat,  # TODO dim attribute?
+    "Identity": _identity,
+    "Loss": _loss,
+    "LossGrad": _loss_grad,
     "MatMul": torch.matmul,
+    "MatMulGrad": _matmul_grad,
+    "RecvP2P": _recv,
     "Relu": torch.relu,
+    "ReluGrad": _relu_grad,
+    "SendP2P": _send,
     "MPIAllgather": _allgather,
 }
 

@@ -57,6 +57,7 @@ OpRegister = {
     "MPIScatterToTupleType": OpRegisterEntry(num_inputs=1, num_outputs=1),
     "Mul": OpRegisterEntry(num_inputs=2, num_outputs=1),
     "Opt": OpRegisterEntry(num_inputs=2, num_outputs=1),
+    "RecvP2P": OpRegisterEntry(num_inputs=0, num_outputs=1),
     "ReduceAllL2": OpRegisterEntry(variadic_inputs=True, num_outputs=1),
     "ReduceSum": OpRegisterEntry(num_inputs=1, num_outputs=1),
     "ReduceSumTraining": OpRegisterEntry(num_inputs=2, num_outputs=1),
@@ -64,7 +65,9 @@ OpRegister = {
     "ReluGrad": OpRegisterEntry(num_inputs=2, num_outputs=1),
     "Reshape": OpRegisterEntry(num_inputs=2, num_outputs=1),
     "Select": OpRegisterEntry(num_inputs=1, num_outputs=1),
+    # TODO call the combined one SendRecv?
     "Send": OpRegisterEntry(num_inputs=1, num_outputs=1),
+    "SendP2P": OpRegisterEntry(num_inputs=1, num_outputs=0),
     "SGDOptimizer": OpRegisterEntry(num_inputs=3, num_outputs=2),
     "Shape": OpRegisterEntry(num_inputs=1, num_outputs=1),
     # TODO allow optional inputs for things like slice

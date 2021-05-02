@@ -7,6 +7,9 @@ from ..ir.type import Type, Tensor
 from .absint import AbstractState, AbstractInterpreter
 
 
+# TODO merge this with torch backend -- it breaks semantics to have P2P send/recv
+
+
 class ProjectorState(AbstractState):
     def __init__(self, function: Function, inputs: Sequence[Any]):
         AbstractState.__init__(self, function, inputs)
@@ -46,13 +49,36 @@ def _mpi_allgather_projector(op: Op, state: ProjectorState):
         state.per_rank_fns[d].ops.append(new_op)
 
 
+def _send_projector(op: Op, state: ProjectorState):
+    from_d = op.inputs[0].type.device
+    to_d = op.attributes["device"]
+    state.per_rank_fns[from_d].ops.append(
+        Op("SendP2P", inputs=op.inputs, attributes={"device": to_d.device_id})
+    )
+    state.per_rank_fns[to_d].ops.append(
+        Op(
+            "RecvP2P",
+            output_values=(op.outputs[0],),
+            attributes={"shape": op.inputs[0].type.shape, "device": from_d.device_id},
+        )
+    )
+
+
 ProjectorRegister = {
+    ("Add", (Tensor, Tensor)): _identity_projector,
+    ("Concat", (Tensor, Tensor)): _identity_projector,
+    ("Identity", (Tensor,)): _identity_projector,
+    ("Loss", (Tensor, Tensor)): _identity_projector,
+    ("LossGrad", (Tensor, Tensor)): _identity_projector,
     ("MatMul", (Tensor, Tensor)): _identity_projector,
-    ("Relu", (Tensor,)): _identity_projector,
+    ("MatMulGrad", (Tensor, Tensor, Tensor)): _identity_projector,
     ("MPIAllgather", (Tensor,) * 2): _mpi_allgather_projector,
     ("MPIAllgather", (Tensor,) * 4): _mpi_allgather_projector,
     ("MPIAllgather", (Tensor,) * 8): _mpi_allgather_projector,
     ("MPIAllgather", (Tensor,) * 16): _mpi_allgather_projector,
+    ("Relu", (Tensor,)): _identity_projector,
+    ("ReluGrad", (Tensor, Tensor)): _identity_projector,
+    ("Send", (Tensor,)): _send_projector,
 }
 
 

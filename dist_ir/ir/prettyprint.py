@@ -47,7 +47,7 @@ from prettyprinter.prettyprinter import (
 )
 from prettyprinter.utils import intersperse
 
-from .function import Function
+from .function import Function, FunctionMaker
 from .value import Value
 from .type import Type, Int32, Int64, Float, Tensor, TupleType
 from .device import Device
@@ -114,6 +114,18 @@ def _(function: Function, ctx):
     return concat(
         [
             annotate(Token.KEYWORD_CONSTANT, "function "),
+            pretty_call(ctx, pp_fnname(function.name), *function.inputs),
+            nest(ctx.indent, concat([COLON, HARDLINE, interline(*ops)])),
+        ]
+    )
+
+
+@register_pretty(FunctionMaker)
+def _(function: FunctionMaker, ctx):
+    ops = _pprint_function_body(function, ctx)
+    return concat(
+        [
+            annotate(Token.KEYWORD_CONSTANT, "function* "),
             pretty_call(ctx, pp_fnname(function.name), *function.inputs),
             nest(ctx.indent, concat([COLON, HARDLINE, interline(*ops)])),
         ]

@@ -125,7 +125,9 @@ Projector = AbstractInterpreter(
 )
 
 
-def project(fn: Function, input_types: Sequence[Type]):
+def project(
+    fn: Function, input_types: Sequence[Type], num_devices: int
+) -> Tuple[Function]:
     """Project fn to a sequence of per-rank functions."""
     state = ProjectorState(fn, input_types)
 
@@ -135,4 +137,30 @@ def project(fn: Function, input_types: Sequence[Type]):
 
     state = Projector.interpret(fn, input_types, state=state)
 
-    return {d: state.per_rank_fns[d].finalize() for d in state.per_rank_fns}
+    # Erase all types in per_rank_fns:
+    # TODO do this during projection?
+    result_fns = [Function(fn.name, (), (), ()) for _ in range(num_devices)]
+    for d, per_rank_fn in state.per_rank_fns.items():
+        value_map = {}
+        new_fn = FunctionMaker(name=f"{fn.name}_{d.device_id-1}")
+        for v in per_rank_fn.inputs:
+            value_map[v] = new_fn.add_input_value(v.name, None)
+        for op in per_rank_fn.ops:
+            new_inputs = tuple(value_map[v] for v in op.inputs)
+            for v in op.outputs:
+                value_map[v] = Value(v.name, None)
+            new_outputs = tuple(value_map[v] for v in op.outputs)
+            new_fn.ops.append(
+                Op(
+                    op.op_type,
+                    name=op.name,
+                    inputs=new_inputs,
+                    attributes=op.attributes,
+                    subfunctions=op.subfunctions,
+                    output_values=new_outputs,
+                )
+            )
+        new_fn.set_outputs(tuple(value_map[v] for v in per_rank_fn.outputs))
+        result_fns[d.device_id - 1] = new_fn.finalize()
+
+    return result_fns

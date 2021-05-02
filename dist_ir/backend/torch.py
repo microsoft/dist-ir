@@ -41,14 +41,16 @@ def function_to_module(fn: Function) -> torch.nn.Module:
     # Convert ops
     for op in fn.ops:
         inputs = tuple(value_map[v] for v in op.inputs)
-        assert len(op.outputs) == 1, "TODO how to handle multiple outputs in fx"
         kwargs = None if op.attributes is None else {**op.attributes}
         output = g.call_function(_op_to_torch[op.op_type], inputs, kwargs)
-        value_map[op.outputs[0]] = output
+        if len(op.outputs) > 1:
+            for i, v in enumerate(op.outputs):
+                value_map[v] = g.call_function(getitem, (output, i))
+        elif len(op.outputs) == 1:
+            value_map[op.outputs[0]] = output
 
     # Convert outputs
-    for v in fn.outputs:
-        g.output(value_map[v])
+    g.output(tuple(value_map[v] for v in fn.outputs))
 
     return fx.GraphModule({}, g)
 

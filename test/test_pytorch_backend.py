@@ -2,15 +2,16 @@ import numpy as np
 import pytest
 import torch
 
-from dist_ir.backend.torch import run_multiprocesses
+from dist_ir.backend.torch import run_pytorch
 from dist_ir.executor import SequentialExecutor
 from dist_ir.executor.cost_model import CostModel
-from dist_ir.executor.rank_projector import project
 from dist_ir.executor.simulator import Simulator
 from dist_ir.executor.type_inference import infer_types
 from dist_ir.ir import Device, FunctionMaker, cpprint, Value
 from dist_ir.ir.type import Float, Tensor
 from dist_ir.ir.topology import Topology
+
+# TODO make examples submodule of dist_ir?
 from examples.grid_search import add_devices_to_topology, gen_configurations, mlp_dist
 from examples.mlp import mlp, mlp_inference_dp
 
@@ -185,17 +186,6 @@ def test_mlp_grid_search():
         actual_time = max(np.median(times) for times in runtimes)
 
         print(fn.name, simulated_time, actual_time)
-
-
-def run_pytorch(num_devices, fn, inputs):
-    """Project `fn` and run on `inputs` using PyTorch backend."""
-    # TODO add to backend.torch?
-    # TODO check that fn uses devices [0...num_devices)
-    per_rank_fns = project(fn, tuple(v.type for v in fn.inputs), num_devices)
-    per_rank_inputs = [[] for _ in range(num_devices)]
-    for v, a in zip(fn.inputs, inputs):
-        per_rank_inputs[v.type.device.device_id - 1].append(a)
-    return run_multiprocesses(per_rank_fns, per_rank_inputs)
 
 
 def test_empty_device():

@@ -10,6 +10,7 @@ import torch
 import torch.distributed as dist
 from torch import fx
 
+from ..executor.rank_projector import project
 from ..ir import Function
 
 
@@ -192,3 +193,15 @@ def run_multiprocesses(
     io_dir.cleanup()
 
     return per_rank_outputs, runtimes
+
+
+def run_pytorch(num_devices, fn, inputs):
+    """Project `fn` and run on `inputs` over `num_devices` devices using the
+    PyTorch backend.
+    """
+    # TODO check that fn uses devices [0...num_devices)
+    per_rank_fns = project(fn, tuple(v.type for v in fn.inputs), num_devices)
+    per_rank_inputs = [[] for _ in range(num_devices)]
+    for v, a in zip(fn.inputs, inputs):
+        per_rank_inputs[v.type.device.device_id - 1].append(a)
+    return run_multiprocesses(per_rank_fns, per_rank_inputs)

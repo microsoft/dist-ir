@@ -1,6 +1,7 @@
 from functools import partial
 import os
 from tempfile import TemporaryDirectory
+from time import perf_counter
 from typing import Any, Tuple
 
 import numpy as np
@@ -53,34 +54,47 @@ def function_to_module(fn: Function) -> torch.nn.Module:
 
 
 def run_process(
-    backend, world_size, io_dir, num_warmup_steps, num_repetitions, rank, module
+    use_gpu, world_size, io_dir, num_warmup_steps, num_repetitions, rank, module
 ):
     """The Python function on rank `rank` that runs module `module`."""
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = "29500"
+    backend = "nccl" if use_gpu else "gloo"
     dist.init_process_group(backend, rank=rank, world_size=world_size)
 
     per_rank_inputs = torch.load(os.path.join(io_dir.name, f"in.{rank}.pt"))
 
-    # Move module and inputs to GPU (TODO gpu flag)
-    module.to(rank)
-    for t in per_rank_inputs:
-        t.to(rank)
+    if use_gpu:
+        # Move module and inputs to GPU
+        module.to(rank)
+        for t in per_rank_inputs:
+            t.to(rank)
+
+    events = []
+
+    def add_event():
+        if use_gpu:
+            events.append(torch.cuda.Event(enable_timing=True))
+            events[-1].record()
+        else:
+            events.append(perf_counter())
 
     # Time a bunch of executions, then execute once for output values
-    events = [torch.cuda.Event(enable_timing=True)]
-    events[0].record()
+    add_event()
     for _ in range(num_warmup_steps + num_repetitions):
         res = module(*per_rank_inputs)
         if world_size > 1:
             torch.distributed.barrier()
-        events.append(torch.cuda.Event(enable_timing=True))
-        events[-1].record()
+        add_event()
 
     torch.save(res, os.path.join(io_dir.name, f"out.{rank}.pt"))
-    runtimes = [
-        events[i].elapsed_time(events[i + 1]) / 1e3 for i in range(len(events) - 1)
-    ]
+
+    if use_gpu:
+        runtimes = [
+            events[i].elapsed_time(events[i + 1]) / 1e3 for i in range(len(events) - 1)
+        ]
+    else:
+        runtimes = [events[i + 1] - events[i] for i in range(len(events) - 1)]
 
     torch.cuda.synchronize()
     dist.destroy_process_group()
@@ -90,7 +104,7 @@ def run_process(
 def run_multiprocesses(
     per_rank_functions: Tuple[Function],
     per_rank_inputs: Tuple[Any],
-    backend="gloo",
+    use_gpu=False,
     num_repetitions=100,
     num_warmup=10,
 ):
@@ -111,7 +125,7 @@ def run_multiprocesses(
 
     global run_process
     per_rank_runner = partial(
-        run_process, backend, world_size, io_dir, num_warmup, num_repetitions
+        run_process, use_gpu, world_size, io_dir, num_warmup, num_repetitions
     )
     with torch.multiprocessing.Pool(world_size) as p:
         runtimes = p.starmap(per_rank_runner, enumerate(per_rank_modules))

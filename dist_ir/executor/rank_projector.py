@@ -1,8 +1,8 @@
 from collections import defaultdict
 from dist_ir.executor.type_inference import TypePropRegister
-from typing import Any, Dict, Sequence
+from typing import Any, Dict, Sequence, Tuple
 
-from ..ir import Function, FunctionMaker, Device, Op
+from ..ir import Function, FunctionMaker, Device, Op, Value
 from ..ir.type import Type, Tensor
 from .absint import AbstractState, AbstractInterpreter
 
@@ -34,14 +34,16 @@ def _identity_projector(op: Op, state: ProjectorState):
     # state.per_rank_fns[d].add_op(op.op_type, name=op.name, inputs=op.inputs, )
 
 
-def _mpi_allgather_projector(op: Op, state: ProjectorState):
+def _collective_projector(op: Op, state: ProjectorState):
+    """Projects a collective op over D devices that has D inputs and D outputs,
+    one on each device."""
     assert len(op.inputs) == len(op.outputs)
     for in_v, out_v in zip(op.inputs, op.outputs):
         assert in_v.type.device == out_v.type.device
         d = in_v.type.device
 
         new_op = Op(
-            "MPIAllgather",
+            op.op_type,
             inputs=(in_v,),
             output_values=(out_v,),
             attributes=op.attributes,
@@ -72,10 +74,14 @@ ProjectorRegister = {
     ("LossGrad", (Tensor, Tensor)): _identity_projector,
     ("MatMul", (Tensor, Tensor)): _identity_projector,
     ("MatMulGrad", (Tensor, Tensor, Tensor)): _identity_projector,
-    ("MPIAllgather", (Tensor,) * 2): _mpi_allgather_projector,
-    ("MPIAllgather", (Tensor,) * 4): _mpi_allgather_projector,
-    ("MPIAllgather", (Tensor,) * 8): _mpi_allgather_projector,
-    ("MPIAllgather", (Tensor,) * 16): _mpi_allgather_projector,
+    ("MPIAllgather", (Tensor,) * 2): _collective_projector,
+    ("MPIAllgather", (Tensor,) * 4): _collective_projector,
+    ("MPIAllgather", (Tensor,) * 8): _collective_projector,
+    ("MPIAllgather", (Tensor,) * 16): _collective_projector,
+    ("MPIAllreduce", (Tensor,) * 2): _collective_projector,
+    ("MPIAllreduce", (Tensor,) * 4): _collective_projector,
+    ("MPIAllreduce", (Tensor,) * 8): _collective_projector,
+    ("MPIAllreduce", (Tensor,) * 16): _collective_projector,
     ("Relu", (Tensor,)): _identity_projector,
     ("ReluGrad", (Tensor, Tensor)): _identity_projector,
     ("Send", (Tensor,)): _send_projector,

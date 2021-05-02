@@ -13,12 +13,22 @@ from torch import fx
 from ..ir import Function
 
 
-# TODO at op creation time, enforce MPIAllgather ops attributes
-def _allgather(x_i, world_size=None, dim=0):
+# TODO kwargs of these functions are required, enforce this somewhere
+def _allgather(x_i, dim=0):
+    world_size = dist.get_world_size()
     xs = [torch.zeros_like(x_i) for _ in range(world_size)]
     dist.all_gather(xs, x_i)
     x = torch.cat(xs, dim=dim)
     return x
+
+
+def _allreduce(x):
+    dist.all_reduce(x)
+    return x
+
+
+def _concat2(x, y, dim=None):
+    return torch.cat((x, y), dim=dim)
 
 
 def _identity(x):
@@ -37,11 +47,11 @@ def _matmul_grad(x, y, dz):
     return (torch.matmul(dz, y.T), torch.matmul(x.T, dz))
 
 
-@torch.fx.wrap
 def _recv(shape=None, device=None):
     x = torch.zeros(shape)
     # TODO pytorch rank = device_id - 1
     dist.recv(x, device - 1)
+    return x
 
 
 def _relu_grad(x, dy):
@@ -51,16 +61,14 @@ def _relu_grad(x, dy):
     return dx
 
 
-@torch.fx.wrap
 def _send(x, device=None):
-    print("_send input type", type(x))
     # TODO pytorch rank = device_id - 1
     dist.send(x, device - 1)
 
 
 _op_to_torch = {
     "Add": torch.add,
-    "Concat": torch.cat,  # TODO dim attribute?
+    "Concat": _concat2,
     "Identity": _identity,
     "Loss": _loss,
     "LossGrad": _loss_grad,
@@ -71,6 +79,7 @@ _op_to_torch = {
     "ReluGrad": _relu_grad,
     "SendP2P": _send,
     "MPIAllgather": _allgather,
+    "MPIAllreduce": _allreduce,
 }
 
 
@@ -141,10 +150,10 @@ def run_process(
         runtimes = [
             events[i].elapsed_time(events[i + 1]) / 1e3 for i in range(len(events) - 1)
         ]
+        torch.cuda.synchronize()
     else:
         runtimes = [events[i + 1] - events[i] for i in range(len(events) - 1)]
 
-    torch.cuda.synchronize()
     dist.destroy_process_group()
     return runtimes[num_warmup_steps:]
 

@@ -19,7 +19,7 @@ from dist_ir.transforms import (
     mlp_dhp_transform,
     PipeDreamScheduler,
 )
-from mlp import mlp
+from .mlp import mlp
 
 DGX_BANDWIDTH_GBPS = 200
 
@@ -31,7 +31,6 @@ def add_devices_to_topology(topology, num_devices):
     for i in range(0, len(devices)):
         for j in range(i + 1, len(devices)):
             topology.set_bandwidth(devices[i], devices[j], DGX_BANDWIDTH_GBPS)
-    return topology
 
 
 def get_all_degrees(n):
@@ -103,31 +102,25 @@ def run_experiment(config):
 
 
 def mlp_dist(
-    batch_size,
-    input_dim,
-    num_hidden_layers,
+    mlp_fn,
     dp_degree,
     hp_degree,
     pp_degree,
     num_microbatches,
-    devices,
+    topology,
 ):
-    function = mlp(batch_size, input_dim, input_dim, input_dim, num_hidden_layers, None)
-    function = infer_types(function, function.inputs)
-    world_size = dp_degree * hp_degree * pp_degree
-
-    transformed_function = mlp_dhp_transform(
-        function,
+    init_function, transformed_function = mlp_dhp_transform(
+        mlp_fn,
         dp_degree,
         hp_degree,
         pp_degree,
-        devices,
+        topology.devices,
         num_microbatches,
     )
-    transformed_function = infer_types(
-        transformed_function, transformed_function.inputs
-    )
-    return transformed_function
+    init_function = infer_types(init_function, init_function.inputs)
+    # init_function.outputs = transformed_function.inputs, so get types from there:
+    transformed_function = infer_types(transformed_function, init_function.outputs)
+    return init_function, transformed_function
 
 
 def gen_configurations(hidden_dims, cluster_sizes, all_num_layers, all_batch_sizes):

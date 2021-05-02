@@ -138,7 +138,7 @@ def _test_helper(
     world_size = dp_degree * hp_degree * pp_degree
     add_devices_to_topology(topology, world_size)
 
-    transformed_function = mlp_dhp_transform(
+    init_function, transformed_function = mlp_dhp_transform(
         function,
         dp_degree,
         hp_degree,
@@ -146,14 +146,15 @@ def _test_helper(
         topology.devices,
         num_microbatches,
     )
-    transformed_function = infer_types(
-        transformed_function, transformed_function.inputs
-    )
+    init_function = infer_types(init_function, init_function.inputs)
+    # init_function.outputs = transformed_function.inputs, so get types from there:
+    transformed_function = infer_types(transformed_function, init_function.outputs)
 
     input_data = [np.random.normal(size=inp.type.shape) for inp in function.inputs]
     ex = SequentialExecutor("numpy")
     outputs = ex.compute(function, input_data)
-    transformed_outputs = ex.compute(transformed_function, input_data)
+    dist_input_data = ex.compute(init_function, input_data)
+    transformed_outputs = ex.compute(transformed_function, dist_input_data)
 
     if hp_degree > 1:
         _verify_hp(

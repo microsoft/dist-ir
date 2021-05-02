@@ -111,7 +111,7 @@ def function_to_module(fn: Function) -> torch.nn.Module:
 
 
 def run_process(
-    use_gpu, world_size, io_dir, num_warmup_steps, num_repetitions, rank, module
+    use_gpu, world_size, io_dir, num_warmup_steps, num_repetitions, rank, fn
 ):
     """The Python function on rank `rank` that runs module `module`."""
     os.environ["MASTER_ADDR"] = "127.0.0.1"
@@ -120,6 +120,9 @@ def run_process(
     dist.init_process_group(backend, rank=rank, world_size=world_size)
 
     per_rank_inputs = torch.load(os.path.join(io_dir.name, f"in.{rank}.pt"))
+
+    # Convert per-rank DistIR function to torch.nn.Module:
+    module = function_to_module(fn)
 
     if use_gpu:
         # Move module and inputs to GPU
@@ -168,11 +171,6 @@ def run_multiprocesses(
     assert len(per_rank_functions) == len(per_rank_inputs)
     world_size = len(per_rank_functions)
 
-    # Convert per-rank DistIR functions to torch.nn.Modules:
-    per_rank_modules = list(map(function_to_module, per_rank_functions))
-    for d, gm in enumerate(per_rank_modules):
-        print(f"{d}\n{gm.graph}\n")
-
     # Save inputs for each per-rank function:
     io_dir = TemporaryDirectory()
     # print("run_multiprocess: saving I/O to:", io_dir.name)
@@ -185,7 +183,7 @@ def run_multiprocesses(
         run_process, use_gpu, world_size, io_dir, num_warmup, num_repetitions
     )
     with torch.multiprocessing.Pool(world_size) as p:
-        runtimes = p.starmap(per_rank_runner, enumerate(per_rank_modules))
+        runtimes = p.starmap(per_rank_runner, enumerate(per_rank_functions))
 
     # Load outputs:
     per_rank_outputs = [

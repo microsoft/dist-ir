@@ -124,7 +124,7 @@ def _verify_hp(function, transformed_function, outputs, transformed_outputs, dp=
 
 def _test_helper(
     batch_size=BATCH_SIZE,
-    num_hidden_layers=2,
+    num_hidden_layers=8,
     input_dim=INPUT_DIM,
     dp_degree=1,
     hp_degree=1,
@@ -149,8 +149,6 @@ def _test_helper(
     init_function = infer_types(init_function, init_function.inputs)
     # init_function.outputs = transformed_function.inputs, so get types from there:
     transformed_function = infer_types(transformed_function, init_function.outputs)
-    cpprint(function)
-    cpprint(transformed_function)
 
     input_data = [np.random.normal(size=inp.type.shape) for inp in function.inputs]
     ex = SequentialExecutor("numpy")

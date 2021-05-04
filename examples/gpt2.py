@@ -85,9 +85,11 @@ def main(args):
         args.num_microbatches,
     )
 
-    # Manual adjustments for horizontal parallelism
+    # Manually adjust constants for horizontal parallelism.
     for i in range(len(input_data)):
-        if input_data[i].shape == (1,) and input_data[i][0] == 2304:
+        if input_data[i].shape == (1,) and (
+            input_data[i][0] == 2304 or input_data[i][0] == 3072
+        ):
             input_data[i] = np.array([input_data[i][0] // args.hp_degree])
 
     transformed_function = ex.infer_types(transformed_function, input_data)

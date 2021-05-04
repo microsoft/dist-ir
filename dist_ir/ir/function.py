@@ -113,11 +113,11 @@ class Function:
                     subfunctions=copy.deepcopy(op.subfunctions),
                     output_names=output_names,
                 )
+                if not isinstance(subfunction_op_outputs, tuple):
+                    subfunction_op_outputs = (subfunction_op_outputs,)
             else:
                 subfunction.ops.append(op)
                 subfunction_op_outputs = op.outputs
-            if not isinstance(subfunction_op_outputs, tuple):
-                subfunction_op_outputs = (subfunction_op_outputs,)
             for orig_output, subfunction_output in zip(
                 op.outputs, subfunction_op_outputs
             ):

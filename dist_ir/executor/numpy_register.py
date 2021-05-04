@@ -776,6 +776,7 @@ NumPyRegister = {
     ("ReluGrad", (np.ndarray, np.ndarray)): relu_grad,
     ("Reshape", (np.ndarray, np.ndarray)): reshape,
     ("Select", (tuple,)): select,
+    ("Send", (np.int64,)): identity,
     ("Send", (np.ndarray,)): identity,
     ("Shape", (np.ndarray,)): shape,
     ("Slice", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): slice_conc,

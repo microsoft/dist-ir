@@ -136,7 +136,7 @@ def _partition_inputs_hp(function, device_tree, dp_inputs):
         if len(hp_devices) > 1:
             # TODO: Partition weights for GPT-2
             for inp in function.inputs:
-                if "c_attn.weight" in inp.name:
+                if "c_attn.weight" in inp.name or "c_fc.weight" in inp.name:
                     hp_inputs[dp_inputs[inp][i]] = _mpi_scatter_value(
                         dp_inputs[inp][i],
                         function,
@@ -144,7 +144,12 @@ def _partition_inputs_hp(function, device_tree, dp_inputs):
                         dim=1,
                         parallelism_level="hp",
                     )
-                elif "c_attn.bias" in inp.name or "attn.c_proj.weight" in inp.name:
+                elif (
+                    "c_attn.bias" in inp.name
+                    or "attn.c_proj.weight" in inp.name
+                    or "c_fc.bias" in inp.name
+                    or "mlp.c_proj.weight" in inp.name
+                ):
                     hp_inputs[dp_inputs[inp][i]] = _mpi_scatter_value(
                         dp_inputs[inp][i],
                         function,
@@ -551,9 +556,12 @@ def gpt2_dhp_transform(
 
                     # Aggregate horizontal parallel outputs.
                     if hp_degree > 1:
-                        # TODO: Fix this for GPT-2
                         if op.op_type == "Gemm" and any(
-                            ["attn.c_proj.weight" in inp.name for inp in op.inputs]
+                            [
+                                "attn.c_proj.weight" in inp.name
+                                or "mlp.c_proj.weight" in inp.name
+                                for inp in op.inputs
+                            ]
                         ):
                             for output in op.outputs:
                                 value_names = tuple(

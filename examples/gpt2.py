@@ -31,9 +31,9 @@ def main(args):
     d0 = topology.add_device("gpu")
     for i in range(world_size):
         topology.add_device("gpu")
-        for j in range(i):
+        for j in range(i + 1):
             topology.set_bandwidth(
-                topology.devices[i], topology.devices[j], NETWORK_BANDWIDTH_Gbps
+                topology.devices[i + 1], topology.devices[j], NETWORK_BANDWIDTH_Gbps
             )
     function, input_data = import_from_onnx(
         args.model_path,
@@ -74,8 +74,9 @@ def main(args):
             assert inputs_with_shapes[i].type.shape == (1,)
             inputs.append(input_data[i])
     ex = SequentialExecutor("numpy")
-    function = ex.infer_types(function, input_data, debug=args.debug)
-    function = gpt2_dhp_transform(
+    function = ex.infer_types(function, input_data)
+    orig_output = ex.compute(function, input_data)
+    transformed_function = gpt2_dhp_transform(
         function,
         args.dp_degree,
         args.hp_degree,
@@ -89,13 +90,15 @@ def main(args):
         if input_data[i].shape == (1,) and input_data[i][0] == 2304:
             input_data[i] = np.array([input_data[i][0] // args.hp_degree])
 
-    function = ex.infer_types(function, input_data, debug=args.debug)
-    cpprint(function)
-    # output = ex.compute(function, input_data)
-    """
-    simulator = PostTypeInferenceSimulator(CostModel(topology))
-    simulation = simulator.interpret(function, (v.type for v in function.inputs))
+    transformed_function = ex.infer_types(transformed_function, input_data)
+    cpprint(transformed_function)
+    transformed_output = ex.compute(transformed_function, input_data)
+    # simulator = PostTypeInferenceSimulator(CostModel(topology))
+    # simulation = simulator.interpret(transformed_function, (v.type for v in transformed_function.inputs))
+    # distributed_running_time = max([simulation.timestamps[d] for d in simulation.timestamps])
+    # print(f"Throughput: {args.batch_size / distributed_running_time:.2f}")
 
+    """
     op_costs = defaultdict(list)
     for event in simulation.trace:
         op_costs[event["name"]].append(event["dur"])
@@ -122,6 +125,5 @@ if __name__ == "__main__":
     parser.add_argument(
         "-k", "--num_microbatches", type=int, default=1, help="Num microbatches"
     )
-    parser.add_argument("--debug", action="store_true", default=False, help="Debug")
     args = parser.parse_args()
     main(args)

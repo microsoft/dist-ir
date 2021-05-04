@@ -125,6 +125,7 @@ class CostModel:
             ("Reshape", (Tensor, Tensor)): self._reshape_cost_fn,
             ("Select", (TupleType,)): self._select_cost_fn,
             ("Send", (Tensor,)): self._send_cost_fn,
+            ("Send", (type(Int64()),)): lambda op, x: {},
             ("Split", (Tensor,)): self._split_cost_fn,
             ("SplitDistIR", (Tensor,)): self._split_cost_fn,
             ("Shape", (Tensor,)): self._shape_cost_fn,

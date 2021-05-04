@@ -3,7 +3,7 @@ import math
 import logging
 import re
 
-from ..ir import cpprint
+from ..ir import cpprint, Op
 from ..ir.function import Function, FunctionMaker
 from .pipedream_scheduler import PipeDreamScheduler
 from .sanitize_attributes_transform import (
@@ -200,100 +200,104 @@ def _partition_inputs_pp(
     return pp_inputs
 
 
-def _pipeline_parallel_partition(function, pp_degree, devices):
-    """Partitions the function into pipeline parallel stages.
+def _get_producers(function):
+    producers = {}
+    for op in function.ops:
+        for output in op.outputs:
+            producers[output] = op
+    return producers
 
-    We assume the following structure for the function:
 
-    MM_F1 -> R_F1 -> ... -> MM_FN -> R_FN -> L-> L_B -> R_BN -> MM_BN -> ... -> R_B1 -> MM_B1
-    (MM: MatMul, R: ReLU, L: Loss)
+def _get_subgraph_from_sink(producers, output):
+    subgraph = set()
+    queue = [producers[output]]
+    while len(queue) > 0:
+        cur = queue.pop(0)
+        subgraph.add(cur)
+        for inp in cur.inputs:
+            if inp in producers:
+                producer = producers[inp]
+                if producer not in subgraph:
+                    queue.append(producer)
+    return subgraph
 
-    Therefore each function has N blocks where N is the number of weights.
 
-    Returns a map from stage to device.
-    """
+def _filter_extra_outputs(function):
+    # Map from op to set of function output values.
+    sinks = defaultdict(set)
 
-    def _get_producers(function):
-        producers = {}
-        for op in function.ops:
-            for output in op.outputs:
-                producers[output] = op
-        return producers
-
-    def _get_subgraph_from_sink(producers, output):
-        subgraph = set()
-        queue = [producers[output]]
-        while len(queue) > 0:
-            cur = queue.pop(0)
-            subgraph.add(cur)
-            for inp in cur.inputs:
-                if inp in producers:
-                    producer = producers[inp]
-                    if producer not in subgraph:
-                        queue.append(producer)
-        return subgraph
-
-    # Verify that all op names are unique.
-    # assert len(set([op.name for op in function.ops])) == len(function.ops)
-
-    # Create a map from value to producer op.
+    # Map from output value to producer op.
     producers = _get_producers(function)
 
-    # Get a list of subgraphs, with one subgraph for each Transformer block
-    # and additional subgraphs for initialization and output aggregation.
-    outputs = sorted(function.outputs, key=lambda x: int(x.name[len("output") :]))
-    subgraphs = []
-    for i, output in enumerate(outputs):
-        subgraph = _get_subgraph_from_sink(producers, output)
-        if i == 0:
-            subgraphs.append(subgraph)
-        else:
-            for prev in subgraphs[1:]:
-                subgraph = subgraph.difference(prev)
-            subgraphs.append(subgraph)
-    for subgraph in subgraphs[1:]:
-        subgraphs[0] = subgraphs[0].difference(subgraph)
+    # Set the sink for each output producer op to be the output.
+    for output in function.outputs:
+        producer = producers[output]
+        sinks[producer] = set([output])
 
-    # The first subgraph might have both initialization and output
-    # aggregation ops, in which we must separate these into distinct subgraphs.
-    final_stage_ops = set()
-    for op in subgraphs[0]:
+    # Incrementally propogate the set of sinks for each op by iterating through
+    # all ops in reverse topological order.
+    ops = list(function.ops)[::-1]
+    while len(ops) > 0:
+        op = ops.pop(0)
         for output in op.outputs:
             for consumer in function.consumers[output]:
-                if consumer not in subgraphs[0] and consumer not in subgraphs[1]:
-                    print(f"Adding {consumer} to final stage ops")
-                    final_stage_ops.add(consumer)
-    if len(final_stage_ops) > 0:
-        for final_stage_op in final_stage_ops:
-            subgraphs[0].remove(final_stage_op)
-        subgraphs.append(final_stage_ops)
-        num_transformer_stages = len(subgraphs) - 2
-    else:
-        num_transformer_stages = len(subgraphs) - 1
+                sinks[op] = sinks[op].union(sinks[consumer])
 
-    # Assemble the stages according to the subgraphs.
-    op_to_stage_map = {}
-    for i, subgraph in enumerate(subgraphs):
-        for op in subgraph:
-            op_to_stage_map[op] = i
-    assert len(op_to_stage_map) == len(function.ops)
-    stage_ops = defaultdict(list)
+    # Filter out ops with no sinks other than output1.
+    filtered_ops = set()
+    for op in sinks:
+        if function.outputs[-1] not in sinks[op]:
+            filtered_ops.add(op)
+    filtered_function = FunctionMaker(name=function.name)
+    value_map = {}
+    for inp in function.inputs:
+        v = filtered_function.add_input_value(inp.name, inp.type)
+        value_map[inp] = v
     for op in function.ops:
-        stage = op_to_stage_map[op]
-        stage_ops[stage].append(op)
-    stages = [
-        function.get_subfunction(stage_ops[stage], name=f"Stage {stage}")
-        for stage in sorted(stage_ops.keys())
+        if op in filtered_ops:
+            continue
+        inputs = tuple(value_map[inp] for inp in op.inputs)
+        new_op = Op(
+            name=op.name,
+            op_type=op.op_type,
+            inputs=inputs,
+            attributes=op.attributes,
+            subfunctions=op.subfunctions,
+            output_names=tuple(output.name for output in op.outputs),
+            output_types=tuple(output.type for output in op.outputs),
+        )
+        filtered_function.ops.append(new_op)
+        for orig_output, new_output in zip(op.outputs, new_op.outputs):
+            value_map[orig_output] = new_output
+    return filtered_function.finalize()
+
+
+def _pipeline_parallel_partition(function, pp_degree, devices):
+    """Partitions the function into pipeline parallel stages."""
+
+    # Assemble blocks using MLP Gemm ops as cut points.
+    blocks = []
+    cur_block = []
+    for op in function.ops:
+        cur_block.append(op)
+        if op.op_type == "Gemm" and any(
+            "mlp.c_proj.weight" in inp.name for inp in op.inputs
+        ):
+            blocks.append(cur_block)
+            cur_block = []
+    blocks.append(cur_block)
+    subfunctions = [
+        function.get_subfunction(block, name=f"{function.name} block {i}")
+        for i, block in enumerate(blocks)
     ]
 
-    # Places stages on each device.
-    num_stages_per_device = num_transformer_stages // pp_degree
+    # Places blocks on each device.
+    num_blocks_per_device = len(subfunctions) // pp_degree
     partition_map = {}
-    partition_map[stages[0]] = devices[0]
-    if len(final_stage_ops) > 0:
-        partition_map[stages[-1]] = devices[-1]
-    for i in range(num_transformer_stages):
-        partition_map[stages[i + 1]] = devices[i // num_stages_per_device]
+    for i in range(len(subfunctions)):
+        partition_map[subfunctions[i]] = devices[
+            min(i // num_blocks_per_device, len(devices) - 1)
+        ]
 
     return partition_map
 
@@ -361,6 +365,8 @@ def gpt2_dhp_transform(
     # TODO: Fix this more gracefully?
     orig_function = function
     (function, attribute_map) = sanitize_unhashable_attributes(function)
+
+    function = _filter_extra_outputs(function)
 
     transformed_function = FunctionMaker(name=function.name)
     device_tree = _get_device_tree(dp_degree, hp_degree, pp_degree, devices)

@@ -28,8 +28,8 @@ def _allreduce(x):
     return x
 
 
-def _concat2(x, y, dim=None):
-    return torch.cat((x, y), dim=dim)
+def _concat2(x, y, axis=None):
+    return torch.cat((x, y), dim=axis)
 
 
 def _identity(x):

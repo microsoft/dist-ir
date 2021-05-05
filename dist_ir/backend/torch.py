@@ -1,4 +1,5 @@
 from functools import partial
+from itertools import combinations
 import logging
 from operator import getitem
 import os
@@ -12,6 +13,22 @@ from torch import fx
 
 from ..executor.rank_projector import project
 from ..ir import Function
+
+_use_gpu = False
+_groups = None
+
+
+def _init_p2p_groups():
+    """Since torch.distributed's NCCL backed doesn't support P2P communication,
+    we create a group for each pair of ranks and use broadcasts to emulate P2P
+    send/recv. This method initializes the groups.
+    """
+    global _use_gpu, _groups
+    if _use_gpu:
+        world_size = dist.get_world_size()
+        _groups = {}
+        for i, j in combinations(range(world_size), 2):
+            _groups[i, j] = dist.new_group([i, j])
 
 
 # TODO kwargs of these functions are required, enforce this somewhere
@@ -51,7 +68,13 @@ def _matmul_grad(x, y, dz):
 def _recv(shape=None, device=None):
     x = torch.zeros(shape)
     # TODO pytorch rank = device_id - 1
-    dist.recv(x, device - 1)
+    if _use_gpu:
+        src_rank = device - 1
+        dst_rank = dist.get_rank()
+        group = _groups[tuple(sorted((src_rank, dst_rank)))]
+        dist.broadcast(x, src_rank, group=group)
+    else:
+        dist.recv(x, device - 1)
     return x
 
 
@@ -64,7 +87,13 @@ def _relu_grad(x, dy):
 
 def _send(x, device=None):
     # TODO pytorch rank = device_id - 1
-    dist.send(x, device - 1)
+    if _use_gpu:
+        src_rank = dist.get_rank()
+        dst_rank = device - 1
+        group = _groups[tuple(sorted((src_rank, dst_rank)))]
+        dist.broadcast(x, src_rank, group=group)
+    else:
+        dist.send(x, device - 1)
 
 
 _op_to_torch = {
@@ -142,21 +171,20 @@ def run_function(rank, fn: Function, inputs: List[Any]):
     return tuple(value_map[v] for v in fn.outputs)
 
 
-def run_process(
-    use_gpu, world_size, io_dir, num_warmup_steps, num_repetitions, rank, fn
-):
+def run_process(world_size, io_dir, num_warmup_steps, num_repetitions, rank, fn):
     """The Python function on rank `rank` that runs module `module`."""
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = "29500"
-    backend = "nccl" if use_gpu else "gloo"
+    backend = "nccl" if _use_gpu else "gloo"
     dist.init_process_group(backend, rank=rank, world_size=world_size)
+    _init_p2p_groups()
 
     per_rank_inputs = torch.load(os.path.join(io_dir.name, f"in.{rank}.pt"))
 
     # # Convert per-rank DistIR function to torch.nn.Module:
     # module = function_to_module(fn)
 
-    if use_gpu:
+    if _use_gpu:
         # Move module and inputs to GPU
         # TODO how to move interpreted non-module code to GPU?
         # module.to(rank)
@@ -166,7 +194,7 @@ def run_process(
     events = []
 
     def add_event():
-        if use_gpu:
+        if _use_gpu:
             events.append(torch.cuda.Event(enable_timing=True))
             events[-1].record()
         else:
@@ -183,7 +211,7 @@ def run_process(
 
     torch.save(res, os.path.join(io_dir.name, f"out.{rank}.pt"))
 
-    if use_gpu:
+    if _use_gpu:
         runtimes = [
             events[i].elapsed_time(events[i + 1]) / 1e3 for i in range(len(events) - 1)
         ]
@@ -198,7 +226,6 @@ def run_process(
 def run_multiprocesses(
     per_rank_functions: Tuple[Function],
     per_rank_inputs: Tuple[Any],
-    use_gpu=False,
     num_repetitions=1,
     num_warmup=0,
 ):
@@ -214,7 +241,7 @@ def run_multiprocesses(
 
     global run_process
     per_rank_runner = partial(
-        run_process, use_gpu, world_size, io_dir, num_warmup, num_repetitions
+        run_process, world_size, io_dir, num_warmup, num_repetitions
     )
     with torch.multiprocessing.Pool(world_size) as p:
         runtimes = p.starmap(per_rank_runner, enumerate(per_rank_functions))
@@ -228,17 +255,23 @@ def run_multiprocesses(
     return per_rank_outputs, runtimes
 
 
-def run_pytorch(num_devices, fn, inputs):
+def run_pytorch(num_devices, fn, inputs, use_gpu=False):
     """Project `fn` and run on `inputs` over `num_devices` devices using the
     PyTorch backend.
     """
     # TODO check that fn uses devices [0...num_devices),
     # or run through and find max device used
+
+    global _use_gpu
+    _use_gpu = use_gpu
+
     per_rank_fns = project(fn, tuple(v.type for v in fn.inputs), num_devices)
     # from ..ir import cpprint
     # for per_rank_fn in per_rank_fns:
     #     cpprint(per_rank_fn)
+
     per_rank_inputs = [[] for _ in range(num_devices)]
     for v, a in zip(fn.inputs, inputs):
         per_rank_inputs[v.type.device.device_id - 1].append(a)
+
     return run_multiprocesses(per_rank_fns, per_rank_inputs)

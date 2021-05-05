@@ -277,7 +277,7 @@ def _mpi_gather_from_tuple_type_prop_fn(op, x):
         # TODO: To strictly follow MPI semantics we should check that the output
         # device is not one of the input devices
         _raise_type_error(op, x)
-    dim = op.attributes["dim"]
+    dim = op.attributes["axis"]
     device = op.attributes["device"]
     output_shape = list(x.types[0].shape)
     for i in range(1, len(x.types)):

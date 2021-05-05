@@ -187,7 +187,7 @@ def test_scatter():
         "MPIScatterToTupleType",
         "MPIScatter/x",
         inputs=[x],
-        attributes={"dim": 0, "devices": [d0, d1]},
+        attributes={"axis": 0, "devices": [d0, d1]},
         output_names=["xs"],
     )
     function = function.finalize()

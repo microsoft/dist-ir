@@ -113,6 +113,11 @@ def _simulate_op(
         # or input data buffers that are active for the entire duration of execution.
         if in_edge in state._function_inputs_set:
             continue
+        if state.consumers[in_edge] <= 0:
+            raise RuntimeError(
+                f"Input {in_edge} for op {op} has "
+                f"{state.consumers[in_edge]} consumers"
+            )
         assert state.consumers[in_edge] > 0
         state.consumers[in_edge] -= 1
         if state.consumers[in_edge] == 0:

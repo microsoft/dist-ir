@@ -134,8 +134,18 @@ def _(function: FunctionMaker, ctx):
 
 @register_pretty(Op)
 def _(op: Op, ctx):
-    results = concat(_join(*(pretty_dispatch(r, ctx) for r in op.outputs)))
-    args = concat(_join(*(v.name for v in op.inputs)))
+    attributes = ()
+    if op.attributes is not None:
+        attributes = (
+            concat((key, ASSIGN_OP, pretty_dispatch(value, ctx)))
+            for key, value in op.attributes.items()
+        )
+    args = concat(_join(*(v.name for v in op.inputs), *attributes))
+
+    if len(op.outputs) == 0:
+        results = "_"
+    else:
+        results = concat(_join(*(pretty_dispatch(r, ctx) for r in op.outputs)))
 
     if op.op_type == "Pmap":
         lambda_body = _pprint_function_body(op.subfunctions[0], ctx)

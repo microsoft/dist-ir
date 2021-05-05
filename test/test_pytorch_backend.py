@@ -268,4 +268,6 @@ if __name__ == "__main__":
     # test_dp_mlp()
     # test_send_recv()
     # test_empty_device()
+    # import logging
+    # logging.basicConfig(level=logging.INFO)
     test_mlp_grid_search()

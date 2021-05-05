@@ -1,11 +1,11 @@
 from functools import partial
+import logging
 from operator import getitem
 import os
 from tempfile import TemporaryDirectory
 from time import perf_counter
-from typing import Any, Tuple
+from typing import Any, List, Tuple
 
-import numpy as np
 import torch
 import torch.distributed as dist
 from torch import fx
@@ -111,6 +111,37 @@ def function_to_module(fn: Function) -> torch.nn.Module:
     return fx.GraphModule({}, g)
 
 
+def run_function(rank, fn: Function, inputs: List[Any]):
+    value_map = {}
+
+    # Add inputs to value_map
+    for v, x in zip(fn.inputs, inputs):
+        value_map[v] = x
+    assert len(fn.inputs) == len(inputs)
+
+    # Run ops
+    for op in fn.ops:
+        first_output = (
+            op.outputs[0].name
+            if op.outputs is not None and len(op.outputs) > 0
+            else "None"
+        )
+        logging.info(f"{rank}: {first_output} {op.op_type}")
+        inputs = tuple(value_map[v] for v in op.inputs)
+        kwargs = {} if op.attributes is None else {**op.attributes}
+        output = _op_to_torch[op.op_type](*inputs, **kwargs)
+        if len(op.outputs) > 1:
+            assert isinstance(output, tuple)
+            for i, v in enumerate(op.outputs):
+                value_map[v] = output[i]
+        elif len(op.outputs) == 1:
+            value_map[op.outputs[0]] = output
+        logging.info(f"{rank}: {first_output} {op.op_type}")
+
+    # Return outputs
+    return tuple(value_map[v] for v in fn.outputs)
+
+
 def run_process(
     use_gpu, world_size, io_dir, num_warmup_steps, num_repetitions, rank, fn
 ):
@@ -122,12 +153,13 @@ def run_process(
 
     per_rank_inputs = torch.load(os.path.join(io_dir.name, f"in.{rank}.pt"))
 
-    # Convert per-rank DistIR function to torch.nn.Module:
-    module = function_to_module(fn)
+    # # Convert per-rank DistIR function to torch.nn.Module:
+    # module = function_to_module(fn)
 
     if use_gpu:
         # Move module and inputs to GPU
-        module.to(rank)
+        # TODO how to move interpreted non-module code to GPU?
+        # module.to(rank)
         for t in per_rank_inputs:
             t.to(rank)
 
@@ -143,7 +175,8 @@ def run_process(
     # Time a bunch of executions, then execute once for output values
     add_event()
     for _ in range(num_warmup_steps + num_repetitions):
-        res = module(*per_rank_inputs)
+        # res = module(*per_rank_inputs)
+        res = run_function(rank, fn, per_rank_inputs)
         if world_size > 1:
             torch.distributed.barrier()
         add_event()
@@ -199,8 +232,12 @@ def run_pytorch(num_devices, fn, inputs):
     """Project `fn` and run on `inputs` over `num_devices` devices using the
     PyTorch backend.
     """
-    # TODO check that fn uses devices [0...num_devices)
+    # TODO check that fn uses devices [0...num_devices),
+    # or run through and find max device used
     per_rank_fns = project(fn, tuple(v.type for v in fn.inputs), num_devices)
+    # from ..ir import cpprint
+    # for per_rank_fn in per_rank_fns:
+    #     cpprint(per_rank_fn)
     per_rank_inputs = [[] for _ in range(num_devices)]
     for v, a in zip(fn.inputs, inputs):
         per_rank_inputs[v.type.device.device_id - 1].append(a)

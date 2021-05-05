@@ -32,7 +32,7 @@ def _split_value(v, function, num_splits, parallelism_level):
     return function.add_op(
         "SplitDistIR",
         inputs=[v],
-        attributes={"dim": 0, "num_splits": num_splits},
+        attributes={"axis": 0, "num_splits": num_splits},
         output_names=output_names,
     )
 
@@ -41,7 +41,7 @@ def _mpi_allgather_values(vs, function, dim, output_names):
     return function.add_op(
         "MPIAllgather",
         inputs=vs,
-        attributes={"dim": dim},
+        attributes={"axis": dim},
         output_names=output_names,
     )
 
@@ -69,7 +69,7 @@ def _mpi_scatter_value(v, function, dim, devices, parallelism_level):
     return function.add_op(
         "MPIScatter",
         inputs=[v],
-        attributes={"dim": dim, "devices": devices},
+        attributes={"axis": dim, "devices": devices},
         output_names=output_names,
     )
 
@@ -91,6 +91,19 @@ def _get_op_to_stage_map(stages):
         for op in stage.ops:
             op_to_stage[op] = stage
     return op_to_stage
+
+
+def _get_consumer_devices_for_pp_value(
+    value, function, op_to_stage_map, pp_devices, partition_map
+):
+    """Returns the set of consumer devices for a pipeline parallel value given
+    the corresponding partition map."""
+    consumers = function.consumers[value]
+    consumer_stages = (op_to_stage_map[op] for op in consumers)
+    consumer_devices = set(
+        partition_map[consumer_stage] for consumer_stage in consumer_stages
+    ).intersection(set(pp_devices))
+    return consumer_devices
 
 
 def _partition_inputs_dp(function, device_tree):
@@ -172,11 +185,15 @@ def _partition_inputs_hp(function, device_tree, dp_inputs):
 
 
 def _partition_inputs_pp(
-    function,
+    init_function,
     device_tree,
     dp_inputs,
     hp_inputs,
     num_microbatches,
+    function,
+    transformed_inputs,
+    partition_maps,
+    op_to_stage_maps,
 ):
     """Partitions inputs using pipeline parallelism."""
     device_tree_root = tuple(device_tree.keys())[0]
@@ -186,95 +203,43 @@ def _partition_inputs_pp(
         hp_devices = tuple(sorted(device_tree[device_tree_root][dp_device].keys()))
         for j, hp_device in enumerate(hp_devices):
             pp_devices = device_tree[device_tree_root][dp_device][hp_device]
-            for inp in function.inputs:
+            for orig_inp in function.inputs:
+                inp = transformed_inputs[orig_inp]
                 hp_input = hp_inputs[dp_inputs[inp][i]][j]
-                if len(pp_devices) > 1 and inp.name == "input1":
-                    # If using pipeline parallelism, split the input along the
-                    # batch dimension. No action is necessary for the weights. We do this
-                    # once for every horizontal parallel partition (and corresponding data
-                    # parallel partition).
-                    pp_inputs[hp_input] = _split_value(
-                        hp_input,
-                        function,
-                        num_splits=num_microbatches,
-                        parallelism_level="pp",
-                    )
+                if len(pp_devices) > 1:
+                    # If using pipeline parallelism, split the input query along the
+                    # batch dimension and send all other inputs to their respective devices
+                    # according to the partition map. We do this once for every horizontal
+                    # parallel partition (and corresponding data parallel partition).
+                    if inp.name == "input1":
+                        pp_inputs[hp_input] = _split_value(
+                            hp_input,
+                            init_function,
+                            num_splits=num_microbatches,
+                            parallelism_level="pp",
+                        )
+                    else:
+                        consumer_devices = _get_consumer_devices_for_pp_value(
+                            orig_inp,
+                            function,
+                            op_to_stage_maps[i],
+                            pp_devices,
+                            partition_maps[i][j],
+                        )
+                        for consumer_device in consumer_devices:
+                            forwarded_value = _send_value(
+                                hp_input,
+                                init_function,
+                                consumer_device,
+                                output_name=f"{hp_input.name}_pp_all",
+                            )
+                            pp_inputs[hp_input] = [
+                                forwarded_value for _ in range(num_microbatches)
+                            ]
                 else:
                     # If not using pipeline parallelism, no action necessary here.
                     pp_inputs[hp_input] = [hp_input]
     return pp_inputs
-
-
-def _get_producers(function):
-    producers = {}
-    for op in function.ops:
-        for output in op.outputs:
-            producers[output] = op
-    return producers
-
-
-def _get_subgraph_from_sink(producers, output):
-    subgraph = set()
-    queue = [producers[output]]
-    while len(queue) > 0:
-        cur = queue.pop(0)
-        subgraph.add(cur)
-        for inp in cur.inputs:
-            if inp in producers:
-                producer = producers[inp]
-                if producer not in subgraph:
-                    queue.append(producer)
-    return subgraph
-
-
-def _filter_extra_outputs(function):
-    # Map from op to set of function output values.
-    sinks = defaultdict(set)
-
-    # Map from output value to producer op.
-    producers = _get_producers(function)
-
-    # Set the sink for each output producer op to be the output.
-    for output in function.outputs:
-        producer = producers[output]
-        sinks[producer] = set([output])
-
-    # Incrementally propogate the set of sinks for each op by iterating through
-    # all ops in reverse topological order.
-    ops = list(function.ops)[::-1]
-    while len(ops) > 0:
-        op = ops.pop(0)
-        for output in op.outputs:
-            for consumer in function.consumers[output]:
-                sinks[op] = sinks[op].union(sinks[consumer])
-
-    # Filter out ops with no sinks other than output1.
-    filtered_ops = set()
-    for op in sinks:
-        if function.outputs[-1] not in sinks[op]:
-            filtered_ops.add(op)
-    filtered_function = FunctionMaker(name=function.name)
-    value_map = {}
-    for inp in function.inputs:
-        v = filtered_function.add_input_value(inp.name, inp.type)
-        value_map[inp] = v
-    for op in function.ops:
-        if op in filtered_ops:
-            continue
-        inputs = tuple(value_map[inp] for inp in op.inputs)
-        new_op = Op(
-            name=op.name,
-            op_type=op.op_type,
-            inputs=inputs,
-            attributes=op.attributes,
-            subfunctions=op.subfunctions,
-            output_names=tuple(output.name for output in op.outputs),
-            output_types=tuple(output.type for output in op.outputs),
-        )
-        filtered_function.ops.append(new_op)
-        for orig_output, new_output in zip(op.outputs, new_op.outputs):
-            value_map[orig_output] = new_output
-    return filtered_function.finalize()
 
 
 def _pipeline_parallel_partition(function, pp_degree, devices):
@@ -366,14 +331,13 @@ def gpt2_dhp_transform(
 ):
     """Automatically distributes a GPT-2 function using D/H/P hybrid parallelism."""
 
-    # Hack to get around unhashable numpy array attributes
-    # TODO: Fix this more gracefully?
-    orig_function = function
+    # Temporarily remove unhashable attributes.
     (function, attribute_map) = sanitize_unhashable_attributes(function)
 
-    function = _filter_extra_outputs(function)
-
-    transformed_function = FunctionMaker(name=function.name)
+    # Initialize the transformed function and construct the device tree given the
+    # specified parallelism dimensions.
+    fn_name = f"{function.name}_{dp_degree}_{hp_degree}_{pp_degree}_{num_microbatches}"
+    transformed_function = FunctionMaker(name=fn_name)
     device_tree = _get_device_tree(dp_degree, hp_degree, pp_degree, devices)
     device_tree_root = tuple(device_tree.keys())[0]
     dp_devices = tuple(sorted(device_tree[device_tree_root].keys()))
@@ -388,45 +352,59 @@ def gpt2_dhp_transform(
         )
     )
 
-    # Add inputs to the transformed function.
-    transformed_inputs = {}
-    for inp in function.inputs:
-        v = transformed_function.add_input_value(inp.name, inp.type)
-        transformed_inputs[inp] = v
-
-    # Partition inputs across each parallelism dimension.
-    dp_inputs = _partition_inputs_dp(transformed_function, device_tree)
-    hp_inputs = _partition_inputs_hp(transformed_function, device_tree, dp_inputs)
-    pp_inputs = _partition_inputs_pp(
-        transformed_function,
-        device_tree,
-        dp_inputs,
-        hp_inputs,
-        num_microbatches,
-    )
-
-    dp_outputs = defaultdict(list)
+    # Construct pipeline parallel partitions and schedules for each
+    # horizontal parallel partition.
+    # A map with the following structure:
+    # Data parallel partition ID
+    # |-> Attention block (subfunction)
+    #     |-> Assigned device
+    partition_maps = defaultdict(dict)
+    # A list of pipeline parallel schedules, with one schedule
+    # (represented as a list of dicts) for every horizontal parallel partition.
+    pp_schedules = defaultdict(list)
+    op_to_stage_maps = {}
     for i, dp_device in enumerate(device_tree[device_tree_root]):
-        # pp_schedules is a list of pipeline parallel schedules, with one schedule
-        # (represented as a list of dicts) list for every horizontal parallel partition.
-        partition_maps = {}
-        pp_schedules = []
         hp_devices = tuple(sorted(device_tree[device_tree_root][dp_device].keys()))
         # Construct the pipeline parallel schedules for each horizontal parallel partition.
         for j, hp_device in enumerate(hp_devices):
             pp_devices = device_tree[device_tree_root][dp_device][hp_device]
-            partition_maps[j] = _pipeline_parallel_partition(
+            partition_maps[i][j] = _pipeline_parallel_partition(
                 function, pp_degree, pp_devices
             )
-            op_to_stage_map = _get_op_to_stage_map(partition_maps[j].keys())
+            op_to_stage_maps[i] = _get_op_to_stage_map(partition_maps[i][j].keys())
             scheduler = PipeDreamScheduler(num_microbatches)
-            schedule = scheduler.schedule(function, partition_maps[j])
-            pp_schedules.append(schedule)
+            schedule = scheduler.schedule(function, partition_maps[i][j])
+            pp_schedules[i].append(schedule)
 
-        # A map from original value to transformed value. Keeps track of values
-        # forwarded between pipeline parallel stages on separate devices.
-        forwarded_value_map = {}
+    # An init function that moves weights/inputs to correct devices.
+    init_function = FunctionMaker(name=fn_name + "_init")
+    transformed_inputs = {}
+    for inp in function.inputs:
+        v = init_function.add_input_value(inp.name, inp.type)
+        transformed_inputs[inp] = v
 
+    # Partition inputs across each parallelism dimension.
+    dp_inputs = _partition_inputs_dp(init_function, device_tree)
+    hp_inputs = _partition_inputs_hp(init_function, device_tree, dp_inputs)
+    pp_inputs = _partition_inputs_pp(
+        init_function,
+        device_tree,
+        dp_inputs,
+        hp_inputs,
+        num_microbatches,
+        function,
+        transformed_inputs,
+        partition_maps,
+        op_to_stage_maps,
+    )
+    init_function = init_function.finalize()
+
+    # Inputs of transformed_function are outputs of init_function.
+    for v in init_function.outputs:
+        transformed_function.inputs.append(v)
+
+    dp_outputs = defaultdict(list)
+    for i, dp_device in enumerate(device_tree[device_tree_root]):
         # A map with the following structure:
         # original intermediate value
         # |-> horizontal parallel partition ID
@@ -434,18 +412,14 @@ def gpt2_dhp_transform(
         #         |-> transformed intermediate value
         intermediate_value_map = defaultdict(lambda: defaultdict(dict))
 
-        # A map from microbatch ID to MatMul count. The count is incremented each time
-        # a MatMul or MatMulGrad op is executed. Horizontal parallel synchronization
-        # is performed when the count reaches an even value.
-        matmul_counter = defaultdict(lambda: 0)
-
         # Jointly iterate through all the schedules, timestep by timestep.
         # Timesteps will be a tuple of dicts corresponding to the schedules
         # at this timestep (represented as a dict) for each horizontal parallel
         # partition. The keys (devices) for each schedule will be different,
         # but the values should be the same. This iteration strategy is necessary
         # for Megatron-style synchronization.
-        for timesteps in zip(*pp_schedules):
+        hp_devices = tuple(sorted(device_tree[device_tree_root][dp_device].keys()))
+        for timesteps in zip(*pp_schedules[i]):
             # For a given set of timesteps, iterate through in order of matching
             # horizontal parallel devices.
             for devices in zip(*tuple(sorted(ts.keys()) for ts in timesteps)):
@@ -472,10 +446,7 @@ def gpt2_dhp_transform(
                                 v = transformed_inputs[inp]
                                 dp_v = dp_inputs[v][i]
                                 hp_v = hp_inputs[dp_v][j]
-                                if inp.name == "input1":
-                                    pp_v = pp_inputs[hp_v][microbatch_id]
-                                else:
-                                    pp_v = pp_inputs[hp_v][0]
+                                pp_v = pp_inputs[hp_v][microbatch_id]
                                 input_values.append(pp_v)
                                 input_devices.append(pp_devices[0])
                             else:
@@ -484,31 +455,6 @@ def gpt2_dhp_transform(
                                 ][inp]
                                 input_values.append(output_value)
                                 input_devices.append(output_device)
-                        # Forward any input values not on the correct device.
-                        for idx, (inp, v, d) in enumerate(
-                            zip(op.inputs, input_values, input_devices)
-                        ):
-                            if d != device:
-                                if (v, device) in forwarded_value_map:
-                                    logging.debug(
-                                        f"Found ({v.name}, {device.device_id})"
-                                        f"in sent value cache"
-                                    )
-                                else:
-                                    logging.debug(
-                                        f"Sending value {inp.name} to"
-                                        f"device {device.device_id}"
-                                    )
-                                    forwarded_value_map[(v, device)] = _send_value(
-                                        v,
-                                        transformed_function,
-                                        device,
-                                        output_name=(
-                                            f"{inp.name}_dp_{i}_hp_{j}_pp_{microbatch_id}"
-                                            f"_device_{device.device_id}"
-                                        ),
-                                    )
-                                input_values[idx] = forwarded_value_map[(v, device)]
                         # Add the op once for each device to the transformed function.
                         attributes = op.attributes
                         if op.op_type == "Split":
@@ -675,12 +621,13 @@ def gpt2_dhp_transform(
                                 microbatch_id
                             ][output]
                             assert device == d
-                            consumers = function.consumers[output]
-                            consumer_stages = (op_to_stage_map[op] for op in consumers)
-                            consumer_devices = set(
-                                partition_maps[j][consumer_stage]
-                                for consumer_stage in consumer_stages
-                            ).intersection(set(pp_devices))
+                            consumer_devices = _get_consumer_devices_for_pp_value(
+                                output,
+                                function,
+                                op_to_stage_maps[i],
+                                pp_devices,
+                                partition_maps[i][j],
+                            )
                             for consumer_device in consumer_devices:
                                 if device != consumer_device:
                                     logging.debug(
@@ -688,17 +635,18 @@ def gpt2_dhp_transform(
                                         f"device {consumer_device.device_id}"
                                     )
 
-                                    forwarded_value_map[
-                                        (transformed_output, consumer_device)
-                                    ] = _send_value(
-                                        transformed_output,
-                                        transformed_function,
-                                        consumer_device,
-                                        output_name=(
-                                            f"{output.name}_dp_{i}_hp_{j}_pp_"
-                                            f"{microbatch_id}_device_"
-                                            f"{consumer_device.device_id}"
+                                    intermediate_value_map[j][microbatch_id][output] = (
+                                        _send_value(
+                                            transformed_output,
+                                            transformed_function,
+                                            consumer_device,
+                                            output_name=(
+                                                f"{output.name}_dp_{i}_hp_{j}_pp_"
+                                                f"{microbatch_id}_device_"
+                                                f"{consumer_device.device_id}"
+                                            ),
                                         ),
+                                        consumer_device,
                                     )
         # Collect the pipeline-parallel aggregated function outputs
         # from horizontal parallel partitions to do data parallel aggregation.
@@ -751,4 +699,4 @@ def gpt2_dhp_transform(
         transformed_function, attribute_map
     )
 
-    return transformed_function.finalize()
+    return init_function, transformed_function.finalize()

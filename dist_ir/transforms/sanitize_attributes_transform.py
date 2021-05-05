@@ -1,13 +1,12 @@
 from collections import Hashable
 from frozendict import frozendict
+import numpy as np
 
 from ..ir.function import Function, FunctionMaker
 from ..ir.op import Op
 
 
 def sanitize_unhashable_attributes(function):
-    import numpy as np
-
     assert isinstance(function, Function)
     attribute_map = {}
     value_map = {}

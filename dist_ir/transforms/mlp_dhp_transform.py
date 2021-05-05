@@ -325,7 +325,7 @@ def mlp_dhp_transform(
         )
     )
 
-    # An init function that moves weights/inputs to correct devices
+    # An init function that moves weights/inputs to correct devices.
     init_function = FunctionMaker(name=fn_name + "_init")
     transformed_inputs = {}
     for inp in function.inputs:
@@ -344,7 +344,7 @@ def mlp_dhp_transform(
     )
     init_function = init_function.finalize()
 
-    # Inputs of transformed_function are outputs of init_function
+    # Inputs of transformed_function are outputs of init_function.
     for v in init_function.outputs:
         transformed_function.inputs.append(v)
 

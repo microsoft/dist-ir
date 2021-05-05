@@ -55,12 +55,14 @@ class SequentialExecutor:
         state = self.interpreter.interpret(function, inputs)
         return tuple(state.env[v] for v in function.outputs)
 
-    def infer_types(self, function: Function, inputs: Sequence[Any]) -> Function:
+    def infer_types(
+        self, function: Function, inputs: Sequence[Any], input_devices: Sequence[Device]
+    ) -> Function:
         """Given a function and a list of input values, returns a new function where
         all values are typed.
 
-        inputs: a list/tuple of Values, of the same length as function.inputs, but
-        the names are irrelevant.
+        inputs: a list/tuple of concrete values of the same length as function.inputs.
+        input_devices: a list/tuple of Devices for input values.
         """
 
         def _numpy_dtype_to_dist_ir_dtype(dtype):
@@ -80,8 +82,7 @@ class SequentialExecutor:
 
         # Propagate devices seperately from shapes.
         device_map = {}
-        for inp in function.inputs:
-            device = inp.type.device
+        for inp, device in zip(function.inputs, input_devices):
             device_map[inp] = device
         for op in function.ops:
             input_devices = [device_map[inp] for inp in op.inputs]
@@ -99,7 +100,7 @@ class SequentialExecutor:
                 input_device_set = set(d for d in input_devices if d is not None)
                 if len(input_device_set) > 1:
                     raise ValueError(
-                        "Op {op} has inputs from devices {set(input_devices)}!"
+                        f"Op {op} has inputs from devices {set(input_devices)}!"
                     )
                 elif len(input_device_set) == 1:
                     output_devices = [input_devices[0] for _ in range(len(op.outputs))]

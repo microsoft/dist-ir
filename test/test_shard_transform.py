@@ -22,7 +22,7 @@ def test_single_variable_data_parallel():
         ops=function.ops,
         input_dims={function.inputs[0]: 0},
         reduction_params={
-            function.outputs[0]: {"op_type": "MPIGather", "dim": 0, "device": d0}
+            function.outputs[0]: {"op_type": "MPIGather", "axis": 0, "device": d0}
         },
         devices=[d0, d1],
     )
@@ -77,7 +77,7 @@ def test_double_variable_data_parallel():
         ops=function.ops,
         input_dims={function.inputs[0]: 0, function.inputs[2]: 0},
         reduction_params={
-            function.outputs[0]: {"op_type": "MPIGather", "dim": 0, "device": d0}
+            function.outputs[0]: {"op_type": "MPIGather", "axis": 0, "device": d0}
         },
         devices=[d0, d1],
     )
@@ -136,7 +136,7 @@ def test_single_variable_horizontal_parallel():
         ops=[function.ops[0]],
         input_dims={function.inputs[1]: 1},
         reduction_params={
-            function.ops[0].outputs[0]: {"op_type": "MPIGather", "dim": 1, "device": d0}
+            function.ops[0].outputs[0]: {"op_type": "MPIGather", "axis": 1, "device": d0}
         },
         devices=[d0, d1],
     )
@@ -267,9 +267,9 @@ def test_mnist_data_parallel():
         ops=function.ops,
         input_dims={function.inputs[0]: 0, function.inputs[1]: 0},
         reduction_params={
-            function.outputs[0]: {"op_type": "MPIGather", "dim": 0, "device": d0},
+            function.outputs[0]: {"op_type": "MPIGather", "axis": 0, "device": d0},
             function.outputs[1]: {"op_type": "MPIAllreduce"},
-            function.outputs[2]: {"op_type": "MPIGather", "dim": 0, "device": d0},
+            function.outputs[2]: {"op_type": "MPIGather", "axis": 0, "device": d0},
             function.outputs[3]: {"op_type": "MPIAllreduce"},
         },
         devices=[d0, d1],

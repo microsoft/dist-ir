@@ -314,7 +314,7 @@ def mpi_broadcast(op, x):
 
 
 def mpi_gather(op, *xs):
-    dim = op.attributes["dim"]
+    dim = op.attributes["axis"]
     return np.concatenate(xs, axis=dim)
 
 
@@ -602,7 +602,7 @@ def softmax_cross_entropy_loss_grad(op, dy, log_prob, label, weight=None):
 # NOTE: This is the DistIR version of Split
 # TODO: Merge split and split_v2
 def split(op, x):
-    dim = op.attributes["dim"]
+    dim = op.attributes["axis"]
     if op.op_type == "Split" or op.op_type == "SplitDistIR":
         num_splits = op.attributes["num_splits"]
     elif op.op_type == "MPIScatter" or op.op_type == "MPIScatterToTupleType":

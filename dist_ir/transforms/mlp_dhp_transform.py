@@ -26,7 +26,7 @@ def _split_value(v, function, num_splits, parallelism_level):
     return function.add_op(
         "SplitDistIR",
         inputs=[v],
-        attributes={"dim": 0, "num_splits": num_splits},
+        attributes={"axis": 0, "num_splits": num_splits},
         output_names=output_names,
     )
 
@@ -35,7 +35,7 @@ def _mpi_allgather_values(vs, function, dim, output_names):
     return function.add_op(
         "MPIAllgather",
         inputs=vs,
-        attributes={"dim": dim},
+        attributes={"axis": dim},
         output_names=output_names,
     )
 
@@ -63,7 +63,7 @@ def _mpi_scatter_value(v, function, dim, devices, parallelism_level):
     return function.add_op(
         "MPIScatter",
         inputs=[v],
-        attributes={"dim": dim, "devices": devices},
+        attributes={"axis": dim, "devices": devices},
         output_names=output_names,
     )
 

@@ -15,11 +15,11 @@ from ..ir import Function
 
 
 # TODO kwargs of these functions are required, enforce this somewhere
-def _allgather(x_i, dim=0):
+def _allgather(x_i, axis=0):
     world_size = dist.get_world_size()
     xs = [torch.zeros_like(x_i) for _ in range(world_size)]
     dist.all_gather(xs, x_i)
-    x = torch.cat(xs, dim=dim)
+    x = torch.cat(xs, dim=axis)
     return x
 
 

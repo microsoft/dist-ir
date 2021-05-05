@@ -53,7 +53,7 @@ def _concat_prop_fn(op, x, y):
         and x.device == y.device
     ):
         _raise_type_error(op, x, y)
-    dim = op.attributes["dim"]
+    dim = op.attributes["axis"]
     for i, (d0, d1) in enumerate(zip(x.shape, y.shape)):
         if i != dim and d0 != d1:
             _raise_type_error(op, x, y)
@@ -186,7 +186,7 @@ def _mpi_allgather_prop_fn(op, *xs):
         and len(set(devices)) == len(devices)
     ):
         _raise_type_error(op, xs)
-    dim = op.attributes["dim"]
+    dim = op.attributes["axis"]
     shape = list(xs[0].shape)
     for x in xs[1:]:
         shape[dim] += x.shape[dim]
@@ -253,7 +253,7 @@ def _mpi_gather_prop_fn(op, *xs):
         # TODO: To strictly follow MPI semantics we should check that the output
         # device is not one of the input devices
         _raise_type_error(op, *xs)
-    dim = op.attributes["dim"]
+    dim = op.attributes["axis"]
     device = op.attributes["device"]
     output_shape = list(xs[0].shape)
     for i in range(1, len(xs)):
@@ -326,7 +326,7 @@ def _mpi_scatter_prop_fn(op, x, to_tuple_type=False):
     # Check devices is a list of distinct Devices
     assert isinstance(devices, Sequence) and all(isinstance(d, Device) for d in devices)
     assert len(devices) == len(set(devices))
-    dim = op.attributes["dim"]
+    dim = op.attributes["axis"]
     # TODO: Should we add another function to raise an attribute error?
     assert dim >= 0 and dim < len(x.shape)
     assert x.shape[dim] % len(devices) == 0
@@ -407,7 +407,7 @@ def _split_prop_fn(op, x):
     if not isinstance(x, Tensor):
         _raise_type_error(op, x)
     num_splits = op.attributes["num_splits"]
-    split_dim = op.attributes["dim"]
+    split_dim = op.attributes["axis"]
     output_shape = list(x.shape)
     # TODO: Move this check to attribute error function?
     assert output_shape[split_dim] % num_splits == 0
@@ -559,7 +559,7 @@ TypePropRegister = {
     ("Select", (TupleType,)): _select_prop_fn,
     ("Send", (Tensor,)): _send_prop_fn,
     ("Shape", (Tensor,)): _shape_prop_fn,
-    ("Split", (Tensor,)): _split_prop_fn,
+    ("SplitDistIR", (Tensor,)): _split_prop_fn,
     ("Split_v2", (Tensor,)): _split_v2_prop_fn,
     # ("Shape", (Tensor,)): TODO
     ("Slice", (Tensor, Tensor, Tensor, Tensor)): _slice_prop_fn,

@@ -35,6 +35,9 @@ def _init_p2p_groups():
 def _allgather(x_i, dim=0):
     world_size = dist.get_world_size()
     xs = [torch.zeros_like(x_i) for _ in range(world_size)]
+    if _use_gpu:
+        xs = [x.cuda(dist.get_rank()) for x in xs]
+
     dist.all_gather(xs, x_i)
     x = torch.cat(xs, dim=dim)
     return x
@@ -69,6 +72,7 @@ def _recv(shape=None, device=None):
     x = torch.zeros(shape)
     # TODO pytorch rank = device_id - 1
     if _use_gpu:
+        x = x.cuda(dist.get_rank())
         src_rank = device - 1
         dst_rank = dist.get_rank()
         group = _groups[tuple(sorted((src_rank, dst_rank)))]
@@ -81,6 +85,8 @@ def _recv(shape=None, device=None):
 def _relu_grad(x, dy):
     # TODO: fix
     dx = torch.zeros(dy.shape)
+    if _use_gpu:
+        dx = dx.cuda(dist.get_rank())
     dx[dy > 0] = 1
     return dx
 
@@ -187,9 +193,8 @@ def run_process(world_size, io_dir, num_warmup_steps, num_repetitions, rank, fn)
     if _use_gpu:
         # Move module and inputs to GPU
         # TODO how to move interpreted non-module code to GPU?
-        # module.to(rank)
-        for t in per_rank_inputs:
-            t.to(rank)
+        # module = module.cuda(rank)
+        per_rank_inputs = [t.cuda(rank) for t in per_rank_inputs]
 
     events = []
 
@@ -208,6 +213,10 @@ def run_process(world_size, io_dir, num_warmup_steps, num_repetitions, rank, fn)
         if world_size > 1:
             torch.distributed.barrier()
         add_event()
+
+    if _use_gpu:
+        # Move outputs back to cpu
+        res = [t.cpu() for t in res]
 
     torch.save(res, os.path.join(io_dir.name, f"out.{rank}.pt"))
 

@@ -142,9 +142,9 @@ def test_owt(num_devices, num_layers):
 
 
 def test_mlp_grid_search():
-    batch_size = 64
-    hidden_dim = 64
-    num_layers = 2
+    batch_size = 2 ** 10
+    hidden_dim = batch_size
+    num_layers = 8
     world_size = 2
 
     topology = Topology()
@@ -184,8 +184,11 @@ def test_mlp_grid_search():
         # TODO check outputs match?
         _, runtimes = run_pytorch(world_size, fn, dist_input_data)
         actual_time = max(np.median(times) for times in runtimes)
+        # actual_time = 0.0
 
         print(fn.name, simulated_time, actual_time)
+        print(*(v.type.shape for v in fn.inputs))
+    print(len(dist_mlp_fns))
 
 
 def test_empty_device():
@@ -269,6 +272,8 @@ if __name__ == "__main__":
     # test_send_recv()
     # test_empty_device()
 
-    # import logging
+    import logging
+    import os
+
     # logging.basicConfig(level=logging.INFO)
     test_mlp_grid_search()

@@ -118,6 +118,40 @@ _op_to_torch = {
     "MPIAllreduce": _allreduce,
 }
 
+# Some mock communication ops that return zero tensors of appropriate shape
+# to be used in the sequential runner for debugging
+
+_mock_world_size = None
+
+
+def _mock_allgather(x_i, dim=0):
+    xs = [torch.zeros_like(x_i) for _ in range(_mock_world_size)]
+    x = torch.cat(xs, dim=dim)
+    return x
+
+
+def _mock_allreduce(x):
+    return x
+
+
+def _mock_recv(shape=None, device=None):
+    x = torch.zeros(shape)
+    return x
+
+
+def _mock_send(x, device=None):
+    pass
+
+
+_mock_comm_ops = {
+    "RecvP2P": _mock_recv,
+    "SendP2P": _mock_send,
+    "MPIAllgather": _mock_allgather,
+    "MPIAllreduce": _mock_allreduce,
+}
+
+_mock_op_to_torch = {**_op_to_torch, **_mock_comm_ops}
+
 
 def function_to_module(fn: Function) -> torch.nn.Module:
     g = fx.Graph()
@@ -146,7 +180,8 @@ def function_to_module(fn: Function) -> torch.nn.Module:
     return fx.GraphModule({}, g)
 
 
-def run_function(rank, fn: Function, inputs: List[Any]):
+def run_function(rank, fn: Function, inputs: List[Any], debug_mock=False):
+    op_to_torch = _mock_op_to_torch if debug_mock else _op_to_torch
     value_map = {}
 
     # Add inputs to value_map
@@ -164,7 +199,7 @@ def run_function(rank, fn: Function, inputs: List[Any]):
         logging.info(f"{rank}: {first_output} {op.op_type}")
         inputs = tuple(value_map[v] for v in op.inputs)
         kwargs = {} if op.attributes is None else {**op.attributes}
-        output = _op_to_torch[op.op_type](*inputs, **kwargs)
+        output = op_to_torch[op.op_type](*inputs, **kwargs)
         if len(op.outputs) > 1:
             assert isinstance(output, tuple)
             for i, v in enumerate(op.outputs):
@@ -232,6 +267,29 @@ def run_process(world_size, io_dir, num_warmup_steps, num_repetitions, rank, fn)
     return runtimes[num_warmup_steps:]
 
 
+def run_mock_multiprocess(
+    per_rank_functions: Tuple[Function],
+    per_rank_inputs: Tuple[Any],
+    num_repetitions=1,
+    num_warmup=0,
+):
+    assert len(per_rank_functions) == len(per_rank_inputs)
+    global _mock_world_size
+    _mock_world_size = len(per_rank_functions)
+
+    per_rank_outputs = [
+        run_function(rank, fn, inputs, debug_mock=True)
+        for rank, fn, inputs in zip(
+            range(_mock_world_size), per_rank_functions, per_rank_inputs
+        )
+    ]
+    mock_runtimes = [
+        [0.0 for _ in range(num_warmup + num_repetitions)]
+        for _ in range(_mock_world_size)
+    ]
+    return (per_rank_outputs, mock_runtimes)
+
+
 def run_multiprocesses(
     per_rank_functions: Tuple[Function],
     per_rank_inputs: Tuple[Any],
@@ -264,7 +322,7 @@ def run_multiprocesses(
     return per_rank_outputs, runtimes
 
 
-def run_pytorch(num_devices, fn, inputs, use_gpu=False):
+def run_pytorch(num_devices, fn, inputs, use_gpu=False, debug_mock=False):
     """Project `fn` and run on `inputs` over `num_devices` devices using the
     PyTorch backend.
     """
@@ -274,13 +332,20 @@ def run_pytorch(num_devices, fn, inputs, use_gpu=False):
     global _use_gpu
     _use_gpu = use_gpu
 
-    per_rank_fns = project(fn, tuple(v.type for v in fn.inputs), num_devices)
     # from ..ir import cpprint
-    # for per_rank_fn in per_rank_fns:
-    #     cpprint(per_rank_fn)
+    # print(*(x.shape for x in inputs))
+    # cpprint(fn)
+
+    per_rank_fns = project(fn, tuple(v.type for v in fn.inputs), num_devices)
 
     per_rank_inputs = [[] for _ in range(num_devices)]
     for v, a in zip(fn.inputs, inputs):
         per_rank_inputs[v.type.device.device_id - 1].append(a)
+    # for xs, per_rank_fn in zip(per_rank_inputs, per_rank_fns):
+    #     print(*(x.shape for x in xs))
+    #     cpprint(per_rank_fn)
 
-    return run_multiprocesses(per_rank_fns, per_rank_inputs)
+    if debug_mock:
+        return run_mock_multiprocess(per_rank_fns, per_rank_inputs)
+    else:
+        return run_multiprocesses(per_rank_fns, per_rank_inputs)

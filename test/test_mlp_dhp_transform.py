@@ -88,11 +88,12 @@ def add_devices_to_topology(topology, num_devices):
 
 
 def _verify_no_hp(outputs, transformed_outputs, dp=False):
-    for output, transformed_output in zip(outputs, transformed_outputs):
-        if dp:
-            np.testing.assert_array_almost_equal(output, transformed_output[0])
+    for i in range(len(outputs)):
+        if not dp:
+            j = i
         else:
-            np.testing.assert_array_almost_equal(output, transformed_output)
+            j = 2 * i
+        np.testing.assert_array_almost_equal(outputs[i], transformed_outputs[j])
 
 
 def _verify_hp(function, transformed_function, outputs, transformed_outputs, dp=False):
@@ -105,10 +106,7 @@ def _verify_hp(function, transformed_function, outputs, transformed_outputs, dp=
         match = re.search(f"(.*)_dp_(.*)_hp_(.*)_pp_(.*){device_suffix}", output.name)
         assert match is not None
         key = (match.group(1), match.group(2), match.group(4))
-        if dp:
-            aggregated_outputs[key].append(v[0])
-        else:
-            aggregated_outputs[key].append(v)
+        aggregated_outputs[key].append(v)
     for key in aggregated_outputs:
         output_name = key[0]
         if "dw" in output_name:

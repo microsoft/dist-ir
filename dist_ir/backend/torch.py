@@ -310,7 +310,8 @@ def run_multiprocesses(
     per_rank_runner = partial(
         run_process, world_size, io_dir, num_warmup, num_repetitions
     )
-    with torch.multiprocessing.Pool(world_size) as p:
+    ctx = torch.multiprocessing.get_context("spawn")
+    with ctx.Pool(world_size) as p:
         runtimes = p.starmap(per_rank_runner, enumerate(per_rank_functions))
 
     # Load outputs:

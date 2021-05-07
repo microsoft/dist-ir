@@ -286,22 +286,22 @@ _op_to_torch = {
 _mock_world_size = None
 
 
-def _mock_allgather(x_i, dim=0):
+def _mock_allgather(x_i, dim=0, ctx=None):
     xs = [torch.zeros_like(x_i) for _ in range(_mock_world_size)]
     x = torch.cat(xs, dim=dim)
     return x
 
 
-def _mock_allreduce(x):
+def _mock_allreduce(x, ctx=None):
     return x
 
 
-def _mock_recv(shape=None, device=None):
+def _mock_recv(shape=None, device=None, ctx=None):
     x = torch.zeros(shape)
     return x
 
 
-def _mock_send(x, device=None):
+def _mock_send(x, device=None, ctx=None):
     pass
 
 
@@ -448,9 +448,10 @@ def run_mock_multiprocess(
     assert len(per_rank_functions) == len(per_rank_inputs)
     global _mock_world_size
     _mock_world_size = len(per_rank_functions)
+    ctx = DistributedContext(use_gpu=False, groups=None)
 
     per_rank_outputs = [
-        run_function(rank, fn, inputs, debug_mock=True)
+        run_function(ctx, rank, fn, inputs, debug_mock=True)
         for rank, fn, inputs in zip(
             range(_mock_world_size), per_rank_functions, per_rank_inputs
         )

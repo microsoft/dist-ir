@@ -3,7 +3,7 @@ from dist_ir.executor.type_inference import TypePropRegister
 from typing import Any, Dict, Sequence, Tuple
 
 from ..ir import Function, FunctionMaker, Device, Op, Value
-from ..ir.type import Type, Tensor
+from ..ir.type import Type, Float32, Float64, Int64, Tensor
 from .absint import AbstractState, AbstractInterpreter
 
 
@@ -16,22 +16,52 @@ class ProjectorState(AbstractState):
         self.per_rank_fns: Dict[Device, FunctionMaker] = defaultdict(FunctionMaker)
 
 
-def _get_input_devices(op: Op):
-    return list(set(x.type.device for x in op.inputs))
+# TODO should projectors just get the function instead of full state?
+def _get_input_devices(op: Op, state: ProjectorState):
+    return list(set(x.type.device for x in op.inputs if x.type.device is not None))
 
 
-# TODO should projectors just get the per_rank_fns dict instead of full state?
+def _constant_projector(op: Op, state: ProjectorState):
+    # Only add the Constant ops to devices which use the constants.
+    assert len(op.outputs) == 1
+    output = op.outputs[0]
+    input_devices = set()
+    consumers = state.function.consumers[output]
+    for consumer in state.function.consumers[output]:
+        consumer_input_devices = set(_get_input_devices(consumer, state))
+        if None in consumer_input_devices:
+            raise ValueError(
+                f"Unable to determine Constant op {op} device "
+                f"with consumers {consumers}"
+            )
+        else:
+            input_devices.update(consumer_input_devices)
+    for input_device in input_devices:
+        state.per_rank_fns[input_device].ops.append(op)
 
 
 def _identity_projector(op: Op, state: ProjectorState):
     """Projects op unchanged to its device's per-rank program.
     The inputs of op must all be on a single device.
     """
-    devices = _get_input_devices(op)
-    assert len(devices) == 1 and devices[0] is not None
-
-    state.per_rank_fns[devices[0]].ops.append(op)
-    # state.per_rank_fns[d].add_op(op.op_type, name=op.name, inputs=op.inputs, )
+    """
+    only_constant_inputs = all(
+        state.function.producers[inp].op_type == "Constant"
+        for inp in op.inputs
+        if inp in state.function.producers
+    )
+    """
+    devices = _get_input_devices(op, state)
+    if (
+        len(devices) > 1
+        or len(devices) == 0
+        or devices[0] is None
+        #and not only_constant_inputs
+    ):
+        raise ValueError(f"Op {op} has input devices {devices}")
+    else:
+        state.per_rank_fns[devices[0]].ops.append(op)
+        # state.per_rank_fns[d].add_op(op.op_type, name=op.name, inputs=op.inputs, )
 
 
 def _collective_projector(op: Op, state: ProjectorState):
@@ -68,8 +98,22 @@ def _send_projector(op: Op, state: ProjectorState):
 
 ProjectorRegister = {
     ("Add", (Tensor, Tensor)): _identity_projector,
+    ("Add", (Tensor, Float32)): _identity_projector,
+    ("Cast", (Tensor,)): _identity_projector,
+    ("Cast", (Int64,)): _identity_projector,
+    ("Cast", (Float64,)): _identity_projector,
     ("Concat", (Tensor, Tensor)): _identity_projector,
+    ("Concat", (Tensor, Tensor, Tensor)): _identity_projector,
+    ("Concat", (Tensor, Tensor, Tensor, Tensor)): _identity_projector,
+    ("Constant", ()): _constant_projector,
+    ("ConstantOfShape", (Tensor,)): _identity_projector,
+    ("Div", (Tensor, Tensor)): _identity_projector,
+    ("Div", (Tensor, Float32)): _identity_projector,
+    ("Div", (Int64, Int64)): _identity_projector,
     ("Identity", (Tensor,)): _identity_projector,
+    ("Gather", (Tensor, Tensor)): _identity_projector,
+    ("Gather", (Tensor, Int64)): _identity_projector,
+    ("Gemm", (Tensor, Tensor, Tensor)): _identity_projector,
     ("Loss", (Tensor, Tensor)): _identity_projector,
     ("LossGrad", (Tensor, Tensor)): _identity_projector,
     ("MatMul", (Tensor, Tensor)): _identity_projector,
@@ -82,9 +126,29 @@ ProjectorRegister = {
     ("MPIAllreduce", (Tensor,) * 4): _collective_projector,
     ("MPIAllreduce", (Tensor,) * 8): _collective_projector,
     ("MPIAllreduce", (Tensor,) * 16): _collective_projector,
+    ("Mul", (Tensor, Tensor)): _identity_projector,
+    ("Mul", (Tensor, Float32)): _identity_projector,
+    ("Mul", (Int64, Int64)): _identity_projector,
+    ("NonZero", (Tensor,)): _identity_projector,
+    ("Pow", (Tensor, Float32)): _identity_projector,
+    ("ReduceMean", (Tensor,)): _identity_projector,
     ("Relu", (Tensor,)): _identity_projector,
     ("ReluGrad", (Tensor, Tensor)): _identity_projector,
+    ("Reshape", (Tensor, Tensor)): _identity_projector,
+    ("Shape", (Tensor,)): _identity_projector,
     ("Send", (Tensor,)): _send_projector,
+    ("Slice", (Tensor, Tensor, Tensor, Tensor, Int64)): _identity_projector,
+    ("Softmax", (Tensor,)): _identity_projector,
+    ("Split", (Tensor,)): _identity_projector,
+    ("Squeeze", (Tensor,)): _identity_projector,
+    ("Sqrt", (Tensor,)): _identity_projector,
+    ("Sub", (Tensor, Tensor)): _identity_projector,
+    ("Sub", (Int64, Int64)): _identity_projector,
+    ("Sub", (Float32, Tensor)): _identity_projector,
+    ("Tanh", (Tensor,)): _identity_projector,
+    ("Transpose", (Tensor,)): _identity_projector,
+    ("Unsqueeze", (Tensor,)): _identity_projector,
+    ("Unsqueeze", (Int64,)): _identity_projector,
 }
 
 
@@ -119,14 +183,39 @@ def _create_semantics(type_prop_register, projector_register):
     }
 
 
+def _create_post_type_inference_semantics(projector_register):
+    """Creates a semantics for AbstractInterpreter using a register of
+    projector functions.
+    """
+
+    def convert_impl(projector):
+        def semantics(op: Op, state: AbstractState):
+            for output in op.outputs:
+                state.env[output] = output.type
+
+            # Project op and add to appropriate per-rank function
+            projector(op, state)
+
+        return semantics
+
+    signatures = projector_register.keys()
+
+    return {f: convert_impl(projector_register[f]) for f in signatures}
+
+
 Projector = AbstractInterpreter(
     AbstractState=ProjectorState,
     semantics=_create_semantics(TypePropRegister, ProjectorRegister),
 )
 
+PostTypeInferenceProjector = AbstractInterpreter(
+    AbstractState=ProjectorState,
+    semantics=_create_post_type_inference_semantics(ProjectorRegister),
+)
+
 
 def project(
-    fn: Function, input_types: Sequence[Type], num_devices: int
+    fn: Function, input_types: Sequence[Type], num_devices: int, run_type_inference=True
 ) -> Tuple[Function]:
     """Project fn to a sequence of per-rank functions."""
     state = ProjectorState(fn, input_types)
@@ -135,7 +224,10 @@ def project(
     for v in fn.inputs:
         state.per_rank_fns[v.type.device].inputs.append(v)
 
-    state = Projector.interpret(fn, input_types, state=state)
+    if run_type_inference:
+        state = Projector.interpret(fn, input_types, state=state)
+    else:
+        state = PostTypeInferenceProjector.interpret(fn, input_types, state=state)
 
     # Erase all types in per_rank_fns:
     # TODO do this during projection?

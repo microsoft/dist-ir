@@ -103,7 +103,7 @@ class SequentialExecutor:
                         f"Op {op} has inputs from devices {set(input_devices)}!"
                     )
                 elif len(input_device_set) == 1:
-                    output_devices = [input_devices[0] for _ in range(len(op.outputs))]
+                    output_devices = [list(input_device_set)[0] for _ in range(len(op.outputs))]
                 else:
                     output_devices = [None]
             for output, device in zip(op.outputs, output_devices):
@@ -113,11 +113,11 @@ class SequentialExecutor:
         type_map = {}
         for key, value in state.env.items():
             if isinstance(value, np.int64):
-                type_map[key] = Int64()
+                type_map[key] = Int64(device=device_map[key])
             elif isinstance(value, np.float32):
-                type_map[key] = Float32()
+                type_map[key] = Float32(device=device_map[key])
             elif isinstance(value, np.float64):
-                type_map[key] = Float64()
+                type_map[key] = Float64(device=device_map[key])
             elif isinstance(value, np.ndarray):
                 dtype = _numpy_dtype_to_dist_ir_dtype(value.dtype)
                 type_map[key] = Tensor(

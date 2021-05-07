@@ -25,10 +25,12 @@ class Function:
 
     # Map from Value -> List of Ops that consume it
     consumers: Dict[Value, Tuple[Op]] = field(init=False)
+    # Map from Value -> Op that producers it
+    producers: Dict[Value, Op] = field(init=False)
 
     def __post_init__(self):
-        """Creates the consumers map, verifies the function, and performs
-        type inference. This is called automatically at initialization.
+        """Creates the consumers and producers maps, verifies the function,
+        and performs type inference. This is called automatically at initialization.
         """
         consumers = defaultdict(list)
         for op in self.ops:
@@ -38,8 +40,13 @@ class Function:
                 consumers[out_edge] = []
         for v in consumers:
             consumers[v] = tuple(consumers[v])
+        producers = {}
+        for op in self.ops:
+            for out_edge in op.outputs:
+                producers[out_edge] = op
         # Can't assign to frozen field:
         object.__setattr__(self, "consumers", frozendict(consumers))
+        object.__setattr__(self, "producers", frozendict(producers))
 
         # Check that ops don't use values from the future
         self._verify_ops_in_topological_order()

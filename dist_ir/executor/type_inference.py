@@ -34,6 +34,17 @@ def _raise_type_error(op, *args):
 # TODO update the below prop functions to be as robust as _allreduce_prop_fn
 
 
+def _get_dist_ir_dtype_from_numpy_dtype(numpy_dtype):
+    if numpy_dtype == np.int32:
+        return Int32()
+    elif numpy_dtype == np.int64:
+        return Int64()
+    elif numpy_dtype == np.float32:
+        return Float32()
+    else:
+        raise NotImplementedError(f"Unsupported numpy dtype {numpy_dtype}")
+
+
 def _cast_prop_fn(op, x):
     proto_dtype = op.attributes["to"]
     dtype = {
@@ -64,7 +75,19 @@ def _concat_prop_fn(op, x, y):
 
 
 def _constant_prop_fn(op):
-    return op.attributes["value"]
+    if isinstance(op.attributes["value"], np.ndarray):
+        return Tensor(
+            shape=op.attributes["value"].shape,
+            device=None,
+            dtype=_get_dist_ir_dtype_from_numpy_dtype(op.attributes["value"].dtype),
+        )
+    else:
+        return _get_dist_ir_dtype_from_numpy_dtype(op.attributes["value"].dtype)
+
+
+def _constant_of_shape_prop_fn(op, x):
+    # TODO: Fix so that x is a constant
+    return Tensor(shape=x.shape, device=x.device, dtype=Int32())
 
 
 def _dropout_prop_fn(op, x, y, z):
@@ -77,11 +100,24 @@ def _elementwise_tensor_op_prop_fn(op, x, y):
         isinstance(x, Tensor)
         and isinstance(y, Tensor)
         and x.dtype == y.dtype
-        and x.shape == y.shape
         and x.device == y.device
     ):
         _raise_type_error(op, x, y)
-    return x
+    shape = []
+    for i in range(max(len(x.shape), len(y.shape))):
+        x_idx = len(x.shape) - 1 - i
+        y_idx = len(y.shape) - 1 - i
+        if x_idx >= 0 and y_idx < 0:
+            shape.insert(0, x.shape[x_idx])
+        elif x_idx < 0 and y_idx >= 0:
+            shape.insert(0, y.shape[y_idx])
+        elif x.shape[x_idx] >= 1 and y.shape[y_idx] == 1:
+            shape.insert(0, x.shape[x_idx])
+        elif x.shape[x_idx] == 1 and y.shape[y_idx] >= 1:
+            shape.insert(0, y.shape[y_idx])
+        else:
+            _raise_type_error(op, x, y)
+    return Tensor(shape=tuple(shape), dtype=x.dtype, device=x.device)
 
 
 def _expand_prop_fn(op, x, y):
@@ -91,12 +127,28 @@ def _expand_prop_fn(op, x, y):
 
 def _gather_prop_fn(op, x, y):
     # TODO: Compute the new shape directly instead of using numpy
-    if not (isinstance(x, Tensor) and x.shape is not None):
+    # TODO: Fix so that y is a constant
+    if not (
+        isinstance(x, Tensor)
+        and x.shape is not None
+        and isinstance(y, Tensor)
+        and y.shape is not None
+    ):
         _raise_type_error(op, x, y)
+    if x.device is None and y.device is None:
+        _raise_type_error(op, x, y)
+    elif x.device is not None and y.device is None:
+        device = x.device
+    elif x.device is None and y.device is not None:
+        device = y.device
+    else:
+        if x.device != y.device:
+            _raise_type_error(op, x, y)
+        device = x.device
     temp = np.zeros(x.shape)
     axis = op.attributes["axis"]
-    new_shape = np.take(temp, y, axis=axis).shape
-    return Tensor(dtype=x.dtype, shape=new_shape, device=x.device)
+    new_shape = np.take(temp, y.shape, axis=axis).shape
+    return Tensor(dtype=x.dtype, shape=new_shape, device=device)
 
 
 def _identity_prop_fn(op, x):
@@ -173,6 +225,11 @@ def _min_prop_fn(op, x, y):
         and x.device == y.device
     ):
         _raise_type_error(op, x, y)
+    return x
+
+
+def _nonzero_prop_fn(op, x):
+    # TODO: Make x a constant
     return x
 
 
@@ -439,9 +496,21 @@ def _split_v2_prop_fn(op, x):
 
 def _transpose_prop_fn(op, x):
     # TODO: Support transpose of tensors with > 2 dimensions
-    if not (isinstance(x, Tensor) and len(x.shape) == 2):
+    if not (isinstance(x, Tensor)):
         _raise_type_error(op, x)
-    return Tensor(dtype=x.dtype, shape=x.shape[::-1], device=x.device)
+    if "perm" in op.attributes:
+        perm = op.attributes["perm"]
+        if len(perm) != len(x.shape):
+            _raise_type_error(op, x)
+    else:
+        if len(x.shape) != 2:
+            _raise_type_error(op, x)
+        else:
+            perm = (1, 0)
+    new_shape = []
+    for idx in perm:
+        new_shape.append(x.shape[idx])
+    return Tensor(dtype=x.dtype, shape=tuple(new_shape), device=x.device)
 
 
 def _unsqueeze_prop_fn(op, x):
@@ -463,10 +532,11 @@ TypePropRegister = {
     # ("Concat", (TupleType,)): _concat_prop_fn,
     ("Concat", (Tensor, Tensor)): _concat_prop_fn,
     ("Constant", ()): _constant_prop_fn,
+    ("ConstantOfShape", (Tensor,)): _constant_of_shape_prop_fn,
+    ("Div", (Tensor, Tensor)): _elementwise_tensor_op_prop_fn,
     ("Dropout", (Tensor, Tensor, type(Bool()))): _dropout_prop_fn,
     ("Expand", (Tensor, Tensor)): _expand_prop_fn,
     ("Gather", (Tensor, Tensor)): _gather_prop_fn,
-    ("Gather", (Tensor, np.ndarray)): _gather_prop_fn,
     ("Identity", (Tensor,)): _identity_prop_fn,
     (
         "Join",
@@ -553,6 +623,7 @@ TypePropRegister = {
     ("MatMul", (Tensor, Tensor)): _matmul_prop_fn,
     ("MatMulGrad", (Tensor, Tensor, Tensor)): _matmul_grad_prop_fn,
     ("Min", (Tensor, Tensor)): _min_prop_fn,
+    ("NonZero", (Tensor,)): _nonzero_prop_fn,
     ("Relu", (Tensor,)): _relu_prop_fn,
     ("ReluGrad", (Tensor, Tensor)): _relu_grad_prop_fn,
     ("Reshape", (Tensor, Tensor)): _reshape_prop_fn,
@@ -563,6 +634,7 @@ TypePropRegister = {
     ("Split_v2", (Tensor,)): _split_v2_prop_fn,
     # ("Shape", (Tensor,)): TODO
     ("Slice", (Tensor, Tensor, Tensor, Tensor)): _slice_prop_fn,
+    ("Sub", (Tensor, Tensor)): _elementwise_tensor_op_prop_fn,
     ("Transpose", (Tensor,)): _transpose_prop_fn,
     ("Unsqueeze", (Tensor,)): _unsqueeze_prop_fn,
 }

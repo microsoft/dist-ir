@@ -24,7 +24,7 @@ class Type:
         return set()
 
 
-@singleton
+#@singleton
 class Int32(Type):
     """The 32-bit integer type. A singleton class."""
 
@@ -36,7 +36,7 @@ class Int32(Type):
         return 4
 
 
-@singleton
+#@singleton
 class Int64(Type):
     """The 64-bit integer type. A singleton class."""
 
@@ -48,7 +48,7 @@ class Int64(Type):
         return 8
 
 
-@singleton
+#@singleton
 class Float16(Type):
     """The 16-bit float type. A singleton class."""
 
@@ -60,7 +60,7 @@ class Float16(Type):
         return 2
 
 
-@singleton
+#@singleton
 class Float32(Type):
     """The 32-bit float type. A singleton class."""
 
@@ -72,7 +72,7 @@ class Float32(Type):
         return 4
 
 
-@singleton
+#@singleton
 class Float64(Type):
     """The 64-bit float type. A singleton class."""
 
@@ -84,7 +84,7 @@ class Float64(Type):
         return 8
 
 
-@singleton
+#@singleton
 class Bool(Type):
     """The boolean type. A singleton class."""
 

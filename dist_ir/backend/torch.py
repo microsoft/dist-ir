@@ -1,6 +1,7 @@
 from functools import partial
 from itertools import combinations
 import logging
+import numpy as np
 from operator import getitem
 import os
 from tempfile import TemporaryDirectory
@@ -48,8 +49,50 @@ def _allreduce(x):
     return x
 
 
-def _concat2(x, y, axis=None):
-    return torch.cat((x, y), dim=axis)
+def _cast(x, to):
+    if to == 1:
+        return x.float32()
+    elif to == 6:
+        return x.int32()
+    elif to == 7:
+        return x.long()
+    elif to == 9:
+        return x.bool()
+    else:
+        raise NotImplementedError()
+
+
+def _concat2(*args, axis=None):
+    return torch.cat(args, dim=axis)
+
+
+def _constant(value):
+    output = torch.tensor(value)
+    if output.shape == (1,):
+        return output[0]
+    return output
+
+
+def _constant_of_shape(x, value=0):
+    # TODO: Check if value is a single value or array?
+    return torch.full(tuple(x.int().numpy()), value[0])
+
+
+def _gather(x, y, axis=0):
+    # TODO: Find the best Torch equivalent for this
+    # torch.gather and torch.index_select do not work
+    output = torch.tensor(np.take(x.numpy(), y.numpy(), axis=axis))
+    if output.shape == (1,):
+        return output[0]
+    return output
+
+
+def _gemm(x, y, z, alpha, beta, transA=0, transB=0):
+    if transA:
+        x = x.transpose()
+    if transB:
+        y = y.transpose()
+    return torch.matmul(alpha * x, beta * y) + z
 
 
 def _identity(x):
@@ -68,6 +111,11 @@ def _matmul_grad(x, y, dz):
     return (torch.matmul(dz, y.T), torch.matmul(x.T, dz))
 
 
+def _nonzero(x):
+    # Torch nonzero returns a shape of (n, 1) instead of (1, n)
+    return torch.nonzero(x).transpose(1, 0)
+
+
 def _recv(shape=None, device=None):
     x = torch.zeros(shape)
     # TODO pytorch rank = device_id - 1
@@ -82,6 +130,10 @@ def _recv(shape=None, device=None):
     return x
 
 
+def _reduce_mean(x, axes, keepdims=1):
+    return torch.mean(x, dim=axes, keepdim=bool(keepdims))
+
+
 def _relu_grad(x, dy):
     # TODO: fix
     dx = torch.zeros(dy.shape)
@@ -89,6 +141,10 @@ def _relu_grad(x, dy):
         dx = dx.cuda(dist.get_rank())
     dx[dy > 0] = 1
     return dx
+
+
+def _reshape(x, y):
+    return torch.reshape(x, tuple(y))
 
 
 def _send(x, device=None):
@@ -102,20 +158,87 @@ def _send(x, device=None):
         dist.send(x, device - 1)
 
 
+def _shape(x):
+    return torch.tensor(x.shape)
+
+
+def _slice(x, starts, ends, axes, steps=None):
+    # TODO: Find the best PyTorch equivalent for this
+    starts = [v.item() for v in list(starts)]
+    ends = [v.item() for v in list(ends)]
+    axes = [v.item() for v in list(axes)]
+    if steps is None:
+        steps = [1] * len(starts)
+    elif steps.shape == ():
+        steps = [steps.item()] * len(starts)
+    else:
+        assert len(steps) == len(starts)
+    slices = {
+        axis: slice(s, e, step) for (s, e, axis, step) in zip(starts, ends, axes, steps)
+    }
+    slices = tuple(slices.get(d, slice(None)) for d in range(x.ndim))
+    return x[slices]
+
+def _softmax(x, axis):
+    exp = torch.exp(x)
+    return exp / torch.sum(exp, dim=axis, keepdim=True)
+
+def _split(x, axis, split):
+    return torch.split(x, split, axis)
+
+
+def _squeeze(x, axes=None):
+    if axes:
+        return torch.squeeze(x, dim=axes[0])
+    else:
+        return torch.squeeze(x)
+
+
+def _transpose(x, perm):
+    return x.permute(perm)
+
+
+def _unsqueeze(x, axes):
+    for dim in axes[::-1]:
+        x = torch.unsqueeze(x, dim=dim)
+    return x
+
+
 _op_to_torch = {
     "Add": torch.add,
+    "Cast": _cast,
     "Concat": _concat2,
+    "Constant": _constant,
+    "ConstantOfShape": _constant_of_shape,
+    "Div": torch.div,
+    "Gather": _gather,
+    "Gemm": _gemm,
     "Identity": _identity,
     "Loss": _loss,
     "LossGrad": _loss_grad,
     "MatMul": torch.matmul,
     "MatMulGrad": _matmul_grad,
-    "RecvP2P": _recv,
-    "Relu": torch.relu,
-    "ReluGrad": _relu_grad,
-    "SendP2P": _send,
     "MPIAllgather": _allgather,
     "MPIAllreduce": _allreduce,
+    "Mul": torch.mul,
+    "NonZero": _nonzero,
+    "Pow": torch.pow,
+    "RecvP2P": _recv,
+    "ReduceMean": _reduce_mean,
+    "Relu": torch.relu,
+    "ReluGrad": _relu_grad,
+    "Reshape": _reshape,
+    "SendP2P": _send,
+    "Shape": _shape,
+    "Slice": _slice,
+    "Softmax": _softmax, 
+    "Split": _split,
+    "Sqrt": torch.sqrt,
+    "Squeeze": _squeeze,
+    "Sub": torch.sub,
+    "Tanh": torch.tanh, 
+    "Transpose": _transpose,
+    "Unsqueeze": _unsqueeze,
 }
 
 
@@ -264,7 +387,7 @@ def run_multiprocesses(
     return per_rank_outputs, runtimes
 
 
-def run_pytorch(num_devices, fn, inputs, use_gpu=False):
+def run_pytorch(num_devices, fn, inputs, use_gpu=False, run_type_inference=True):
     """Project `fn` and run on `inputs` over `num_devices` devices using the
     PyTorch backend.
     """
@@ -274,7 +397,9 @@ def run_pytorch(num_devices, fn, inputs, use_gpu=False):
     global _use_gpu
     _use_gpu = use_gpu
 
-    per_rank_fns = project(fn, tuple(v.type for v in fn.inputs), num_devices)
+    per_rank_fns = project(
+        fn, tuple(v.type for v in fn.inputs), num_devices, run_type_inference
+    )
     # from ..ir import cpprint
     # for per_rank_fn in per_rank_fns:
     #     cpprint(per_rank_fn)

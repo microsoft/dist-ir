@@ -646,7 +646,6 @@ def transpose(op, x):
 
 def unsqueeze(op, x):
     axes = op.attributes["axes"]
-    # TODO: Does this need to be in reverse order?
     for i in axes[::-1]:
         x = np.expand_dims(x, axis=i)
     return x

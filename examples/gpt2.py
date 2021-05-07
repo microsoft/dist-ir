@@ -4,6 +4,7 @@ import numpy as np
 from transformers import GPT2Tokenizer
 import torch
 
+from dist_ir.backend.torch import run_pytorch
 from dist_ir.executor import (
     CostModel,
     infer_types,
@@ -32,18 +33,12 @@ def _to_numpy(x):
 def _filter_extra_outputs(function):
     function, attribute_map = sanitize_unhashable_attributes(function)
 
-    # Map from output value to producer op.
-    producers = {}
-    for op in function.ops:
-        for output in op.outputs:
-            producers[output] = op
-
     # Map from op to set of function output values.
     sinks = defaultdict(set)
 
     # Set the sink for each output producer op to be the output.
     for output in function.outputs:
-        producer = producers[output]
+        producer = function.producers[output]
         sinks[producer] = set([output])
 
     # Incrementally propogate the set of sinks for each op by iterating through
@@ -178,20 +173,36 @@ def main(args):
     function, input_data = import_function_and_get_input_data(
         args.model_path, batch_size=args.batch_size, default_device=d0
     )
-    transformed_function, simulation = simulate(
+    ex = SequentialExecutor("numpy")
+    function = ex.infer_types(
         function,
         input_data,
-        topology,
-        args.dp_degree,
-        args.hp_degree,
-        args.pp_degree,
-        args.num_microbatches,
+        input_devices=[topology.devices[0] for _ in range(len(input_data))],
     )
+    if args.operation == "simulate":
+        transformed_function, simulation = simulate(
+            function,
+            input_data,
+            topology,
+            args.dp_degree,
+            args.hp_degree,
+            args.pp_degree,
+            args.num_microbatches,
+        )
 
-    distributed_running_time = max(
-        [simulation.timestamps[d] for d in simulation.timestamps]
-    )
-    print(f"Throughput: {args.batch_size / distributed_running_time:.2f}")
+        distributed_running_time = max(
+            [simulation.timestamps[d] for d in simulation.timestamps]
+        )
+        print(
+            f"Throughput: {args.batch_size / distributed_running_time:.2f} "
+            f"samples/second"
+        )
+    elif args.operation == "pytorch":
+        input_data = [torch.tensor(x) for x in input_data]
+        per_rank_outputs, runtimes = run_pytorch(
+            1, function, input_data, use_gpu=False, run_type_inference=False
+        )
+        print(f"Throughput: {args.batch_size / max(runtimes[0]):.2f} samples/second")
 
 
 if __name__ == "__main__":
@@ -211,6 +222,13 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-k", "--num_microbatches", type=int, default=1, help="Num microbatches"
+    )
+    parser.add_argument(
+        "-o",
+        "--operation",
+        choices=["simulate", "pytorch"],
+        default="simulate",
+        help="Operation to run",
     )
     args = parser.parse_args()
     main(args)

@@ -5,7 +5,7 @@ from operator import getitem
 import os
 from tempfile import TemporaryDirectory
 from time import perf_counter
-from typing import Any, List, Tuple
+from typing import Any, Dict, List, NamedTuple, Tuple
 
 import torch
 import torch.distributed as dist
@@ -14,28 +14,34 @@ from torch import fx
 from ..executor.rank_projector import project
 from ..ir import Function
 
-_use_gpu = False
-_groups = None
+
+DistributedContext = NamedTuple(
+    "DistributedContext", use_gpu=bool, groups=Dict[Tuple[int, int], Any]  # Any->Group
+)
 
 
-def _init_p2p_groups():
+def _init_distributed_context(use_gpu):
     """Since torch.distributed's NCCL backed doesn't support P2P communication,
     we create a group for each pair of ranks and use broadcasts to emulate P2P
     send/recv. This method initializes the groups.
     """
-    global _use_gpu, _groups
-    if _use_gpu:
+    groups = {}
+    if use_gpu:
         world_size = dist.get_world_size()
-        _groups = {}
         for i, j in combinations(range(world_size), 2):
-            _groups[i, j] = dist.new_group([i, j])
+            groups[i, j] = dist.new_group([i, j])
+    return DistributedContext(use_gpu=use_gpu, groups=groups)
+
+
+def _add(x, y, ctx=None):
+    return torch.add(x, y)
 
 
 # TODO kwargs of these functions are required, enforce this somewhere
-def _allgather(x_i, dim=0):
+def _allgather(x_i, dim=0, ctx=None):
     world_size = dist.get_world_size()
     xs = [torch.zeros_like(x_i) for _ in range(world_size)]
-    if _use_gpu:
+    if ctx.use_gpu:
         xs = [x.cuda(dist.get_rank()) for x in xs]
 
     dist.all_gather(xs, x_i)
@@ -43,75 +49,82 @@ def _allgather(x_i, dim=0):
     return x
 
 
-def _allreduce(x):
+def _allreduce(x, ctx=None):
     dist.all_reduce(x)
     return x
 
 
-def _concat2(x, y, dim=None):
+def _concat2(x, y, dim=None, ctx=None):
     return torch.cat((x, y), dim=dim)
 
 
-def _identity(x):
+def _identity(x, ctx=None):
     return x
 
 
-def _loss(x, y, N=None):
+def _loss(x, y, N=None, ctx=None):
     return torch.square(x - y) / N
 
 
-def _loss_grad(x, y, N=None):
+def _loss_grad(x, y, N=None, ctx=None):
     return 2 * (x - y) / N
 
 
-def _matmul_grad(x, y, dz):
+def _matmul(x, y, ctx=None):
+    return torch.matmul(x, y)
+
+
+def _matmul_grad(x, y, dz, ctx=None):
     return (torch.matmul(dz, y.T), torch.matmul(x.T, dz))
 
 
-def _recv(shape=None, device=None):
+def _recv(shape=None, device=None, ctx=None):
     x = torch.zeros(shape)
     # TODO pytorch rank = device_id - 1
-    if _use_gpu:
+    if ctx.use_gpu:
         x = x.cuda(dist.get_rank())
         src_rank = device - 1
         dst_rank = dist.get_rank()
-        group = _groups[tuple(sorted((src_rank, dst_rank)))]
+        group = ctx.groups[tuple(sorted((src_rank, dst_rank)))]
         dist.broadcast(x, src_rank, group=group)
     else:
         dist.recv(x, device - 1)
     return x
 
 
-def _relu_grad(x, dy):
-    # TODO: fix
-    dx = torch.zeros(dy.shape)
-    if _use_gpu:
-        dx = dx.cuda(dist.get_rank())
-    dx[dy > 0] = 1
+def _relu(x, ctx=None):
+    return torch.relu(x)
+
+
+def _relu_grad(x, dy, ctx=None):
+    dx = dy.clone()
+    dx[x <= 0] = 0
     return dx
 
 
-def _send(x, device=None):
+def _send(x, device=None, ctx=None):
     # TODO pytorch rank = device_id - 1
-    if _use_gpu:
+    if ctx.use_gpu:
         src_rank = dist.get_rank()
         dst_rank = device - 1
-        group = _groups[tuple(sorted((src_rank, dst_rank)))]
+        group = ctx.groups[tuple(sorted((src_rank, dst_rank)))]
         dist.broadcast(x, src_rank, group=group)
     else:
         dist.send(x, device - 1)
+    # Note: in a proper backend, might want to concatenate multiple tensors into
+    # a single buffer and call a single send op
 
 
 _op_to_torch = {
-    "Add": torch.add,
+    "Add": _add,
     "Concat": _concat2,
     "Identity": _identity,
     "Loss": _loss,
     "LossGrad": _loss_grad,
-    "MatMul": torch.matmul,
+    "MatMul": _matmul,
     "MatMulGrad": _matmul_grad,
     "RecvP2P": _recv,
-    "Relu": torch.relu,
+    "Relu": _relu,
     "ReluGrad": _relu_grad,
     "SendP2P": _send,
     "MPIAllgather": _allgather,
@@ -180,7 +193,14 @@ def function_to_module(fn: Function) -> torch.nn.Module:
     return fx.GraphModule({}, g)
 
 
-def run_function(rank, fn: Function, inputs: List[Any], debug_mock=False):
+def run_function(
+    ctx: DistributedContext,
+    rank: int,
+    fn: Function,
+    inputs: List[Any],
+    debug_mock=False,
+):
+    # TODO free values when no longer needed
     op_to_torch = _mock_op_to_torch if debug_mock else _op_to_torch
     value_map = {}
 
@@ -199,6 +219,7 @@ def run_function(rank, fn: Function, inputs: List[Any], debug_mock=False):
         logging.info(f"{rank}: {first_output} {op.op_type}")
         inputs = tuple(value_map[v] for v in op.inputs)
         kwargs = {} if op.attributes is None else {**op.attributes}
+        kwargs["ctx"] = ctx
         output = op_to_torch[op.op_type](*inputs, **kwargs)
         if len(op.outputs) > 1:
             assert isinstance(output, tuple)
@@ -212,20 +233,22 @@ def run_function(rank, fn: Function, inputs: List[Any], debug_mock=False):
     return tuple(value_map[v] for v in fn.outputs)
 
 
-def run_process(world_size, io_dir, num_warmup_steps, num_repetitions, rank, fn):
+def run_process(
+    use_gpu, world_size, io_dir, num_warmup_steps, num_repetitions, rank, fn
+):
     """The Python function on rank `rank` that runs module `module`."""
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = "29500"
-    backend = "nccl" if _use_gpu else "gloo"
+    backend = "nccl" if use_gpu else "gloo"
     dist.init_process_group(backend, rank=rank, world_size=world_size)
-    _init_p2p_groups()
+    ctx = _init_distributed_context(use_gpu)
 
     per_rank_inputs = torch.load(os.path.join(io_dir.name, f"in.{rank}.pt"))
 
     # # Convert per-rank DistIR function to torch.nn.Module:
     # module = function_to_module(fn)
 
-    if _use_gpu:
+    if use_gpu:
         # Move module and inputs to GPU
         # TODO how to move interpreted non-module code to GPU?
         # module = module.cuda(rank)
@@ -234,7 +257,7 @@ def run_process(world_size, io_dir, num_warmup_steps, num_repetitions, rank, fn)
     events = []
 
     def add_event():
-        if _use_gpu:
+        if use_gpu:
             events.append(torch.cuda.Event(enable_timing=True))
             events[-1].record()
         else:
@@ -244,18 +267,18 @@ def run_process(world_size, io_dir, num_warmup_steps, num_repetitions, rank, fn)
     add_event()
     for _ in range(num_warmup_steps + num_repetitions):
         # res = module(*per_rank_inputs)
-        res = run_function(rank, fn, per_rank_inputs)
+        res = run_function(ctx, rank, fn, per_rank_inputs)
         if world_size > 1:
             torch.distributed.barrier()
         add_event()
 
-    if _use_gpu:
+    if use_gpu:
         # Move outputs back to cpu
         res = [t.cpu() for t in res]
 
     torch.save(res, os.path.join(io_dir.name, f"out.{rank}.pt"))
 
-    if _use_gpu:
+    if use_gpu:
         runtimes = [
             events[i].elapsed_time(events[i + 1]) / 1e3 for i in range(len(events) - 1)
         ]
@@ -293,6 +316,7 @@ def run_mock_multiprocess(
 def run_multiprocesses(
     per_rank_functions: Tuple[Function],
     per_rank_inputs: Tuple[Any],
+    use_gpu=False,
     num_repetitions=1,
     num_warmup=0,
 ):
@@ -308,7 +332,7 @@ def run_multiprocesses(
 
     global run_process
     per_rank_runner = partial(
-        run_process, world_size, io_dir, num_warmup, num_repetitions
+        run_process, use_gpu, world_size, io_dir, num_warmup, num_repetitions
     )
     ctx = torch.multiprocessing.get_context("spawn")
     with ctx.Pool(world_size) as p:
@@ -323,15 +347,20 @@ def run_multiprocesses(
     return per_rank_outputs, runtimes
 
 
-def run_pytorch(num_devices, fn, inputs, use_gpu=False, debug_mock=False):
+def run_pytorch(
+    num_devices,
+    fn,
+    inputs,
+    use_gpu=True,
+    num_repetitions=1,
+    num_warmup=0,
+    debug_mock=False,
+):
     """Project `fn` and run on `inputs` over `num_devices` devices using the
     PyTorch backend.
     """
     # TODO check that fn uses devices [0...num_devices),
     # or run through and find max device used
-
-    global _use_gpu
-    _use_gpu = use_gpu
 
     # from ..ir import cpprint
     # print(*(x.shape for x in inputs))
@@ -349,4 +378,10 @@ def run_pytorch(num_devices, fn, inputs, use_gpu=False, debug_mock=False):
     if debug_mock:
         return run_mock_multiprocess(per_rank_fns, per_rank_inputs)
     else:
-        return run_multiprocesses(per_rank_fns, per_rank_inputs)
+        return run_multiprocesses(
+            per_rank_fns,
+            per_rank_inputs,
+            use_gpu=use_gpu,
+            num_repetitions=num_repetitions,
+            num_warmup=num_warmup,
+        )

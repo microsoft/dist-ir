@@ -144,37 +144,39 @@ def test_owt(num_devices, num_layers):
 
 
 def test_mlp_grid_search():
-    batch_size = 2 ** 10
-    hidden_dim = batch_size
-    num_layers = 8
-    world_size = 2
-
-    topology = Topology()
-    d0 = topology.add_device("gpu")
-    add_devices_to_topology(topology, world_size)
-    simulator = Simulator(CostModel(topology))
-    seq_executor = SequentialExecutor("numpy")
-
-    seq_mlp = mlp(batch_size, hidden_dim, hidden_dim, hidden_dim, num_layers, d0)
-    seq_mlp = infer_types(seq_mlp, seq_mlp.inputs)
-    configs = list(
-        gen_configurations([hidden_dim], [world_size], [num_layers], [batch_size])
-    )
-    dist_mlp_fns = [
-        mlp_dist(seq_mlp, d, h, p, m, topology) for (_, _, _, d, h, p, m) in configs
-    ]
-    print(len(dist_mlp_fns))
-
-    # Create random input data
-    input_data = tuple(
-        np.random.randn(*v.type.shape).astype(np.float32) for v in seq_mlp.inputs
-    )
+    # batch_sizes = [2 ** i for i in range(10, 15)]
+    # hidden_dims = [2 ** i for i in range(8, 13)]
+    batch_sizes = [2 ** 10]
+    hidden_dims = [2 ** 10]
+    world_sizes = [2, 4]
+    all_num_layers = [8, 16, 32]
 
     results = []
-    for init_fn, fn in dist_mlp_fns:
+    for (batch_size, hidden_dim, num_layers, d, h, p, m) in gen_configurations(
+        hidden_dims, world_sizes, all_num_layers, batch_sizes
+    ):
+        world_size = d * h * p
+        # TODO reuse seq_mlp
+        topology = Topology()
+        d0 = topology.add_device("gpu")
+        add_devices_to_topology(topology, world_size)
+        simulator = Simulator(CostModel(topology))
+        seq_executor = SequentialExecutor("numpy")
+        seq_mlp = mlp(batch_size, hidden_dim, hidden_dim, hidden_dim, num_layers, d0)
+        seq_mlp = infer_types(seq_mlp, seq_mlp.inputs)
+
+        # Create random input data
+        input_data = tuple(
+            np.random.randn(*v.type.shape).astype(np.float32) for v in seq_mlp.inputs
+        )
+
+        init_fn, fn = mlp_dist(seq_mlp, d, h, p, m, topology)
+        print(fn.name)
+
         # Simulate
         simulation = simulator.interpret(fn, (v.type for v in fn.inputs))
         simulated_time = max([simulation.timestamps[d] for d in simulation.timestamps])
+        print(simulated_time)
 
         # Reference-execute init_fn to get inputs for fn
         dist_input_data = seq_executor.compute(init_fn, input_data)
@@ -185,7 +187,16 @@ def test_mlp_grid_search():
 
         # Measure actual execution time
         # TODO check outputs match?
-        _, runtimes = run_pytorch(world_size, fn, dist_input_data)
+        # _, runtimes = run_pytorch(world_size, fn, dist_input_data)
+        _, runtimes = run_pytorch(
+            world_size,
+            fn,
+            dist_input_data,
+            use_gpu=False,
+            num_repetitions=1,  # TODO use 100
+            num_warmup=1,
+        )
+        # TODO or median of max?
         actual_time = max(np.median(times) for times in runtimes)
 
         print(fn.name, simulated_time, actual_time)
@@ -199,8 +210,6 @@ def test_mlp_grid_search():
                 actual_time,
             )
         )
-
-    print(len(dist_mlp_fns))
 
     fieldnames = [
         "world_size",
@@ -396,7 +405,5 @@ if __name__ == "__main__":
     # test_send_recv()
     # test_empty_device()
 
-    # import logging
-    # logging.basicConfig(level=logging.INFO)
     test_mlp_grid_search()
-    plot_mlp_grid_search_results()
+    # plot_mlp_grid_search_results()

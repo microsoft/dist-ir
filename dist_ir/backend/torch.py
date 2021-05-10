@@ -1,37 +1,28 @@
 from functools import partial
-from itertools import combinations
 import logging
 import numpy as np
 from operator import getitem
 import os
 from tempfile import TemporaryDirectory
 from time import perf_counter
-from typing import Any, Dict, List, NamedTuple, Tuple
+from typing import Any, Dict, Iterable, List, NamedTuple, Tuple
 
 import torch
 import torch.distributed as dist
 from torch import fx
 
 from ..executor.rank_projector import project
-from ..ir import Function
+from ..ir import Function, cpprint
 
 
 DistributedContext = NamedTuple(
-    "DistributedContext", use_gpu=bool, groups=Dict[Tuple[int, int], Any]  # Any->Group
+    "DistributedContext",
+    use_gpu=bool,
+    groups=Dict[Tuple[int, int], Any],  # Maps tuple of ranks to ProcessGroup
+    groups_list=Iterable[
+        Tuple[int]
+    ],  # to store group IDs until threads can create ProcessGroups
 )
-
-
-def _init_distributed_context(use_gpu):
-    """Since torch.distributed's NCCL backed doesn't support P2P communication,
-    we create a group for each pair of ranks and use broadcasts to emulate P2P
-    send/recv. This method initializes the groups.
-    """
-    groups = {}
-    if use_gpu:
-        world_size = dist.get_world_size()
-        for i, j in combinations(range(world_size), 2):
-            groups[i, j] = dist.new_group([i, j])
-    return DistributedContext(use_gpu=use_gpu, groups=groups)
 
 
 def _add(x, y, ctx=None):
@@ -39,19 +30,18 @@ def _add(x, y, ctx=None):
 
 
 # TODO kwargs of these functions are required, enforce this somewhere
-def _allgather(x_i, axis=0, ctx=None):
-    world_size = dist.get_world_size()
-    xs = [torch.zeros_like(x_i) for _ in range(world_size)]
+def _allgather(x_i, dim=0, group=None, ctx=None):
+    xs = [torch.zeros_like(x_i) for _ in range(len(group))]
     if ctx.use_gpu:
         xs = [x.cuda(dist.get_rank()) for x in xs]
 
-    dist.all_gather(xs, x_i)
-    x = torch.cat(xs, dim=axis)
+    dist.all_gather(xs, x_i, group=ctx.groups[group])
+    x = torch.cat(xs, dim=dim)
     return x
 
 
-def _allreduce(x, ctx=None):
-    dist.all_reduce(x)
+def _allreduce(x, group=None, ctx=None):
+    dist.all_reduce(x, group=ctx.groups[group])
     return x
 
 
@@ -395,22 +385,23 @@ def run_function(
     return tuple(value_map[v] for v in fn.outputs)
 
 
-def run_process(
-    use_gpu, world_size, io_dir, num_warmup_steps, num_repetitions, rank, fn
-):
+def run_process(ctx, world_size, io_dir, num_warmup_steps, num_repetitions, rank, fn):
     """The Python function on rank `rank` that runs module `module`."""
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = "29500"
-    backend = "nccl" if use_gpu else "gloo"
+    backend = "nccl" if ctx.use_gpu else "gloo"
     dist.init_process_group(backend, rank=rank, world_size=world_size)
-    ctx = _init_distributed_context(use_gpu)
+    # Create the process groups used by fn's communication ops
+    for group in ctx.groups_list:
+        ranks = tuple(d - 1 for d in group)  # TODO fixme
+        ctx.groups[group] = dist.new_group(ranks)
 
     per_rank_inputs = torch.load(os.path.join(io_dir.name, f"in.{rank}.pt"))
 
     # # Convert per-rank DistIR function to torch.nn.Module:
     # module = function_to_module(fn)
 
-    if use_gpu:
+    if ctx.use_gpu:
         # Move module and inputs to GPU
         # TODO how to move interpreted non-module code to GPU?
         # module = module.cuda(rank)
@@ -419,7 +410,7 @@ def run_process(
     events = []
 
     def add_event():
-        if use_gpu:
+        if ctx.use_gpu:
             events.append(torch.cuda.Event(enable_timing=True))
             events[-1].record()
         else:
@@ -434,14 +425,13 @@ def run_process(
             torch.distributed.barrier()
         add_event()
 
-    if use_gpu:
+    if ctx.use_gpu:
         # Move outputs back to cpu
         res = [t.cpu() for t in res]
 
     torch.save(res, os.path.join(io_dir.name, f"out.{rank}.pt"))
 
-    if use_gpu:
-        torch.cuda.synchronize()
+    if ctx.use_gpu:
         runtimes = [
             events[i].elapsed_time(events[i + 1]) / 1e3 for i in range(len(events) - 1)
         ]
@@ -477,15 +467,16 @@ def run_mock_multiprocess(
 
 
 def run_multiprocesses(
+    ctx,
     per_rank_functions: Tuple[Function],
     per_rank_inputs: Tuple[Any],
-    use_gpu=False,
     num_repetitions=1,
     num_warmup=0,
 ):
     assert len(per_rank_functions) == len(per_rank_inputs)
     world_size = len(per_rank_functions)
 
+    # TODO just pass tensors instead
     # Save inputs for each per-rank function:
     io_dir = TemporaryDirectory()
     # print("run_multiprocess: saving I/O to:", io_dir.name)
@@ -495,10 +486,10 @@ def run_multiprocesses(
 
     global run_process
     per_rank_runner = partial(
-        run_process, use_gpu, world_size, io_dir, num_warmup, num_repetitions
+        run_process, ctx, world_size, io_dir, num_warmup, num_repetitions
     )
-    ctx = torch.multiprocessing.get_context("spawn")
-    with ctx.Pool(world_size) as p:
+    mp = torch.multiprocessing.get_context("spawn")
+    with mp.Pool(world_size) as p:
         runtimes = p.starmap(per_rank_runner, enumerate(per_rank_functions))
 
     # Load outputs:
@@ -526,13 +517,13 @@ def run_pytorch(
     # TODO check that fn uses devices [0...num_devices),
     # or run through and find max device used
 
-    # from ..ir import cpprint
     # print(*(x.shape for x in inputs))
     # cpprint(fn)
 
-    per_rank_fns = project(
+    per_rank_fns, groups = project(
         fn, tuple(v.type for v in fn.inputs), num_devices, run_type_inference
     )
+    ctx = DistributedContext(use_gpu=use_gpu, groups={}, groups_list=groups)
 
     per_rank_inputs = [[] for _ in range(num_devices)]
     for v, a in zip(fn.inputs, inputs):
@@ -545,9 +536,9 @@ def run_pytorch(
         return run_mock_multiprocess(per_rank_fns, per_rank_inputs)
     else:
         return run_multiprocesses(
+            ctx,
             per_rank_fns,
             per_rank_inputs,
-            use_gpu=use_gpu,
             num_repetitions=num_repetitions,
             num_warmup=num_warmup,
         )

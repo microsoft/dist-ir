@@ -1,6 +1,6 @@
 from collections import defaultdict
 from dist_ir.executor.type_inference import TypePropRegister
-from typing import Any, Dict, Sequence, Tuple
+from typing import Any, Dict, Sequence, Set, Tuple
 
 from ..ir import Function, FunctionMaker, Device, Op, Value
 from ..ir.type import Type, Tensor
@@ -14,6 +14,7 @@ class ProjectorState(AbstractState):
     def __init__(self, function: Function, inputs: Sequence[Any]):
         AbstractState.__init__(self, function, inputs)
         self.per_rank_fns: Dict[Device, FunctionMaker] = defaultdict(FunctionMaker)
+        self.groups: Set[Tuple[int]] = set()
 
 
 def _get_input_devices(op: Op):
@@ -38,6 +39,11 @@ def _collective_projector(op: Op, state: ProjectorState):
     """Projects a collective op over D devices that has D inputs and D outputs,
     one on each device."""
     assert len(op.inputs) == len(op.outputs)
+    devices = {int(v.type.device.device_id) for v in op.inputs + op.outputs}
+    attributes = {
+        **(op.attributes if op.attributes is not None else {}),
+        "group": tuple(devices),
+    }
     for in_v, out_v in zip(op.inputs, op.outputs):
         assert in_v.type.device == out_v.type.device
         d = in_v.type.device
@@ -46,7 +52,7 @@ def _collective_projector(op: Op, state: ProjectorState):
             op.op_type,
             inputs=(in_v,),
             output_values=(out_v,),
-            attributes=op.attributes,
+            attributes=attributes,
         )
         state.per_rank_fns[d].ops.append(new_op)
 
@@ -109,6 +115,11 @@ def _create_semantics(type_prop_register, projector_register):
             # Project op and add to appropriate per-rank function
             projector(op, state)
 
+            # If op involves more than one device, create a group
+            devices = {int(v.type.device.device_id) for v in op.inputs + op.outputs}
+            if len(devices) > 1:
+                state.groups.add(tuple(devices))
+
         return semantics
 
     signatures = set(projector_register.keys()).intersection(type_prop_register.keys())
@@ -161,6 +172,7 @@ def project(
                 )
             )
         new_fn.set_outputs(tuple(value_map[v] for v in per_rank_fn.outputs))
+        # TODO fix off-by-one discrepancy between DistIR device ID and torch rank
         result_fns[d.device_id - 1] = new_fn.finalize()
 
-    return result_fns
+    return result_fns, state.groups

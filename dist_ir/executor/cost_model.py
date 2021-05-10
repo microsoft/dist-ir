@@ -150,7 +150,7 @@ class CostModel:
         if x.device is None:
             return {}
         n = reduce(mul, [x.shape[i] for i in range(len(x.shape))])
-        data_size = x.dtype.size * n
+        data_size = x.dtype.size() * n
         if y is not None:
             data_size *= 2
         flops = n
@@ -187,7 +187,7 @@ class CostModel:
         return {x.device: 0 for x in xs}
 
     def _matmul_cost_fn(self, op, x, y):
-        data_size = x.dtype.size * (x.shape[0] * x.shape[1] + y.shape[0] * y.shape[1])
+        data_size = x.dtype.size() * (x.shape[0] * x.shape[1] + y.shape[0] * y.shape[1])
         flops = 2 * x.shape[0] * x.shape[1] * y.shape[1]
         communication_cost = data_size / x.device.dram_bandwidth
         computation_cost = flops / x.device.throughput
@@ -215,7 +215,7 @@ class CostModel:
                     self._topology.get_bandwidth(devices[i], devices[j])
                 )
         average_bandwidth = np.mean(all_bandwidths)
-        average_input_size = np.mean([x.size() for x in xs]) * xs[0].dtype.size
+        average_input_size = np.mean([x.size() for x in xs]) * xs[0].dtype.size()
         per_device_data = 2 * average_input_size * (len(devices) - 1) / len(devices)
         per_device_data_gb = per_device_data / BYTES_IN_Gb
         cost = per_device_data_gb / average_bandwidth
@@ -247,7 +247,7 @@ class CostModel:
         output_device = op.attributes["device"]
         costs = {output_device: 0}
         for x in xs:
-            input_size = x.size() * x.dtype.size
+            input_size = x.size() * x.dtype.size()
             input_size_gb = input_size / BYTES_IN_Gb
             bandwidth = self._topology.get_bandwidth(x.device, output_device)
             transfer_time = input_size_gb / bandwidth
@@ -256,7 +256,7 @@ class CostModel:
         return costs
 
     def _mpi_reduce_cost_fn(self, op, *xs):
-        input_size = xs[0].size() * xs[0].dtype.size
+        input_size = xs[0].size() * xs[0].dtype.size()
         input_size_gb = input_size / BYTES_IN_Gb
         output_device = op.attributes["device"]
         costs = {output_device: 0}
@@ -292,7 +292,7 @@ class CostModel:
         costs = {}
         input_device = x.device
         # TODO send is synchronous; input device should do same work too
-        input_size = x.size() * x.dtype.size
+        input_size = x.size() * x.dtype.size()
         input_size_gb = input_size / BYTES_IN_Gb
         output_device = op.attributes["device"]
         bandwidth = self._topology.get_bandwidth(input_device, output_device)

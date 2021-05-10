@@ -4,7 +4,7 @@ import numpy as np
 from transformers import GPT2Tokenizer
 import torch
 
-from dist_ir.backend.torch import run_pytorch
+import dist_ir.backend.torch as torch_backend
 from dist_ir.executor import (
     CostModel,
     infer_types,
@@ -113,7 +113,7 @@ def import_function_and_get_input_data(model_path, batch_size, default_device):
     return function, input_data
 
 
-def simulate(
+def transform(
     function,
     input_data,
     topology,
@@ -161,10 +161,31 @@ def simulate(
         initialized_input_data,
         [output.type.device for output in init_function.outputs],
     )
-    input_types = (v.type for v in transformed_function.inputs)
+    return init_function, transformed_function, initialized_input_data
+
+
+def simulate(function, input_data):
+    input_types = (v.type for v in function.inputs)
     simulator = PostTypeInferenceSimulator(CostModel(topology))
-    simulation = simulator.interpret(transformed_function, input_types)
-    return transformed_function, simulation
+    simulation = simulator.interpret(function, input_types)
+    return simulation
+
+
+def run_pytorch(function, input_data, world_size, use_gpu=True):
+    pytorch_input_data = [torch.tensor(x) for x in input_data]
+    if use_gpu and world_size > torch.cuda.device_count():
+        raise ValueError(
+            f"Specified world size is {world_size}, but only "
+            f"{torch.cuda.device_count()} GPUs available"
+        )
+    per_rank_outputs, runtimes = torch_backend.run_pytorch(
+        world_size,
+        function,
+        pytorch_input_data,
+        use_gpu=use_gpu,
+        run_type_inference=False,
+    )
+    return per_rank_outputs, runtimes
 
 
 def main(args):
@@ -179,15 +200,19 @@ def main(args):
         input_data,
         input_devices=[topology.devices[0] for _ in range(len(input_data))],
     )
+    init_function, transformed_function, initialized_input_data = transform(
+        function,
+        input_data,
+        topology,
+        args.dp_degree,
+        args.hp_degree,
+        args.pp_degree,
+        args.num_microbatches,
+    )
     if args.operation == "simulate":
-        transformed_function, simulation = simulate(
-            function,
-            input_data,
-            topology,
-            args.dp_degree,
-            args.hp_degree,
-            args.pp_degree,
-            args.num_microbatches,
+        simulation = simulate(
+            transformed_function,
+            initialized_input_data,
         )
 
         distributed_running_time = max(
@@ -198,11 +223,12 @@ def main(args):
             f"samples/second"
         )
     elif args.operation == "pytorch":
-        input_data = [torch.tensor(x) for x in input_data]
-        per_rank_outputs, runtimes = run_pytorch(
-            1, function, input_data, use_gpu=False, run_type_inference=False
+        world_size = args.dp_degree * args.hp_degree * args.pp_degree
+        per_rank_outputs, runtimes = run_pytorch(transformed_function, initialized_input_data, world_size, args.use_gpu)
+        print(
+            f"Throughput: {args.batch_size / np.median(runtimes[-1]):.2f} "
+            f"samples/second"
         )
-        print(f"Throughput: {args.batch_size / max(runtimes[0]):.2f} samples/second")
 
 
 if __name__ == "__main__":
@@ -229,6 +255,12 @@ if __name__ == "__main__":
         choices=["simulate", "pytorch"],
         default="simulate",
         help="Operation to run",
+    )
+    parser.add_argument(
+        "--use_gpu",
+        action="store_true",
+        default=False,
+        help="Use GPU with PyTorch backend",
     )
     args = parser.parse_args()
     main(args)

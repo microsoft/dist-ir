@@ -39,7 +39,7 @@ def _add(x, y, ctx=None):
 
 
 # TODO kwargs of these functions are required, enforce this somewhere
-def _allgather(x_i, dim=0, ctx=None):
+def _allgather(x_i, axis=0, ctx=None):
     world_size = dist.get_world_size()
     xs = [torch.zeros_like(x_i) for _ in range(world_size)]
     if ctx.use_gpu:
@@ -76,23 +76,32 @@ def _constant(value, ctx=None):
     output = torch.tensor(value)
     if output.shape == (1,):
         return output[0]
+    if ctx.use_gpu:
+        return output.cuda(dist.get_rank())
     return output
 
 
 def _constant_of_shape(x, value=0, ctx=None):
     # TODO: Check if value is a single value or array?
-    return torch.full(tuple(x.int().numpy()), value[0])
+    output = torch.full(tuple(x.int().cpu().numpy()), value[0])
+    if ctx.use_gpu:
+        return output.cuda(dist.get_rank())
+    else:
+        return output
 
 
 def _div(x, y, ctx=None):
     return torch.div(x, y)
 
+
 def _gather(x, y, axis=0, ctx=None):
     # TODO: Find the best Torch equivalent for this
     # torch.gather and torch.index_select do not work
-    output = torch.tensor(np.take(x.numpy(), y.numpy(), axis=axis))
+    output = torch.tensor(np.take(x.cpu().numpy(), y.cpu().numpy(), axis=axis))
     if output.shape == (1,):
         return output[0]
+    if ctx.use_gpu:
+        return output.cuda(dist.get_rank())
     return output
 
 
@@ -125,7 +134,7 @@ def _matmul_grad(x, y, dz, ctx=None):
 
 
 def _mul(x, y, ctx=None):
-    return torch.mul(x, y, ctx=None)
+    return torch.mul(x, y)
 
 
 def _nonzero(x, ctx=None):
@@ -183,7 +192,10 @@ def _send(x, device=None, ctx=None):
 
 
 def _shape(x, ctx=None):
-    return torch.tensor(x.shape)
+    output = torch.tensor(x.shape)
+    if ctx.use_gpu:
+        return output.cuda(dist.get_rank())
+    return output
 
 
 def _slice(x, starts, ends, axes, steps=None, ctx=None):
@@ -367,6 +379,7 @@ def run_function(
         )
         logging.info(f"{rank}: {first_output} {op.op_type}")
         inputs = tuple(value_map[v] for v in op.inputs)
+        logging.info(f"{op}: {tuple(x.is_cuda for x in inputs)}")
         kwargs = {} if op.attributes is None else {**op.attributes}
         kwargs["ctx"] = ctx
         output = op_to_torch[op.op_type](*inputs, **kwargs)
@@ -428,10 +441,10 @@ def run_process(
     torch.save(res, os.path.join(io_dir.name, f"out.{rank}.pt"))
 
     if use_gpu:
+        torch.cuda.synchronize()
         runtimes = [
             events[i].elapsed_time(events[i + 1]) / 1e3 for i in range(len(events) - 1)
         ]
-        torch.cuda.synchronize()
     else:
         runtimes = [events[i + 1] - events[i] for i in range(len(events) - 1)]
 
@@ -502,8 +515,8 @@ def run_pytorch(
     fn,
     inputs,
     use_gpu=False,
-    num_repetitions=1,
-    num_warmup=0,
+    num_repetitions=10,
+    num_warmup=10,
     run_type_inference=True,
     debug_mock=False,
 ):

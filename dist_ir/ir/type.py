@@ -24,74 +24,68 @@ class Type:
         return set()
 
 
-#@singleton
+# @singleton
 class Int32(Type):
     """The 32-bit integer type. A singleton class."""
 
     def __repr__(self):
         return "Int32"
 
-    @property
     def size(self):
         return 4
 
 
-#@singleton
+# @singleton
 class Int64(Type):
     """The 64-bit integer type. A singleton class."""
 
     def __repr__(self):
         return "Int64"
 
-    @property
     def size(self):
         return 8
 
 
-#@singleton
+# @singleton
 class Float16(Type):
     """The 16-bit float type. A singleton class."""
 
     def __repr__(self):
         return "Float16"
 
-    @property
     def size(self):
         return 2
 
 
-#@singleton
+# @singleton
 class Float32(Type):
     """The 32-bit float type. A singleton class."""
 
     def __repr__(self):
         return "Float32"
 
-    @property
     def size(self):
         return 4
 
 
-#@singleton
+# @singleton
 class Float64(Type):
     """The 64-bit float type. A singleton class."""
 
     def __repr__(self):
         return "Float64"
 
-    @property
     def size(self):
         return 8
 
 
-#@singleton
+# @singleton
 class Bool(Type):
     """The boolean type. A singleton class."""
 
     def __repr__(self):
         return "Bool"
 
-    @property
     def size(self):
         return 1
 
@@ -121,7 +115,7 @@ class Tensor(Type):
     def size(self):
         if not isinstance(self.shape, tuple):
             return 0
-        return reduce(mul, self.shape) * self.dtype.size
+        return reduce(mul, self.shape) * self.dtype.size()
 
 
 @dataclass(frozen=True)

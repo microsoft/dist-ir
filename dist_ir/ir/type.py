@@ -29,7 +29,7 @@ class Int32(Type):
     """The 32-bit integer type. A singleton class."""
 
     def __repr__(self):
-        return "Int32"
+        return f"Int32[device={self.device}]"
 
     def size(self):
         return 4
@@ -40,7 +40,7 @@ class Int64(Type):
     """The 64-bit integer type. A singleton class."""
 
     def __repr__(self):
-        return "Int64"
+        return f"Int64[device={self.device}]"
 
     def size(self):
         return 8
@@ -51,7 +51,7 @@ class Float16(Type):
     """The 16-bit float type. A singleton class."""
 
     def __repr__(self):
-        return "Float16"
+        return f"Float16[device={self.device}]"
 
     def size(self):
         return 2
@@ -62,7 +62,7 @@ class Float32(Type):
     """The 32-bit float type. A singleton class."""
 
     def __repr__(self):
-        return "Float32"
+        return f"Float32[device={self.device}]"
 
     def size(self):
         return 4
@@ -73,7 +73,7 @@ class Float64(Type):
     """The 64-bit float type. A singleton class."""
 
     def __repr__(self):
-        return "Float64"
+        return f"Float64[device={self.device}]"
 
     def size(self):
         return 8
@@ -84,7 +84,7 @@ class Bool(Type):
     """The boolean type. A singleton class."""
 
     def __repr__(self):
-        return "Bool"
+        return f"Bool[device={self.device}]"
 
     def size(self):
         return 1

@@ -115,6 +115,8 @@ def _elementwise_tensor_op_prop_fn(op, x, y):
             shape.insert(0, x.shape[x_idx])
         elif x.shape[x_idx] == 1 and y.shape[y_idx] >= 1:
             shape.insert(0, y.shape[y_idx])
+        elif x.shape[x_idx] == y.shape[y_idx]:
+            shape.insert(0, x.shape[x_idx])
         else:
             _raise_type_error(op, x, y)
     return Tensor(shape=tuple(shape), dtype=x.dtype, device=x.device)

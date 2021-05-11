@@ -76,7 +76,9 @@ def simulate(config):
             pp_degree,
             num_microbatches,
         )
-        simulation = gpt2.simulate(transformed_function, initialized_input_data)
+        simulation = gpt2.simulate(
+            transformed_function, initialized_input_data, topology
+        )
         throughput = batch_size / max(
             [simulation.timestamps[d] for d in simulation.timestamps]
         )
@@ -118,13 +120,13 @@ def run_pytorch(config):
     throughput = batch_size / np.median(runtimes[-1])
     # TODO: Measure peak memory?
     peak_memory = 0
-    return config_throughput, peak_memory
+    return config, throughput, peak_memory
 
 
 def grid_search(args):
     # TODO: Make search space configuration part of args
     all_cluster_sizes = [4]
-    all_batch_sizes = [64]
+    all_batch_sizes = [256]
     configs = []
     for batch_size in all_batch_sizes:
         for i, cluster_size in enumerate(all_cluster_sizes):
@@ -156,14 +158,14 @@ def grid_search(args):
         print(config)
     if args.backend == "simulation":
         n = multiprocessing.cpu_count()
-        target = simulate
+        with multiprocessing.Pool(n) as pool:
+            results = list(
+                tqdm.tqdm(pool.imap_unordered(simulate, configs), total=len(configs))
+            )
     elif args.backend == "pytorch":
-        n = 1
-        target = run_pytorch
-    with multiprocessing.Pool(n) as pool:
-        results = list(
-            tqdm.tqdm(pool.imap_unordered(target, configs), total=len(configs))
-        )
+        results = []
+        for config in tqdm.tqdm(configs):
+            results.append(run_pytorch(config))
 
     with open("grid_search_results.csv", "w", newline="") as f:
         fieldnames = [
@@ -201,7 +203,10 @@ def grid_search(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GPT-2 Grid Search")
     parser.add_argument(
-        "--backend", choices=["simulation", "pytorch"], help="Simulation or PyTorch"
+        "--backend",
+        choices=["simulation", "pytorch"],
+        default="simulation",
+        help="Simulation or PyTorch",
     )
     args = parser.parse_args()
     grid_search(args)

@@ -30,13 +30,13 @@ def _add(x, y, ctx=None):
 
 
 # TODO kwargs of these functions are required, enforce this somewhere
-def _allgather(x_i, dim=0, group=None, ctx=None):
+def _allgather(x_i, axis=0, group=None, ctx=None):
     xs = [torch.zeros_like(x_i) for _ in range(len(group))]
     if ctx.use_gpu:
         xs = [x.cuda(dist.get_rank()) for x in xs]
 
     dist.all_gather(xs, x_i, group=ctx.groups[group])
-    x = torch.cat(xs, dim=dim)
+    x = torch.cat(xs, dim=axis)
     return x
 
 
@@ -143,7 +143,12 @@ def _recv(shape=None, device=None, ctx=None):
         x = x.cuda(dist.get_rank())
         src_rank = device - 1
         dst_rank = dist.get_rank()
-        group = ctx.groups[tuple(sorted((src_rank, dst_rank)))]
+        group_key = (device, dst_rank + 1)
+        # group_key = (src_rank, dst_rank)
+        print(f"Recv: {group_key} ({src_rank} -> {dst_rank})")
+        if group_key not in ctx.groups:
+            raise ValueError(f"No group for {src_rank} -> {dst_rank}")
+        group = ctx.groups[group_key]
         dist.broadcast(x, src_rank, group=group)
     else:
         dist.recv(x, device - 1)
@@ -155,7 +160,8 @@ def _reduce_mean(x, axes, keepdims=1, ctx=None):
 
 
 def _reshape(x, y, ctx=None):
-    return torch.reshape(x, tuple(y))
+    new_shape = tuple(int(v.item()) for v in list(y))
+    return torch.reshape(x, new_shape)
 
 
 def _relu(x, ctx=None):
@@ -173,7 +179,10 @@ def _send(x, device=None, ctx=None):
     if ctx.use_gpu:
         src_rank = dist.get_rank()
         dst_rank = device - 1
-        group = ctx.groups[tuple(sorted((src_rank, dst_rank)))]
+        # group_key = (src_rank, dst_rank)
+        group_key = (src_rank + 1, device)
+        print(f"Send: {group_key} ({src_rank} -> {dst_rank})")
+        group = ctx.groups[group_key]
         dist.broadcast(x, src_rank, group=group)
     else:
         dist.send(x, device - 1)
@@ -394,6 +403,7 @@ def run_process(ctx, world_size, io_dir, num_warmup_steps, num_repetitions, rank
     # Create the process groups used by fn's communication ops
     for group in ctx.groups_list:
         ranks = tuple(d - 1 for d in group)  # TODO fixme
+        # ranks = tuple(d for d in group)  # TODO fixme
         ctx.groups[group] = dist.new_group(ranks)
 
     per_rank_inputs = torch.load(os.path.join(io_dir.name, f"in.{rank}.pt"))

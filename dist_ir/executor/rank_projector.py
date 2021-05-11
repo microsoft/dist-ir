@@ -57,7 +57,7 @@ def _identity_projector(op: Op, state: ProjectorState):
         len(devices) > 1
         or len(devices) == 0
         or devices[0] is None
-        #and not only_constant_inputs
+        # and not only_constant_inputs
     ):
         raise ValueError(f"Op {op} has input devices {devices}")
     else:
@@ -93,11 +93,16 @@ def _send_projector(op: Op, state: ProjectorState):
     state.per_rank_fns[from_d].ops.append(
         Op("SendP2P", inputs=op.inputs, attributes={"device": to_d.device_id})
     )
+    print(f"Sending {op.inputs[0]} from {from_d} to {to_d}")
+    if not isinstance(op.inputs[0].type, Tensor):
+        output_shape = tuple()
+    else:
+        output_shape = op.inputs[0].type.shape
     state.per_rank_fns[to_d].ops.append(
         Op(
             "RecvP2P",
             output_values=(op.outputs[0],),
-            attributes={"shape": op.inputs[0].type.shape, "device": from_d.device_id},
+            attributes={"shape": output_shape, "device": from_d.device_id},
         )
     )
 
@@ -143,6 +148,7 @@ ProjectorRegister = {
     ("Reshape", (Tensor, Tensor)): _identity_projector,
     ("Shape", (Tensor,)): _identity_projector,
     ("Send", (Tensor,)): _send_projector,
+    ("Send", (Int64,)): _send_projector,
     ("Slice", (Tensor, Tensor, Tensor, Tensor, Int64)): _identity_projector,
     ("Softmax", (Tensor,)): _identity_projector,
     ("Split", (Tensor,)): _identity_projector,
@@ -180,7 +186,9 @@ def _create_semantics(type_prop_register, projector_register):
             projector(op, state)
 
             # If op involves more than one device, create a group
-            devices = {int(v.type.device.device_id) for v in op.inputs + op.outputs}
+            devices = {output.device.device_id for output in outputs}.union(
+                {int(v.type.device.device_id) for v in op.inputs}
+            )
             if len(devices) > 1:
                 state.groups.add(tuple(devices))
 
@@ -206,6 +214,19 @@ def _create_post_type_inference_semantics(projector_register):
 
             # Project op and add to appropriate per-rank function
             projector(op, state)
+
+            # If op involves more than one device, create a group
+            devices = {
+                int(v.type.device.device_id)
+                for v in op.inputs + op.outputs
+                if v.type.device is not None
+            }
+            if op.op_type == "Send":
+                print(op)
+                print(tuple(devices))
+                print()
+            if len(devices) > 1:
+                state.groups.add(tuple(devices))
 
         return semantics
 
@@ -267,4 +288,5 @@ def project(
         # TODO fix off-by-one discrepancy between DistIR device ID and torch rank
         result_fns[d.device_id - 1] = new_fn.finalize()
 
+    print(f"Groups: {state.groups}")
     return result_fns, state.groups

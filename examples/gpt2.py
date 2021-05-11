@@ -164,7 +164,7 @@ def transform(
     return init_function, transformed_function, initialized_input_data
 
 
-def simulate(function, input_data):
+def simulate(function, input_data, topology):
     input_types = (v.type for v in function.inputs)
     simulator = PostTypeInferenceSimulator(CostModel(topology))
     simulation = simulator.interpret(function, input_types)
@@ -209,11 +209,8 @@ def main(args):
         args.pp_degree,
         args.num_microbatches,
     )
-    if args.operation == "simulate":
-        simulation = simulate(
-            transformed_function,
-            initialized_input_data,
-        )
+    if args.backend == "simulate":
+        simulation = simulate(transformed_function, initialized_input_data, topology)
 
         distributed_running_time = max(
             [simulation.timestamps[d] for d in simulation.timestamps]
@@ -222,9 +219,11 @@ def main(args):
             f"Throughput: {args.batch_size / distributed_running_time:.2f} "
             f"samples/second"
         )
-    elif args.operation == "pytorch":
+    elif args.backend == "pytorch":
         world_size = args.dp_degree * args.hp_degree * args.pp_degree
-        per_rank_outputs, runtimes = run_pytorch(transformed_function, initialized_input_data, world_size, args.use_gpu)
+        per_rank_outputs, runtimes = run_pytorch(
+            transformed_function, initialized_input_data, world_size, args.use_gpu
+        )
         print(
             f"Throughput: {args.batch_size / np.median(runtimes[-1]):.2f} "
             f"samples/second"
@@ -250,14 +249,13 @@ if __name__ == "__main__":
         "-k", "--num_microbatches", type=int, default=1, help="Num microbatches"
     )
     parser.add_argument(
-        "-o",
-        "--operation",
+        "--backend",
         choices=["simulate", "pytorch"],
         default="simulate",
         help="Operation to run",
     )
     parser.add_argument(
-        "--use_gpu",
+        "--use-gpu",
         action="store_true",
         default=False,
         help="Use GPU with PyTorch backend",

@@ -116,9 +116,11 @@ def _create_semantics(type_prop_register, projector_register):
             projector(op, state)
 
             # If op involves more than one device, create a group
-            devices = {int(v.type.device.device_id) for v in op.inputs + op.outputs}
+            devices = {v.device.device_id for v in outputs}.union(
+                {int(v.type.device.device_id) for v in op.inputs}
+            )
             if len(devices) > 1:
-                state.groups.add(tuple(devices))
+                state.groups.add(tuple(sorted(devices)))
 
         return semantics
 

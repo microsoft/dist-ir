@@ -227,9 +227,6 @@ def _partition_inputs_pp(
                             partition_maps[i][j],
                         )
                         for consumer_device in consumer_devices:
-                            print(
-                                f"Sending {hp_input} to Device {consumer_device.device_id}"
-                            )
                             forwarded_value = _send_value(
                                 hp_input,
                                 init_function,
@@ -637,10 +634,6 @@ def gpt2_dhp_transform(
                                         f"Sending value {output.name} to "
                                         f"device {consumer_device.device_id}"
                                     )
-                                    print(
-                                        f"Sending {transformed_output.name} to Device {consumer_device.device_id}"
-                                    )
-
                                     intermediate_value_map[j][microbatch_id][output] = (
                                         _send_value(
                                             transformed_output,

@@ -75,7 +75,8 @@ def _recv(shape=None, device=None, ctx=None):
         x = x.cuda(dist.get_rank())
         src_rank = device - 1
         dst_rank = dist.get_rank()
-        group = ctx.groups[tuple(sorted((src_rank, dst_rank)))]
+        group_key = tuple(sorted(device, dst_rank + 1))
+        group = ctx.groups[group_key]
         dist.broadcast(x, src_rank, group=group)
     else:
         dist.recv(x, device - 1)
@@ -97,7 +98,8 @@ def _send(x, device=None, ctx=None):
     if ctx.use_gpu:
         src_rank = dist.get_rank()
         dst_rank = device - 1
-        group = ctx.groups[tuple(sorted((src_rank, dst_rank)))]
+        group_key = tuple(sorted((src_rank - 1, device)))
+        group = ctx.groups[group_key]
         dist.broadcast(x, src_rank, group=group)
     else:
         dist.send(x, device - 1)

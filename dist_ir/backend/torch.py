@@ -13,7 +13,7 @@ from torch import fx
 
 from ..executor.rank_projector import project
 from ..ir import Function, cpprint
-
+from ..ir.type import Int64, Float32
 
 DistributedContext = NamedTuple(
     "DistributedContext",
@@ -136,8 +136,12 @@ def _pow(x, y, ctx=None):
     return torch.pow(x, y)
 
 
-def _recv(shape=None, device=None, ctx=None):
-    x = torch.zeros(shape)
+def _recv(shape=None, device=None, dtype=None, ctx=None):
+    if isinstance(dtype, Int64):
+        x = torch.zeros(shape).long()
+    elif isinstance(dtype, Float32):
+        x = torch.zeros(shape).float()
+
     # TODO pytorch rank = device_id - 1
     if ctx.use_gpu:
         x = x.cuda(dist.get_rank())
@@ -145,7 +149,6 @@ def _recv(shape=None, device=None, ctx=None):
         dst_rank = dist.get_rank()
         group_key = (device, dst_rank + 1)
         # group_key = (src_rank, dst_rank)
-        print(f"Recv: {group_key} ({src_rank} -> {dst_rank})")
         if group_key not in ctx.groups:
             raise ValueError(f"No group for {src_rank} -> {dst_rank}")
         group = ctx.groups[group_key]
@@ -181,7 +184,6 @@ def _send(x, device=None, ctx=None):
         dst_rank = device - 1
         # group_key = (src_rank, dst_rank)
         group_key = (src_rank + 1, device)
-        print(f"Send: {group_key} ({src_rank} -> {dst_rank})")
         group = ctx.groups[group_key]
         dist.broadcast(x, src_rank, group=group)
     else:
@@ -307,8 +309,11 @@ def _mock_allreduce(x, ctx=None):
     return x
 
 
-def _mock_recv(shape=None, device=None, ctx=None):
-    x = torch.zeros(shape)
+def _mock_recv(shape=None, device=None, dtype=None, ctx=None):
+    if isinstance(dtype, Int64):
+        x = torch.zeros(shape).long()
+    elif isinstance(dtype, Float32):
+        x = torch.zeros(shape).float()
     return x
 
 

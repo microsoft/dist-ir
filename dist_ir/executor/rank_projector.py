@@ -93,16 +93,21 @@ def _send_projector(op: Op, state: ProjectorState):
     state.per_rank_fns[from_d].ops.append(
         Op("SendP2P", inputs=op.inputs, attributes={"device": to_d.device_id})
     )
-    print(f"Sending {op.inputs[0]} from {from_d} to {to_d}")
     if not isinstance(op.inputs[0].type, Tensor):
         output_shape = tuple()
+        output_type = op.inputs[0].type
     else:
         output_shape = op.inputs[0].type.shape
+        output_type = op.inputs[0].type.dtype
     state.per_rank_fns[to_d].ops.append(
         Op(
             "RecvP2P",
             output_values=(op.outputs[0],),
-            attributes={"shape": output_shape, "device": from_d.device_id},
+            attributes={
+                "shape": output_shape,
+                "device": from_d.device_id,
+                "dtype": output_type,
+            },
         )
     )
 
@@ -221,10 +226,6 @@ def _create_post_type_inference_semantics(projector_register):
                 for v in op.inputs + op.outputs
                 if v.type.device is not None
             }
-            if op.op_type == "Send":
-                print(op)
-                print(tuple(devices))
-                print()
             if len(devices) > 1:
                 state.groups.add(tuple(devices))
 
@@ -288,5 +289,4 @@ def project(
         # TODO fix off-by-one discrepancy between DistIR device ID and torch rank
         result_fns[d.device_id - 1] = new_fn.finalize()
 
-    print(f"Groups: {state.groups}")
     return result_fns, state.groups

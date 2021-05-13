@@ -146,15 +146,19 @@ def test_owt(num_devices, num_layers):
 def test_mlp_grid_search():
     # batch_sizes = [2 ** i for i in range(10, 15)]
     # hidden_dims = [2 ** i for i in range(8, 13)]
-    batch_sizes = [2 ** 10]
-    hidden_dims = [2 ** 10]
-    world_sizes = [2, 4]
-    all_num_layers = [8, 16, 32]
+    batch_sizes = [64]
+    hidden_dims = [64]
+    world_sizes = [1, 2, 4, 8]
+    all_num_layers = [32]
 
     results = []
     for (batch_size, hidden_dim, num_layers, d, h, p, m) in gen_configurations(
         hidden_dims, world_sizes, all_num_layers, batch_sizes
     ):
+        # TODO this is to debug mlp_1_2_4_2. Remove when fixed
+        d = 1
+        h = m = 2
+        p = 4
         world_size = d * h * p
         # TODO reuse seq_mlp
         topology = Topology()
@@ -210,6 +214,7 @@ def test_mlp_grid_search():
                 actual_time,
             )
         )
+        return  # TODO remove after debugging
 
     fieldnames = [
         "world_size",

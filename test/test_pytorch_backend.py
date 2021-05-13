@@ -155,10 +155,6 @@ def test_mlp_grid_search():
     for (batch_size, hidden_dim, num_layers, d, h, p, m) in gen_configurations(
         hidden_dims, world_sizes, all_num_layers, batch_sizes
     ):
-        # TODO this is to debug mlp_1_2_4_2. Remove when fixed
-        d = 1
-        h = m = 2
-        p = 4
         world_size = d * h * p
         # TODO reuse seq_mlp
         topology = Topology()
@@ -214,7 +210,6 @@ def test_mlp_grid_search():
                 actual_time,
             )
         )
-        return  # TODO remove after debugging
 
     fieldnames = [
         "world_size",

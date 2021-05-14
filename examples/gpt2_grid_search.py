@@ -23,9 +23,6 @@ from dist_ir.executor import (
 from dist_ir.transforms import gpt2_dhp_transform, filter_transform
 import gpt2
 
-NETWORK_BANDWIDTH_Gbps = 200
-MODEL_PATH = "/lfs/1/keshav2/gpt2/model.onnx"
-
 
 def get_all_degrees(n):
     all_degrees = []
@@ -54,11 +51,23 @@ def get_all_degrees(n):
 
 
 def simulate(config):
-    (batch_size, dp_degree, hp_degree, pp_degree, num_microbatches) = config
+    (
+        model_path,
+        device_throughput,
+        dram_bandwidth,
+        network_bandwidth,
+        batch_size,
+        dp_degree,
+        hp_degree,
+        pp_degree,
+        num_microbatches,
+    ) = config
     topology = Topology()
-    d0 = topology.add_device("gpu")
+    d0 = topology.add_device(
+        "gpu", throughput=device_throughput, dram_bandwidth=dram_bandwidth
+    )
     function, input_data = gpt2.import_function_and_get_input_data(
-        MODEL_PATH, batch_size=batch_size, default_device=d0
+        model_path, batch_size=batch_size, default_device=d0
     )
     ex = SequentialExecutor("numpy")
     function = ex.infer_types(
@@ -66,6 +75,7 @@ def simulate(config):
         input_data,
         input_devices=[topology.devices[0] for _ in range(len(input_data))],
     )
+    condensed_config = (batch_size, dp_degree, hp_degree, pp_degree, num_microbatches)
     try:
         init_function, transformed_function, initialized_input_data = gpt2.transform(
             function,
@@ -75,6 +85,9 @@ def simulate(config):
             hp_degree,
             pp_degree,
             num_microbatches,
+            device_throughput=device_throughput,
+            dram_bandwidth=dram_bandwidth,
+            network_bandwidth=network_bandwidth,
         )
         simulation = gpt2.simulate(
             transformed_function, initialized_input_data, topology
@@ -88,11 +101,21 @@ def simulate(config):
     except Exception as e:
         throughput = 0
         peak_memory = 0
-    return config, throughput, peak_memory
+    return condensed_config, throughput, peak_memory
 
 
 def run_pytorch(config):
-    (batch_size, dp_degree, hp_degree, pp_degree, num_microbatches) = config
+    (
+        model_path,
+        _,
+        _,
+        _,
+        batch_size,
+        dp_degree,
+        hp_degree,
+        pp_degree,
+        num_microbatches,
+    ) = config
     world_size = dp_degree * hp_degree * pp_degree
     topology = Topology()
     d0 = topology.add_device("gpu")
@@ -105,28 +128,32 @@ def run_pytorch(config):
         input_data,
         input_devices=[topology.devices[0] for _ in range(len(input_data))],
     )
-    init_function, transformed_function, initialized_input_data = gpt2.transform(
-        function,
-        input_data,
-        topology,
-        dp_degree,
-        hp_degree,
-        pp_degree,
-        num_microbatches,
-    )
+    condensed_config = (batch_size, dp_degree, hp_degree, pp_degree, num_microbatches)
+    try:
+        init_function, transformed_function, initialized_input_data = gpt2.transform(
+            function,
+            input_data,
+            topology,
+            dp_degree,
+            hp_degree,
+            pp_degree,
+            num_microbatches,
+        )
+    except Exception as e:
+        return condensed_config, 0, 0
     per_rank_outputs, runtimes = gpt2.run_pytorch(
         transformed_function, initialized_input_data, world_size
     )
     throughput = batch_size / np.median(runtimes[-1])
     # TODO: Measure peak memory?
     peak_memory = 0
-    return config, throughput, peak_memory
+    return condensed_config, throughput, peak_memory
 
 
 def grid_search(args):
     # TODO: Make search space configuration part of args
     all_cluster_sizes = [4]
-    all_batch_sizes = [256]
+    all_batch_sizes = [64, 128, 256]
     configs = []
     for batch_size in all_batch_sizes:
         for i, cluster_size in enumerate(all_cluster_sizes):
@@ -138,7 +165,17 @@ def grid_search(args):
                 else:
                     all_num_microbatches = [
                         int(2 ** k)
-                        for k in range(1, int(np.floor(np.log2(dp_batch_size) / 2)))
+                        for k in range(
+                            1,
+                            int(
+                                np.floor(
+                                    min(
+                                        np.log2(pp_degree) + 1,
+                                        np.log2(dp_batch_size) / 2,
+                                    )
+                                )
+                            ),
+                        )
                     ]
                 for num_microbatches in all_num_microbatches:
                     if pp_degree == 1:
@@ -147,6 +184,10 @@ def grid_search(args):
                         assert num_microbatches > 1
                     configs.append(
                         (
+                            args.model_path,
+                            args.device_throughput,
+                            args.dram_bandwidth,
+                            args.network_bandwidth,
                             batch_size,
                             dp_degree,
                             hp_degree,
@@ -156,13 +197,13 @@ def grid_search(args):
                     )
     for config in configs:
         print(config)
-    if args.backend == "simulation":
+    if not args.pytorch:
         n = multiprocessing.cpu_count()
         with multiprocessing.Pool(n) as pool:
             results = list(
                 tqdm.tqdm(pool.imap_unordered(simulate, configs), total=len(configs))
             )
-    elif args.backend == "pytorch":
+    else:
         results = []
         for config in tqdm.tqdm(configs):
             results.append(run_pytorch(config))
@@ -203,10 +244,19 @@ def grid_search(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GPT-2 Grid Search")
     parser.add_argument(
-        "--backend",
-        choices=["simulation", "pytorch"],
-        default="simulation",
-        help="Simulation or PyTorch",
+        "--pytorch", action="store_true", default=False, help="Use PyTorch backend"
+    )
+    parser.add_argument(
+        "--model_path", type=str, required=True, help="Path to GPT-2 ONNX model"
+    )
+    parser.add_argument(
+        "--network_bandwidth", type=float, default=77, help="Network bandwidth in Gbps"
+    )
+    parser.add_argument(
+        "--device_throughput", type=float, default=1.38e13, help="Device throughput"
+    )
+    parser.add_argument(
+        "--dram_bandwidth", type=float, default=7e11, help="DRAM Bandwidth"
     )
     args = parser.parse_args()
     grid_search(args)

@@ -103,7 +103,8 @@ class SequentialExecutor:
                         f"Op {op} has inputs from devices {set(input_devices)}!"
                     )
                 elif len(input_device_set) == 1:
-                    output_devices = [list(input_device_set)[0] for _ in range(len(op.outputs))]
+                    input_device = list(input_device_set)[0]
+                    output_devices = [input_device for _ in range(len(op.outputs))]
                 else:
                     output_devices = [None]
             for output, device in zip(op.outputs, output_devices):

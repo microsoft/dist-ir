@@ -121,19 +121,23 @@ def transform(
     hp_degree,
     pp_degree,
     num_microbatches,
-    filter_set=None,
+    device_throughput=1.38e13,
+    dram_bandwidth=7e11,
+    network_bandwidth=77,
 ):
     world_size = dp_degree * hp_degree * pp_degree
     for i in range(1, world_size + 1):
-        topology.add_device("gpu")
+        topology.add_device(
+            "gpu", throughput=device_throughput, dram_bandwidth=dram_bandwidth
+        )
         for j in range(0, i):
             if j == 0:
                 topology.set_bandwidth(
-                    topology.devices[i], topology.devices[j], NETWORK_BANDWIDTH_Gbps
+                    topology.devices[i], topology.devices[j], network_bandwidth
                 )
             else:
                 topology.set_bandwidth(
-                    topology.devices[i], topology.devices[j], NETWORK_BANDWIDTH_Gbps
+                    topology.devices[i], topology.devices[j], network_bandwidth
                 )
     init_function, transformed_function = gpt2_dhp_transform(
         function,
@@ -233,7 +237,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GPT-2 Inference")
     parser.add_argument(
-        "--model_path", type=str, required=True, help="Path to ONNX model"
+        "--model_path", type=str, required=True, help="Path to GPT-2 ONNX model"
     )
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
     parser.add_argument(

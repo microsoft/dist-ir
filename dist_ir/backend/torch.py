@@ -88,6 +88,7 @@ def _gather(x, y, axis=0, ctx=None):
     # TODO: Find the best Torch equivalent for this
     # torch.gather and torch.index_select do not work
     output = torch.tensor(np.take(x.cpu().numpy(), y.cpu().numpy(), axis=axis))
+    #output = torch.gather(x, index=torch.LongTensor(y), dim=axis)
     if output.shape == (1,):
         return output[0]
     if ctx.use_gpu:
@@ -432,13 +433,25 @@ def run_process(ctx, world_size, io_dir, num_warmup_steps, num_repetitions, rank
             events.append(perf_counter())
 
     # Time a bunch of executions, then execute once for output values
-    add_event()
-    for _ in range(num_warmup_steps + num_repetitions):
-        # res = module(*per_rank_inputs)
-        res = run_function(ctx, rank, fn, per_rank_inputs)
-        if world_size > 1:
-            torch.distributed.barrier()
+    with torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.CUDA,
+        ],
+        schedule=torch.profiler.schedule(
+            wait=0,
+            warmup=num_warmup_steps,
+            active=num_repetitions),
+        on_trace_ready=lambda p: p.export_chrome_trace(f"{rank}_profile.json")
+    ) as p:
         add_event()
+        for _ in range(num_warmup_steps + num_repetitions):
+            # res = module(*per_rank_inputs)
+            res = run_function(ctx, rank, fn, per_rank_inputs)
+            if world_size > 1:
+                torch.distributed.barrier()
+            add_event()
+            p.step()
 
     if ctx.use_gpu:
         # Move outputs back to cpu
@@ -447,6 +460,7 @@ def run_process(ctx, world_size, io_dir, num_warmup_steps, num_repetitions, rank
     torch.save(res, os.path.join(io_dir.name, f"out.{rank}.pt"))
 
     if ctx.use_gpu:
+        torch.cuda.synchronize()
         runtimes = [
             events[i].elapsed_time(events[i + 1]) / 1e3 for i in range(len(events) - 1)
         ]
@@ -521,8 +535,8 @@ def run_pytorch(
     fn,
     inputs,
     use_gpu=False,
-    num_repetitions=10,
-    num_warmup=10,
+    num_repetitions=1,
+    num_warmup=5,
     run_type_inference=True,
     debug_mock=False,
 ):

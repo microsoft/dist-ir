@@ -1,7 +1,7 @@
 from functools import partial
-import logging
 from operator import getitem
 import os
+import sys
 from tempfile import TemporaryDirectory
 from time import perf_counter
 from typing import Any, Dict, Iterable, List, NamedTuple, Tuple
@@ -11,7 +11,7 @@ import torch.distributed as dist
 from torch import fx
 
 from ..executor.rank_projector import project
-from ..ir import Function, cpprint
+from ..ir import Function, cpprint, pformat
 
 
 DistributedContext = NamedTuple(
@@ -22,6 +22,9 @@ DistributedContext = NamedTuple(
         Tuple[int]
     ],  # to store group IDs until threads can create ProcessGroups
 )
+
+
+# TODO organize by category
 
 
 def _add(x, y, ctx=None):
@@ -162,8 +165,6 @@ def function_to_module(fn: Function) -> torch.nn.Module:
     g = fx.Graph()
     value_map = {}
 
-    # TODO need to check that fn has unique value names
-
     # Convert inputs
     for v in fn.inputs:
         value_map[v] = g.placeholder(v.name)
@@ -203,12 +204,9 @@ def run_function(
 
     # Run ops
     for op in fn.ops:
-        first_output = (
-            op.outputs[0].name
-            if op.outputs is not None and len(op.outputs) > 0
-            else "None"
-        )
-        logging.info(f"{rank}: {first_output} {op.op_type}")
+        # op_str = pformat(op).replace("\n", " ")
+        # print(f"{rank}: {op_str}")
+        # sys.stdout.flush()
         inputs = tuple(value_map[v] for v in op.inputs)
         kwargs = {} if op.attributes is None else {**op.attributes}
         kwargs["ctx"] = ctx
@@ -219,7 +217,8 @@ def run_function(
                 value_map[v] = output[i]
         elif len(op.outputs) == 1:
             value_map[op.outputs[0]] = output
-        logging.info(f"{rank}: {first_output} {op.op_type}")
+        # print(f"{rank}: {op_str}")
+        # sys.stdout.flush()
 
     # Return outputs
     return tuple(value_map[v] for v in fn.outputs)
@@ -243,7 +242,7 @@ def run_process(ctx, world_size, io_dir, num_warmup_steps, num_repetitions, rank
 
     if ctx.use_gpu:
         # Move module and inputs to GPU
-        # TODO how to move interpreted non-module code to GPU?
+        # TODO check if interpreted code is running on GPU (check all inputs?)
         # module = module.cuda(rank)
         per_rank_inputs = [t.cuda(rank) for t in per_rank_inputs]
 
@@ -272,10 +271,10 @@ def run_process(ctx, world_size, io_dir, num_warmup_steps, num_repetitions, rank
     torch.save(res, os.path.join(io_dir.name, f"out.{rank}.pt"))
 
     if ctx.use_gpu:
+        torch.cuda.synchronize()
         runtimes = [
             events[i].elapsed_time(events[i + 1]) / 1e3 for i in range(len(events) - 1)
         ]
-        torch.cuda.synchronize()
     else:
         runtimes = [events[i + 1] - events[i] for i in range(len(events) - 1)]
 

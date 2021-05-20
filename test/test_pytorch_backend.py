@@ -143,6 +143,41 @@ def test_owt(num_devices, num_layers):
     assert all(np.allclose(y[0], o) for y, o in zip(per_rank_outputs, output_arrays))
 
 
+def test_dp_mp_matmuls():
+    fn = FunctionMaker("dp_mp_matmuls")
+    B = 64
+    d0 = Device(0, "gpu")
+    d1 = Device(1, "gpu")
+    x_0 = fn.add_input_value("x_0", Tensor(Float(), (B // 2, B), d0))
+    x_1 = fn.add_input_value("x_1", Tensor(Float(), (B // 2, B), d1))
+    wA_0 = fn.add_input_value("wA_0", Tensor(Float(), (B, B), d0))
+    wA_1 = fn.add_input_value("wA_1", Tensor(Float(), (B, B), d1))
+    wB_0 = fn.add_input_value("wB_0", Tensor(Float(), (B, B), d0))
+    wC_1 = fn.add_input_value("wC_1", Tensor(Float(), (B, B), d1))
+    a0_0 = fn.add_op("MatMul", inputs=[x_0, wA_0], output_names=["a0"])
+    a1_1 = fn.add_op("MatMul", inputs=[x_1, wA_1], output_names=["a1"])
+    a_0 = fn.add_op(
+        "MPIGather",
+        inputs=[a0_0, a1_1],
+        output_names=["a_0"],
+        attributes={"device": d0, "dim": 0},
+    )
+    b_0 = fn.add_op("MatMul", inputs=[a_0, wB_0], output_names=["b_0"])
+    b_1 = fn.add_op(
+        "Send", inputs=[b_0], output_names=["b_1"], attributes={"device": d1}
+    )
+    c_1 = fn.add_op("MatMul", inputs=[b_1, wC_1], output_names=["c_1"])
+    fn = fn.finalize()
+    fn = infer_types(fn, fn.inputs)
+    cpprint(fn)
+
+    from dist_ir.executor.rank_projector import project
+
+    per_rank_fns, groups = project(fn, tuple(v.type for v in fn.inputs), 2)
+    for per_rank_fn in per_rank_fns:
+        cpprint(per_rank_fn)
+
+
 def test_mlp_grid_search():
     # batch_sizes = [2 ** i for i in range(10, 15)]
     # hidden_dims = [2 ** i for i in range(8, 13)]

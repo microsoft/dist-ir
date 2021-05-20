@@ -57,6 +57,25 @@ def _collective_projector(op: Op, state: ProjectorState):
         state.per_rank_fns[d].ops.append(new_op)
 
 
+def _gather_projector(op: Op, state: ProjectorState):
+    devices = set(v.type.device for v in op.inputs)
+    assert len(op.inputs) == len(devices)
+    assert len(op.outputs) == 1 and op.outputs[0].type.device in devices
+    attributes = {
+        **(op.attributes if op.attributes is not None else {}),
+        "group": tuple(sorted(devices)),
+    }
+    for in_v in op.inputs:
+        d = in_v.type.device
+        new_op = Op(
+            op.op_type,
+            inputs=(in_v,),
+            output_values=op.outputs,  # TODO only on dst device!
+            attributes=attributes,
+        )
+        state.per_rank_fns[d].ops.append(new_op)
+
+
 def _send_projector(op: Op, state: ProjectorState):
     from_d = op.inputs[0].type.device
     to_d = op.attributes["device"]
@@ -88,6 +107,7 @@ ProjectorRegister = {
     ("MPIAllreduce", (Tensor,) * 4): _collective_projector,
     ("MPIAllreduce", (Tensor,) * 8): _collective_projector,
     ("MPIAllreduce", (Tensor,) * 16): _collective_projector,
+    ("MPIGather", (Tensor,) * 2): _gather_projector,
     ("Relu", (Tensor,)): _identity_projector,
     ("ReluGrad", (Tensor, Tensor)): _identity_projector,
     ("Send", (Tensor,)): _send_projector,

@@ -1,9 +1,11 @@
+from functools import reduce
+from operator import mul
 import numpy as np
 
 from ..ir.type import Tensor, TupleType
 
 BYTES_IN_Gb = 1.25e8
-KERNEL_LAUNCH_OVERHEAD = 1.0e-6
+KERNEL_LAUNCH_OVERHEAD = 1.0e-5
 
 
 class CostModel:
@@ -28,7 +30,7 @@ class CostModel:
         # TODO: Add support for variadic inputs
         self.cost_functions = {
             ("Add", (Tensor, Tensor)): self._elementwise_cost_fn,
-            ("Cast", (Tensor,)): self._cast_cost_fn,
+            ("Cast", (Tensor,)): self._elementwise_cost_fn,
             ("Concat", (Tensor, Tensor)): self._concat_cost_fn,
             ("Identity", (Tensor,)): self._identity_cost_fn,
             ("Join", (Tensor, Tensor)): self._join_cost_fn,
@@ -109,12 +111,17 @@ class CostModel:
         }
 
     def _elementwise_cost_fn(self, op, x, y=None):
-        flops = x.size()
-        runtime = flops / x.device.throughput
-        return {x.device: runtime}
-
-    def _cast_cost_fn(self, op, x):
-        return {x.device: x.size()}
+        if x.device is None:
+            return {}
+        n = reduce(mul, [x.shape[i] for i in range(len(x.shape))])
+        data_size = x.dtype.size * n
+        if y is not None:
+            data_size *= 2
+        flops = n
+        communication_cost = data_size / x.device.dram_bandwidth
+        computation_cost = flops / x.device.throughput
+        latency = KERNEL_LAUNCH_OVERHEAD + communication_cost + computation_cost
+        return {x.device: latency}
 
     def _concat_cost_fn(self, op, *xs):
         # TODO: Compute cost properly
@@ -133,7 +140,7 @@ class CostModel:
         flops = 2 * x.shape[0] * x.shape[1] * y.shape[1]
         communication_cost = data_size / x.device.dram_bandwidth
         computation_cost = flops / x.device.throughput
-        latency = communication_cost + computation_cost
+        latency = KERNEL_LAUNCH_OVERHEAD + communication_cost + computation_cost
         return {x.device: latency}
 
     def _matmul_grad_cost_fn(self, op, x, y, dz):

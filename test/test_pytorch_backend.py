@@ -191,9 +191,12 @@ def test_mlp_grid_search():
     # world_sizes = [1, 2]
     # all_num_layers = [32]
 
-    DEVICE_THROUGHPUT = 1.38e12  # 1.38e13  # FLOPS # TODO where from?
-    DRAM_BANDWIDTH = 7e11  # Bps
+    DEVICE_THROUGHPUT = 15e12  # FLOPS
+    DRAM_BANDWIDTH = 900e9  # Bps
+    # Both of the above are from: (FLOPS for Single-precision)
+    # https://www.anandtech.com/show/11367/nvidia-volta-unveiled-gv100-gpu-and-tesla-v100-accelerator-announced
     PCIE_BANDWIDTH = 77  # Gbps
+    # This was measured by Keshav. TODO measure again.
 
     results = []
     config_index = 0
@@ -273,7 +276,7 @@ def test_mlp_grid_search():
                 "batch_size": batch_size,
                 "hidden_dim": hidden_dim,
                 "simulated_time": simulated_time,
-                "actual_time": actual_time,
+                # "actual_time": actual_time,
             }
         )
 

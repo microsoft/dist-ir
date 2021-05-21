@@ -1,6 +1,7 @@
 from collections import defaultdict
 import csv
 import numpy as np
+import pandas as pd
 import pytest
 import torch
 
@@ -179,31 +180,53 @@ def test_dp_mp_matmuls():
 
 
 def test_mlp_grid_search():
-    # batch_sizes = [2 ** i for i in range(10, 15)]
-    # hidden_dims = [2 ** i for i in range(8, 13)]
-    batch_sizes = [64]
-    hidden_dims = [64]
-    world_sizes = [1, 2, 4, 8]
-    all_num_layers = [32]
+    # TODO move to grid_search.py
+    # TODO handle interrupts. Write full data to stdout too.
+    batch_sizes = [2 ** i for i in range(10, 15)]
+    hidden_dims = [2 ** i for i in range(8, 13)]
+    world_sizes = [1, 2, 4]
+    all_num_layers = [2 ** i for i in range(5, 10)]
+    # batch_sizes = [64]
+    # hidden_dims = [64]
+    # world_sizes = [1, 2]
+    # all_num_layers = [32]
+
+    DEVICE_THROUGHPUT = 1.38e12  # 1.38e13  # FLOPS # TODO where from?
+    DRAM_BANDWIDTH = 7e11  # Bps
+    PCIE_BANDWIDTH = 77  # Gbps
 
     results = []
+    config_index = 0
     for (batch_size, hidden_dim, num_layers, d, h, p, m) in gen_configurations(
         hidden_dims, world_sizes, all_num_layers, batch_sizes
     ):
+        # TODO remove. This is to get simulated results for first experiment
+        if config_index > 283:
+            break
+        config_index += 1
         world_size = d * h * p
         # TODO reuse seq_mlp
         topology = Topology()
-        d0 = topology.add_device("gpu")
-        add_devices_to_topology(topology, world_size)
+        d0 = topology.add_device(
+            "gpu", throughput=DEVICE_THROUGHPUT, dram_bandwidth=DRAM_BANDWIDTH
+        )  # TODO d0 shouldn't be a GPU, it should be CPU
+        for i in range(world_size):
+            di = topology.add_device(
+                "gpu", throughput=DEVICE_THROUGHPUT, dram_bandwidth=DRAM_BANDWIDTH
+            )
+            topology.set_bandwidth(d0, di, float("inf"))
+            for j in range(1, i + 1):
+                dj = topology.devices[j]
+                topology.set_bandwidth(di, dj, PCIE_BANDWIDTH)
         simulator = Simulator(CostModel(topology))
         seq_executor = SequentialExecutor("numpy")
         seq_mlp = mlp(batch_size, hidden_dim, hidden_dim, hidden_dim, num_layers, d0)
         seq_mlp = infer_types(seq_mlp, seq_mlp.inputs)
 
-        # Create random input data
-        input_data = tuple(
-            np.random.randn(*v.type.shape).astype(np.float32) for v in seq_mlp.inputs
-        )
+        # # Create random input data
+        # input_data = tuple(
+        #     np.random.randn(*v.type.shape).astype(np.float32) for v in seq_mlp.inputs
+        # )
 
         init_fn, fn = mlp_dist(seq_mlp, d, h, p, m, topology)
         print(fn.name)
@@ -213,69 +236,50 @@ def test_mlp_grid_search():
         simulated_time = max([simulation.timestamps[d] for d in simulation.timestamps])
         print(simulated_time)
 
-        # Reference-execute init_fn to get inputs for fn
-        dist_input_data = seq_executor.compute(init_fn, input_data)
-        dist_input_data = tuple(torch.tensor(t) for t in dist_input_data)
-        assert all(
-            t.shape == v.type.shape for (t, v) in zip(dist_input_data, fn.inputs)
-        )
+        # # Reference-execute init_fn to get inputs for fn
+        # dist_input_data = seq_executor.compute(init_fn, input_data)
+        # dist_input_data = tuple(torch.tensor(t) for t in dist_input_data)
+        # assert all(
+        #     t.shape == v.type.shape for (t, v) in zip(dist_input_data, fn.inputs)
+        # )
 
-        # Measure actual execution time
-        # TODO check outputs match?
-        # _, runtimes = run_pytorch(world_size, fn, dist_input_data)
-        _, runtimes = run_pytorch(
-            world_size,
-            fn,
-            dist_input_data,
-            use_gpu=False,
-            num_repetitions=1,  # TODO use 100
-            num_warmup=1,
-        )
-        # TODO or median of max?
-        actual_time = max(np.median(times) for times in runtimes)
+        # # Measure actual execution time
+        # # TODO check outputs match?
+        # # _, runtimes = run_pytorch(world_size, fn, dist_input_data)
+        # _, runtimes = run_pytorch(
+        #     world_size,
+        #     fn,
+        #     dist_input_data,
+        #     use_gpu=True,
+        #     num_repetitions=100,
+        #     num_warmup=10,
+        #     # num_repetitions=1,
+        #     # num_warmup=0,
+        # )
+        # # TODO or median of max?
+        # actual_time = max(np.median(times) for times in runtimes)
+
+        actual_time = 0.0
 
         print(fn.name, simulated_time, actual_time)
         results.append(
-            (
-                world_size,
-                num_layers,
-                batch_size,
-                hidden_dim,
-                simulated_time,
-                actual_time,
-            )
+            {
+                "world_size": world_size,
+                "D": d,
+                "H": h,
+                "P": p,
+                "M": m,
+                "num_layers": num_layers,
+                "batch_size": batch_size,
+                "hidden_dim": hidden_dim,
+                "simulated_time": simulated_time,
+                "actual_time": actual_time,
+            }
         )
 
-    fieldnames = [
-        "world_size",
-        "num_layers",
-        "batch_size",
-        "hidden_dim",
-        "simulated_time",
-        "actual_time",
-    ]
-
-    with open("mlp_grid_search.csv", "w") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for (
-            world_size,
-            num_layers,
-            batch_size,
-            hidden_dim,
-            simulated_time,
-            actual_time,
-        ) in results:
-            writer.writerow(
-                {
-                    "world_size": world_size,
-                    "num_layers": num_layers,
-                    "batch_size": batch_size,
-                    "hidden_dim": hidden_dim,
-                    "simulated_time": simulated_time,
-                    "actual_time": actual_time,
-                }
-            )
+    results = pd.DataFrame(results)
+    # results.to_pickle("mlp_grid_search.pkl")
+    results.to_pickle("mlp_simulated.pkl")
 
 
 def plot_mlp_grid_search_results():

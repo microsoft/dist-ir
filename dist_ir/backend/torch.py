@@ -192,7 +192,6 @@ def run_function(
     inputs: List[Any],
     debug_mock=False,
 ):
-    # TODO free values when no longer needed
     op_to_torch = _mock_op_to_torch if debug_mock else _op_to_torch
     value_map = {}
 
@@ -209,13 +208,21 @@ def run_function(
         inputs = tuple(value_map[v] for v in op.inputs)
         kwargs = {} if op.attributes is None else {**op.attributes}
         kwargs["ctx"] = ctx
+
         output = op_to_torch[op.op_type](*inputs, **kwargs)
+
         if len(op.outputs) > 1:
             assert isinstance(output, tuple)
             for i, v in enumerate(op.outputs):
                 value_map[v] = output[i]
         elif len(op.outputs) == 1:
             value_map[op.outputs[0]] = output
+
+        # Free tensors that are not used again
+        for v in op.inputs:
+            if v in value_map and fn.last_use(v) == op and not (v in fn.outputs):
+                del value_map[v]
+
         # print(f"{rank}: {op_str}")
         # sys.stdout.flush()
 
@@ -236,6 +243,7 @@ def run_process(ctx, world_size, num_warmup_steps, num_repetitions, rank, fn, in
     # Create the process groups used by fn's communication ops
     for group in ctx.groups_list:
         ranks = tuple(d - 1 for d in group)  # TODO fixme
+        # TODO ctx is copied or shared among threads?
         ctx.groups[group] = dist.new_group(ranks)
 
     if ctx.use_gpu:

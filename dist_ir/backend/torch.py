@@ -2,7 +2,6 @@ from functools import partial
 from operator import getitem
 import os
 import sys
-from tempfile import TemporaryDirectory
 from time import perf_counter
 from typing import Any, Dict, Iterable, List, NamedTuple, Tuple
 
@@ -224,8 +223,12 @@ def run_function(
     return tuple(value_map[v] for v in fn.outputs)
 
 
-def run_process(ctx, world_size, io_dir, num_warmup_steps, num_repetitions, rank, fn):
-    """The Python function on rank `rank` that runs module `module`."""
+def run_process(ctx, world_size, num_warmup_steps, num_repetitions, rank, fn, inputs):
+    """The Python function on rank `rank` that runs DistIR function `fn` on
+    (torch) inputs `inputs`. The function is run
+    `num_warmup_steps + num_repetitions` times. The outputs of the last run are
+    returned, along with the last `num_repetitions` runtimes.
+    """
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = "29500"
     backend = "nccl" if ctx.use_gpu else "gloo"
@@ -235,16 +238,11 @@ def run_process(ctx, world_size, io_dir, num_warmup_steps, num_repetitions, rank
         ranks = tuple(d - 1 for d in group)  # TODO fixme
         ctx.groups[group] = dist.new_group(ranks)
 
-    per_rank_inputs = torch.load(os.path.join(io_dir.name, f"in.{rank}.pt"))
-
-    # # Convert per-rank DistIR function to torch.nn.Module:
-    # module = function_to_module(fn)
-
     if ctx.use_gpu:
         # Move module and inputs to GPU
         # TODO check if interpreted code is running on GPU (check all inputs?)
         # module = module.cuda(rank)
-        per_rank_inputs = [t.cuda(rank) for t in per_rank_inputs]
+        inputs = [t.cuda(rank) for t in inputs]
 
     events = []
 
@@ -258,17 +256,15 @@ def run_process(ctx, world_size, io_dir, num_warmup_steps, num_repetitions, rank
     # Time a bunch of executions, then execute once for output values
     add_event()
     for _ in range(num_warmup_steps + num_repetitions):
-        # res = module(*per_rank_inputs)
-        res = run_function(ctx, rank, fn, per_rank_inputs)
+        # res = module(*inputs)
+        outputs = run_function(ctx, rank, fn, inputs)
         if world_size > 1:
             torch.distributed.barrier()
         add_event()
 
     if ctx.use_gpu:
         # Move outputs back to cpu
-        res = [t.cpu() for t in res]
-
-    torch.save(res, os.path.join(io_dir.name, f"out.{rank}.pt"))
+        outputs = [t.cpu() for t in outputs]
 
     if ctx.use_gpu:
         torch.cuda.synchronize()
@@ -279,7 +275,7 @@ def run_process(ctx, world_size, io_dir, num_warmup_steps, num_repetitions, rank
         runtimes = [events[i + 1] - events[i] for i in range(len(events) - 1)]
 
     dist.destroy_process_group()
-    return runtimes[num_warmup_steps:]
+    return outputs, runtimes[num_warmup_steps:]
 
 
 def run_mock_multiprocess(
@@ -315,29 +311,17 @@ def run_multiprocesses(
 ):
     assert len(per_rank_functions) == len(per_rank_inputs)
     world_size = len(per_rank_functions)
+    args = [
+        (r, f, x) for (r, (f, x)) in enumerate(zip(per_rank_functions, per_rank_inputs))
+    ]
 
-    # TODO just pass tensors instead
-    # Save inputs for each per-rank function:
-    io_dir = TemporaryDirectory()
-    # print("run_multiprocess: saving I/O to:", io_dir.name)
-    # TODO lowered pytorch file numbers devices 0...num_devices-1
-    for d, inps in enumerate(per_rank_inputs):
-        torch.save(inps, os.path.join(io_dir.name, f"in.{d}.pt"))
-
-    global run_process
-    per_rank_runner = partial(
-        run_process, ctx, world_size, io_dir, num_warmup, num_repetitions
-    )
+    global run_process  # TODO needed?
+    per_rank_runner = partial(run_process, ctx, world_size, num_warmup, num_repetitions)
     mp = torch.multiprocessing.get_context("spawn")
     with mp.Pool(world_size) as p:
-        runtimes = p.starmap(per_rank_runner, enumerate(per_rank_functions))
+        outputs = p.starmap(per_rank_runner, args)
 
-    # Load outputs:
-    per_rank_outputs = [
-        torch.load(os.path.join(io_dir.name, f"out.{d}.pt")) for d in range(world_size)
-    ]
-    io_dir.cleanup()
-
+    per_rank_outputs, runtimes = zip(*outputs)
     return per_rank_outputs, runtimes
 
 

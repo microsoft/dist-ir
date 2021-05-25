@@ -112,11 +112,15 @@ def plot_throughputs(results):
 
 plot_throughputs(results)
 
+# TODO add throughputs to DF
+
 # %%
 
 results["err"] = results["actual_time"] - results["simulated_time"]
 results.sort_values(by="err", ascending=False)
 
 # TODO
+# - why does 1-1-1 have highest throughputs?
+# - plot runtime vs world_size for D, H, P alone, for same model
 # - dump chrome trace from pytorch
 # - See if matmul timings, sequential timings match up

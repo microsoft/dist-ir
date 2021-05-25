@@ -315,7 +315,6 @@ def run_multiprocesses(
         (r, f, x) for (r, (f, x)) in enumerate(zip(per_rank_functions, per_rank_inputs))
     ]
 
-    global run_process  # TODO needed?
     per_rank_runner = partial(run_process, ctx, world_size, num_warmup, num_repetitions)
     mp = torch.multiprocessing.get_context("spawn")
     with mp.Pool(world_size) as p:

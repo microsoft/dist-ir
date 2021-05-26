@@ -171,8 +171,8 @@ def test_dp_mp_matmuls():
 
     from dist_ir.executor.rank_projector import project
 
-    per_rank_fns, groups = project(fn, tuple(v.type for v in fn.inputs), 2)
-    for per_rank_fn in per_rank_fns:
+    per_rank_fns, groups = project(fn, tuple(v.type for v in fn.inputs))
+    for per_rank_fn in per_rank_fns.values():
         cpprint(per_rank_fn)
 
 
@@ -433,6 +433,7 @@ if __name__ == "__main__":
     # test_dp_mlp()
     # test_send_recv()
     # test_single_device()
+    test_dp_mp_matmuls()
 
     test_mlp_grid_search()
     # plot_mlp_grid_search_results()

@@ -11,10 +11,15 @@ from .absint import AbstractState, AbstractInterpreter
 
 
 class ProjectorState(AbstractState):
+    """The Abstract Interpreter state for projection. It keeps a mapping from
+    Devices to per-rank Functions, and a set of Device groups that perform
+    collective communication.
+    """
+
     def __init__(self, function: Function, inputs: Sequence[Any]):
         AbstractState.__init__(self, function, inputs)
         self.per_rank_fns: Dict[Device, FunctionMaker] = defaultdict(FunctionMaker)
-        self.groups: Set[Tuple[int]] = set()
+        self.groups: Set[Tuple[Device]] = set()
 
 
 def _get_input_devices(op: Op):
@@ -173,8 +178,13 @@ Projector = AbstractInterpreter(
 )
 
 
-def project(fn: Function, input_types: Sequence[Type]) -> Tuple[Function]:
-    """Project fn to a sequence of per-rank functions."""
+def project(
+    fn: Function, input_types: Sequence[Type]
+) -> Tuple[Dict[Device, Function], Set[Tuple[Device]]]:
+    """Project `fn` to per-rank functions. Returns a mapping from Devices to
+    per-rank Functions, and a set of Device groups that perform collective
+    communications in `fn`.
+    """
     state = ProjectorState(fn, input_types)
 
     # Project fn's inputs to each per-rank fn:
@@ -207,7 +217,6 @@ def project(fn: Function, input_types: Sequence[Type]) -> Tuple[Function]:
                 )
             )
         new_fn.set_outputs(tuple(value_map[v] for v in per_rank_fn.outputs))
-        # TODO fix off-by-one discrepancy between DistIR device ID and torch rank
         result_fns[d] = new_fn.finalize()
 
     return result_fns, state.groups

@@ -159,6 +159,9 @@ _mock_op_to_torch = {**_op_to_torch, **_mock_comm_ops}
 
 
 def function_to_module(fn: Function) -> torch.nn.Module:
+    """Deprecated. Converts a DistIR Function to a PyTorch nn.Module using
+    torch.fx.
+    """
     g = fx.Graph()
     value_map = {}
 
@@ -185,11 +188,13 @@ def function_to_module(fn: Function) -> torch.nn.Module:
 
 def run_function(
     ctx: DistributedContext,
-    rank: int,
     fn: Function,
     inputs: List[Any],
     debug_mock=False,
 ):
+    """Runs DistIR Function `fn` on `inputs` in a distributed context `ctx` by
+    converting each DistIR op to its torch implementation as given in _op_to_torch.
+    """
     op_to_torch = _mock_op_to_torch if debug_mock else _op_to_torch
     value_map = {}
 
@@ -265,11 +270,11 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
     for _ in range(num_warmup_steps + num_repetitions):
         # res = module(*inputs)
         # try:
-        #     outputs = run_function(ctx, rank, fn, inputs)
+        #     outputs = run_function(ctx, fn, inputs)
         # except Exception as e:
         #     print_exc()
         #     sys.exit(1)
-        outputs = run_function(ctx, rank, fn, inputs)
+        outputs = run_function(ctx, fn, inputs)
         if ctx.world_size > 1:
             torch.distributed.barrier()
         add_event()
@@ -302,7 +307,7 @@ def run_mock_multiprocess(
     ctx = DistributedContext(use_gpu=False, groups=None)
 
     per_rank_outputs = [
-        run_function(ctx, rank, fn, inputs, debug_mock=True)
+        run_function(ctx, fn, inputs, debug_mock=True)
         for rank, fn, inputs in zip(
             range(_mock_world_size), per_rank_functions, per_rank_inputs
         )

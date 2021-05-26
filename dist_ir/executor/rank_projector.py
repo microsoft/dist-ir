@@ -21,6 +21,13 @@ def _get_input_devices(op: Op):
     return list(set(x.type.device for x in op.inputs))
 
 
+def _make_group(devices):
+    """Return a hashable representation of a group of devices. This is needed by
+    the backend, which maps them to process groups for communication primitives.
+    """
+    return tuple(sorted(set(devices)))
+
+
 # TODO should projectors just get the per_rank_fns dict instead of full state?
 
 
@@ -39,10 +46,10 @@ def _collective_projector(op: Op, state: ProjectorState):
     """Projects a collective op over D devices that has D inputs and D outputs,
     one on each device."""
     assert len(op.inputs) == len(op.outputs)
-    devices = {int(v.type.device.device_id) for v in op.inputs + op.outputs}
+    group = _make_group(v.type.device for v in op.inputs + op.outputs)
     attributes = {
         **(op.attributes if op.attributes is not None else {}),
-        "group": tuple(sorted(devices)),
+        "group": group,
     }
     for in_v, out_v in zip(op.inputs, op.outputs):
         assert in_v.type.device == out_v.type.device
@@ -63,7 +70,7 @@ def _gather_projector(op: Op, state: ProjectorState):
     assert len(op.outputs) == 1 and op.outputs[0].type.device in devices
     attributes = {
         **(op.attributes if op.attributes is not None else {}),
-        "group": tuple(sorted(devices)),
+        "group": _make_group(devices),
     }
     for in_v in op.inputs:
         d = in_v.type.device
@@ -79,14 +86,23 @@ def _gather_projector(op: Op, state: ProjectorState):
 def _send_projector(op: Op, state: ProjectorState):
     from_d = op.inputs[0].type.device
     to_d = op.attributes["device"]
+    group = _make_group((from_d, to_d))
     state.per_rank_fns[from_d].ops.append(
-        Op("SendP2P", inputs=op.inputs, attributes={"device": to_d.device_id})
+        Op(
+            "SendP2P",
+            inputs=op.inputs,
+            attributes={"to_d": to_d, "group": group},
+        )
     )
     state.per_rank_fns[to_d].ops.append(
         Op(
             "RecvP2P",
             output_values=(op.outputs[0],),
-            attributes={"shape": op.inputs[0].type.shape, "device": from_d.device_id},
+            attributes={
+                "shape": op.inputs[0].type.shape,
+                "from_d": from_d,
+                "group": group,
+            },
         )
     )
 
@@ -136,11 +152,10 @@ def _create_semantics(type_prop_register, projector_register):
             projector(op, state)
 
             # If op involves more than one device, create a group
-            devices = {v.device.device_id for v in outputs}.union(
-                {int(v.type.device.device_id) for v in op.inputs}
-            )
-            if len(devices) > 1:
-                state.groups.add(tuple(sorted(devices)))
+            devices = [v.device for v in outputs] + [v.type.device for v in op.inputs]
+            group = _make_group(devices)
+            if len(group) > 1:
+                state.groups.add(group)
 
         return semantics
 
@@ -158,9 +173,7 @@ Projector = AbstractInterpreter(
 )
 
 
-def project(
-    fn: Function, input_types: Sequence[Type], num_devices: int
-) -> Tuple[Function]:
+def project(fn: Function, input_types: Sequence[Type]) -> Tuple[Function]:
     """Project fn to a sequence of per-rank functions."""
     state = ProjectorState(fn, input_types)
 
@@ -171,8 +184,8 @@ def project(
     state = Projector.interpret(fn, input_types, state=state)
 
     # Erase all types in per_rank_fns:
-    # TODO do this during projection?
-    result_fns = [Function(fn.name, (), (), ()) for _ in range(num_devices)]
+    # TODO don't use singleton types, and remove this
+    result_fns = {}
     for d, per_rank_fn in state.per_rank_fns.items():
         value_map = {}
         new_fn = FunctionMaker(name=f"{fn.name}_{d.device_id-1}")
@@ -195,6 +208,6 @@ def project(
             )
         new_fn.set_outputs(tuple(value_map[v] for v in per_rank_fn.outputs))
         # TODO fix off-by-one discrepancy between DistIR device ID and torch rank
-        result_fns[d.device_id - 1] = new_fn.finalize()
+        result_fns[d] = new_fn.finalize()
 
     return result_fns, state.groups

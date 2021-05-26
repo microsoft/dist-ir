@@ -3,6 +3,7 @@ from operator import getitem
 import os
 import sys
 from time import perf_counter
+from traceback import print_exc
 from typing import Any, Dict, Iterable, List, NamedTuple, Tuple
 
 import torch
@@ -11,15 +12,19 @@ from torch import fx
 
 from ..executor.rank_projector import project
 from ..ir import Function, cpprint, pformat
+from ..ir.device import Device
 
 
 DistributedContext = NamedTuple(
     "DistributedContext",
+    world_size=int,
     use_gpu=bool,
-    groups=Dict[Tuple[int, int], Any],  # Maps tuple of ranks to ProcessGroup
-    groups_list=Iterable[
-        Tuple[int]
-    ],  # to store group IDs until threads can create ProcessGroups
+    # Map from DistIR device to PyTorch backend rank
+    device_to_rank=Dict[Device, int],
+    # Maps tuple of ranks to ProcessGroup
+    groups=Dict[Tuple[int], Any],
+    # Temp store of group IDs until threads can create ProcessGroups
+    groups_list=Iterable[Tuple[int]],
 )
 
 
@@ -70,18 +75,14 @@ def _matmul_grad(x, y, dz, ctx=None):
     return (torch.matmul(dz, y.T), torch.matmul(x.T, dz))
 
 
-def _recv(shape=None, device=None, ctx=None):
+def _recv(shape=None, from_d=None, group=None, ctx=None):
     x = torch.zeros(shape)
-    # TODO pytorch rank = device_id - 1
+    src_rank = ctx.device_to_rank[from_d]
     if ctx.use_gpu:
         x = x.cuda(dist.get_rank())
-        src_rank = device - 1
-        dst_rank = dist.get_rank()
-        group_key = tuple(sorted(device, dst_rank + 1))
-        group = ctx.groups[group_key]
-        dist.broadcast(x, src_rank, group=group)
+        dist.broadcast(x, src_rank, group=ctx.groups[group])
     else:
-        dist.recv(x, device - 1)
+        dist.recv(x, src_rank)
     return x
 
 
@@ -95,16 +96,13 @@ def _relu_grad(x, dy, ctx=None):
     return dx
 
 
-def _send(x, device=None, ctx=None):
-    # TODO pytorch rank = device_id - 1
+def _send(x, to_d=None, group=None, ctx=None):
     if ctx.use_gpu:
         src_rank = dist.get_rank()
-        dst_rank = device - 1
-        group_key = tuple(sorted((src_rank - 1, device)))
-        group = ctx.groups[group_key]
-        dist.broadcast(x, src_rank, group=group)
+        dist.broadcast(x, src_rank, group=ctx.groups[group])
     else:
-        dist.send(x, device - 1)
+        dst_rank = ctx.device_to_rank[to_d]
+        dist.send(x, dst_rank)
     # Note: in a proper backend, might want to concatenate multiple tensors into
     # a single buffer and call a single send op
 
@@ -230,7 +228,7 @@ def run_function(
     return tuple(value_map[v] for v in fn.outputs)
 
 
-def run_process(ctx, world_size, num_warmup_steps, num_repetitions, rank, fn, inputs):
+def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
     """The Python function on rank `rank` that runs DistIR function `fn` on
     (torch) inputs `inputs`. The function is run
     `num_warmup_steps + num_repetitions` times. The outputs of the last run are
@@ -239,10 +237,11 @@ def run_process(ctx, world_size, num_warmup_steps, num_repetitions, rank, fn, in
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = "29500"
     backend = "nccl" if ctx.use_gpu else "gloo"
-    dist.init_process_group(backend, rank=rank, world_size=world_size)
+    dist.init_process_group(backend, rank=rank, world_size=ctx.world_size)
+
     # Create the process groups used by fn's communication ops
     for group in ctx.groups_list:
-        ranks = tuple(d - 1 for d in group)  # TODO fixme
+        ranks = [ctx.device_to_rank[d] for d in group]
         # TODO ctx is copied or shared among threads?
         ctx.groups[group] = dist.new_group(ranks)
 
@@ -265,8 +264,13 @@ def run_process(ctx, world_size, num_warmup_steps, num_repetitions, rank, fn, in
     add_event()
     for _ in range(num_warmup_steps + num_repetitions):
         # res = module(*inputs)
+        # try:
+        #     outputs = run_function(ctx, rank, fn, inputs)
+        # except Exception as e:
+        #     print_exc()
+        #     sys.exit(1)
         outputs = run_function(ctx, rank, fn, inputs)
-        if world_size > 1:
+        if ctx.world_size > 1:
             torch.distributed.barrier()
         add_event()
 
@@ -318,14 +322,13 @@ def run_multiprocesses(
     num_warmup=0,
 ):
     assert len(per_rank_functions) == len(per_rank_inputs)
-    world_size = len(per_rank_functions)
     args = [
         (r, f, x) for (r, (f, x)) in enumerate(zip(per_rank_functions, per_rank_inputs))
     ]
 
-    per_rank_runner = partial(run_process, ctx, world_size, num_warmup, num_repetitions)
+    per_rank_runner = partial(run_process, ctx, num_warmup, num_repetitions)
     mp = torch.multiprocessing.get_context("spawn")
-    with mp.Pool(world_size) as p:
+    with mp.Pool(ctx.world_size) as p:
         outputs = p.starmap(per_rank_runner, args)
 
     per_rank_outputs, runtimes = zip(*outputs)
@@ -333,7 +336,6 @@ def run_multiprocesses(
 
 
 def run_pytorch(
-    num_devices,
     fn,
     inputs,
     use_gpu=False,
@@ -344,18 +346,32 @@ def run_pytorch(
     """Project `fn` and run on `inputs` over `num_devices` devices using the
     PyTorch backend.
     """
-    # TODO check that fn uses devices [0...num_devices),
-    # or run through and find max device used
-
     # print(*(x.shape for x in inputs))
     # cpprint(fn)
 
-    per_rank_fns, groups = project(fn, tuple(v.type for v in fn.inputs), num_devices)
-    ctx = DistributedContext(use_gpu=use_gpu, groups={}, groups_list=groups)
+    device_to_fns, groups = project(fn, tuple(v.type for v in fn.inputs))
 
-    per_rank_inputs = [[] for _ in range(num_devices)]
+    # Map between DistIR devices and pytorch ranks:
+    device_to_rank = {}
+    world_size = 0
+    per_rank_fns = []
+    for d in device_to_fns:
+        device_to_rank[d] = world_size
+        per_rank_fns.append(device_to_fns[d])
+        world_size += 1
+
+    ctx = DistributedContext(
+        world_size=world_size,
+        use_gpu=use_gpu,
+        groups={},
+        groups_list=list(groups),
+        device_to_rank=device_to_rank,
+    )
+
+    per_rank_inputs = [[] for _ in range(world_size)]
     for v, a in zip(fn.inputs, inputs):
-        per_rank_inputs[v.type.device.device_id - 1].append(a)
+        per_rank_inputs[device_to_rank[v.type.device]].append(a)
+
     # for xs, per_rank_fn in zip(per_rank_inputs, per_rank_fns):
     #     print(*(x.shape for x in xs))
     #     cpprint(per_rank_fn)

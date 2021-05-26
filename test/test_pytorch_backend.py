@@ -135,9 +135,7 @@ def test_owt(num_devices, num_layers):
     assert all(np.allclose(y, o) for y, o in zip(ys, output_arrays))
 
     # Run per-rank modules using PyTorch backend:
-    per_rank_outputs, _ = run_pytorch(
-        num_devices, fn, [torch.tensor(a) for a in input_arrays]
-    )
+    per_rank_outputs, _ = run_pytorch(fn, [torch.tensor(a) for a in input_arrays])
 
     # Check outputs:
     assert all(np.allclose(y[0], o) for y, o in zip(per_rank_outputs, output_arrays))
@@ -224,7 +222,6 @@ def test_mlp_grid_search():
         # TODO check outputs match?
         # _, runtimes = run_pytorch(world_size, fn, dist_input_data)
         _, runtimes = run_pytorch(
-            world_size,
             fn,
             dist_input_data,
             use_gpu=False,
@@ -359,9 +356,8 @@ def plot_mlp_grid_search_results():
     )
 
 
-def test_empty_device():
+def test_single_device():
     d1 = Device(1, "gpu")
-    d2 = Device(2, "gpu")
     fn = FunctionMaker()
     x = fn.add_input_value("x", Tensor(Float(), (4, 4), d1))
     y = fn.add_op("MatMul", inputs=(x, x))
@@ -371,7 +367,7 @@ def test_empty_device():
 
     x = torch.randn(4, 4)
     inputs = (x,)
-    outputs, _ = run_pytorch(2, fn, inputs)
+    outputs, _ = run_pytorch(fn, inputs)
     print(outputs)
     assert torch.allclose(torch.matmul(x, x), outputs[0][0])
 
@@ -388,7 +384,7 @@ def test_send_recv():
 
     x = torch.randn(4, 4)
     inputs = (x,)
-    outputs, _ = run_pytorch(2, fn, inputs)
+    outputs, _ = run_pytorch(fn, inputs)
     assert torch.allclose(x, outputs[1][0])
 
 
@@ -424,9 +420,7 @@ def test_dp_mlp():
         y = torch.relu(y)
 
     # Project and run on backend:
-    per_rank_outputs, runtimes = run_pytorch(
-        num_devices, fn, convert_inputs_dp(weights, x)
-    )
+    per_rank_outputs, runtimes = run_pytorch(fn, convert_inputs_dp(weights, x))
 
     # Check outputs:
     assert torch.allclose(y, torch.cat([o[0] for o in per_rank_outputs], 0))
@@ -438,7 +432,7 @@ if __name__ == "__main__":
     # test_owt(2, 4)
     # test_dp_mlp()
     # test_send_recv()
-    # test_empty_device()
+    # test_single_device()
 
     test_mlp_grid_search()
     # plot_mlp_grid_search_results()

@@ -247,7 +247,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
     # Create the process groups used by fn's communication ops
     for group in ctx.groups_list:
         ranks = [ctx.device_to_rank[d] for d in group]
-        # TODO ctx is copied or shared among threads?
+        # ctx is a curried arg, hence is thread-local and can be modified:
         ctx.groups[group] = dist.new_group(ranks)
 
     if ctx.use_gpu:

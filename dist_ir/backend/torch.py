@@ -251,9 +251,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
         ctx.groups[group] = dist.new_group(ranks)
 
     if ctx.use_gpu:
-        # Move module and inputs to GPU
-        # TODO check if interpreted code is running on GPU (check all inputs?)
-        # module = module.cuda(rank)
+        # Move inputs to GPU
         inputs = [t.cuda(rank) for t in inputs]
 
     events = []
@@ -268,7 +266,6 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
     # Time a bunch of executions, then execute once for output values
     add_event()
     for _ in range(num_warmup_steps + num_repetitions):
-        # res = module(*inputs)
         # try:
         #     outputs = run_function(ctx, fn, inputs)
         # except Exception as e:

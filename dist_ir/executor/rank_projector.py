@@ -72,7 +72,7 @@ def _collective_projector(op: Op, state: ProjectorState):
     devices = {int(v.type.device.device_id) for v in op.inputs + op.outputs}
     attributes = {
         **(op.attributes if op.attributes is not None else {}),
-        "group": tuple(devices),
+        "group": tuple(sorted(devices)),
     }
     for in_v, out_v in zip(op.inputs, op.outputs):
         assert in_v.type.device == out_v.type.device

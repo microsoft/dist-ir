@@ -215,7 +215,8 @@ def main(args):
     )
     if args.backend == "simulate":
         simulation = simulate(transformed_function, initialized_input_data, topology)
-
+        if args.trace_file is not None:
+            simulation.dump_chrome_trace(args.trace_file)
         distributed_running_time = max(
             [simulation.timestamps[d] for d in simulation.timestamps]
         )
@@ -264,5 +265,6 @@ if __name__ == "__main__":
         default=False,
         help="Use GPU with PyTorch backend",
     )
+    parser.add_argument("--trace_file", type=str, default=None, help="Trace file")
     args = parser.parse_args()
     main(args)

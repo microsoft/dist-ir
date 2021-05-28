@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package dist_ir;
+
+import "op.proto";
+import "value.proto";
+
+message Function {
+    string name = 1;
+    repeated Op ops = 2;
+    repeated Value inputs = 3;
+    repeated Value outputs = 4;
+    // TODO: Add consumers?
+}

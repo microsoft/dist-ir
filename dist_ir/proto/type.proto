@@ -1,0 +1,39 @@
+syntax = "proto3";
+
+package dist_ir;
+
+import "device.proto";
+
+enum DataType {
+    INT32 = 0;
+    INT64 = 1;
+    FLOAT16 = 2;
+    FLOAT32 = 3;
+    BOOL = 4;
+}
+
+message Int32 {
+    Device device = 1;
+}
+
+message Int64 {
+    Device device = 1;
+}
+
+message Float16 {
+    Device device = 1;
+}
+
+message Float32 {
+    Device device = 1;
+}
+
+message Bool {
+    Device device = 1;
+}
+
+message Tensor {
+    Device device = 1;
+    DataType dtype = 2;
+    repeated uint32 shape = 3; 
+}

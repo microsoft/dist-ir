@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package dist_ir;
+
+message Device {
+    string device_id = 1;
+    string device_type = 2;
+    float throughput = 3;
+    float dram_bandwidth = 4; 
+}

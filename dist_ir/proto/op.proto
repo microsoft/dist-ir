@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package dist_ir;
+
+import "google/protobuf/any.proto";
+import "value.proto";
+
+message Op {
+    string op_type = 1;
+    string name = 2;
+    repeated Value inputs = 3;
+    map<string, google.protobuf.Any> attributes = 4;
+    repeated Value outputs = 5; 
+    // TODO: Add subfunctions?
+}

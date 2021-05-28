@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package dist_ir;
+
+import "type.proto";
+
+message Value {
+    string name = 1;
+    oneof type {
+        Int32 i32 = 2;
+        Int64 i64 = 3;
+        Float16 f16 = 4;
+        Float32 f32 = 5;
+        Bool bool = 6;
+        Tensor tensor = 7;
+    }
+}

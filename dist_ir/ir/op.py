@@ -6,6 +6,7 @@ from frozendict import frozendict
 from .op_register import OpRegister
 from .value import Value
 from .type import Type
+from ..proto import op_pb2
 
 
 @dataclass(frozen=True)
@@ -93,3 +94,16 @@ class Op:
         object.__setattr__(
             self, "outputs", output_values
         )  # Can't assign to frozen field
+
+    def serialize_to_proto(self):
+        op_proto = op_pb2.Op()
+        op_proto.op_type = self.op_type
+        op_proto.name = self.name
+        for inp in self.inputs:
+            inp_proto = inp.serialize_to_proto()
+            op_proto.inputs.append(inp_proto)
+        # TODO: Serialize attributes
+        for output in self.outputs:
+            output_proto = output.serialize_to_proto()
+            op_proto.outputs.append(output_proto)
+        return op_proto

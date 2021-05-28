@@ -5,6 +5,7 @@ from typing import Optional, Set, Tuple
 
 from .device import Device
 from .utils import singleton
+from ..proto import type_pb2
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,9 @@ class Int32(Type):
     def size(self):
         return 4
 
+    def serialize_to_proto(self):
+        return type_pb2.Int32()
+
 
 @singleton
 class Int64(Type):
@@ -48,6 +52,9 @@ class Int64(Type):
     @property
     def size(self):
         return 8
+
+    def serialize_to_proto(self):
+        return type_pb2.Int64()
 
 
 @singleton
@@ -72,6 +79,9 @@ class Bool(Type):
     @property
     def size(self):
         return 1
+
+    def serialize_to_proto(self):
+        return type_pb2.Bool()
 
 
 @dataclass(frozen=True)
@@ -98,6 +108,34 @@ class Tensor(Type):
 
     def size(self):
         return reduce(mul, self.shape) * self.dtype.size
+
+    def serialize_to_proto(self):
+        tensor_proto = type_pb2.Tensor()
+        if self.device is not None:
+            tensor_proto.device.CopyFrom(self.device.serialize_to_proto())
+        else:
+            # TODO: Anything?
+            pass
+        if self.shape is not None:
+            for dim in self.shape:
+                tensor_proto.shape.append(dim)
+        if self.dtype is not None:
+            if isinstance(self.dtype, Int32):
+                tensor_proto.dtype = type_pb2.DataType.INT32
+            elif isinstance(self.dtype, Int64):
+                tensor_proto.dtype = type_pb2.DataType.INT64
+            elif isinstance(self.dtype, Bool):
+                tensor_proto.dtype = type_pb2.DataType.BOOL
+            elif isinstance(self.dtype, Float):
+                raise NotImplementedError(
+                    "Float type will be deprecated in favor of  Float16 and Float32"
+                )
+            else:
+                raise ValueError(f"Unknown dtype {type(self.dtype)}")
+        else:
+            # TODO: Anything?
+            pass
+        return tensor_proto
 
 
 @dataclass(frozen=True)

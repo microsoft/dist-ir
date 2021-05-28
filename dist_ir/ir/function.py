@@ -8,6 +8,7 @@ from frozendict import frozendict
 
 from .op import Op
 from .value import Value
+from ..proto import function_pb2
 
 
 @dataclass(frozen=True)
@@ -136,6 +137,20 @@ class Function:
                 value_map[orig_output] = subfunction_output
         subfunction.set_outputs(outputs)
         return subfunction.finalize()
+
+    def serialize_to_proto(self):
+        function_proto = function_pb2.Function()
+        function_proto.name = self.name
+        for op in self.ops:
+            op_proto = op.serialize_to_proto()
+            function_proto.ops.append(op_proto)
+        for inp in self.inputs:
+            inp_proto = inp.serialize_to_proto()
+            function_proto.inputs.append(inp_proto)
+        for output in self.outputs:
+            output_proto = output.serialize_to_proto()
+            function_proto.outputs.append(output_proto)
+        return function_proto
 
 
 @dataclass

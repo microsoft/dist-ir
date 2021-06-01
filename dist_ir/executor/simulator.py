@@ -23,6 +23,7 @@ class SimulatorState(AbstractState):
         self.consumers = defaultdict(int)
         self.trace = []
         self._function_inputs_set = set(function.inputs)
+        self.per_op_costs = {}
 
     def add_trace_event(self, op_type, device, start_time, duration):
         self.trace.append(
@@ -121,6 +122,7 @@ def _create_semantics(cost_functions, implementations):
 
             # Run the cost function
             costs = cost_fn(op, *inputs)
+            state.per_op_costs[op] = costs
 
             if not isinstance(outputs, tuple):
                 outputs = (outputs,)

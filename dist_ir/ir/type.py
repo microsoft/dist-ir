@@ -28,46 +28,43 @@ class Type:
 
 
 class Int32(Type):
-    """The 32-bit integer type. A singleton class."""
+    """The 32-bit integer type."""
 
     def __repr__(self):
-        return "Int32"
+        return f"Int32 [device={self.device}]"
 
     @property
     def size(self):
         return 4
 
 
-@singleton
 class Int64(Type):
-    """The 64-bit integer type. A singleton class."""
+    """The 64-bit integer type."""
 
     def __repr__(self):
-        return "Int64"
+        return f"Int64 [device={self.device}]"
 
     @property
     def size(self):
         return 8
 
 
-@singleton
 class Float(Type):
-    """The float type. A singleton class."""
+    """The float type."""
 
     def __repr__(self):
-        return "Float"
+        return f"Float [device={self.device}]"
 
     @property
     def size(self):
         return 4
 
 
-@singleton
 class Bool(Type):
-    """The boolean type. A singleton class."""
+    """The boolean type."""
 
     def __repr__(self):
-        return "Bool"
+        return f"Bool [device={self.device}]"
 
     @property
     def size(self):

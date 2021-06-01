@@ -197,6 +197,7 @@ def project(
     # TODO don't use singleton types, and remove this
     result_fns = {}
     for d, per_rank_fn in state.per_rank_fns.items():
+        """
         value_map = {}
         new_fn = FunctionMaker(name=f"{fn.name}_{d.device_id-1}")
         for v in per_rank_fn.inputs:
@@ -218,5 +219,6 @@ def project(
             )
         new_fn.set_outputs(tuple(value_map[v] for v in per_rank_fn.outputs))
         result_fns[d] = new_fn.finalize()
-
+        """
+        result_fns[d] = per_rank_fn
     return result_fns, state.groups

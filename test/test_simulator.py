@@ -47,7 +47,7 @@ def test_data_parallel():
         reduction_params={
             function.outputs[0]: {"op_type": "MPIGather", "dim": 0, "device": d0}
         },
-        devices=[d0, d1],
+        devices=(d0, d1),
     )
     transformed_function = infer_types(
         transformed_function, transformed_function.inputs
@@ -90,7 +90,7 @@ def test_chrome_trace():
         reduction_params={
             function.outputs[0]: {"op_type": "MPIGather", "dim": 0, "device": d0}
         },
-        devices=[d0, d1],
+        devices=(d0, d1),
     )
     transformed_function = infer_types(
         transformed_function, transformed_function.inputs

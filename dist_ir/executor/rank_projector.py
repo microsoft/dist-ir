@@ -115,6 +115,7 @@ def _send_projector(op: Op, state: ProjectorState):
 ProjectorRegister = {
     ("Add", (Tensor, Tensor)): _identity_projector,
     ("Concat", (Tensor, Tensor)): _identity_projector,
+    ("Dummy", (Tensor,)): _identity_projector,
     ("Identity", (Tensor,)): _identity_projector,
     ("Loss", (Tensor, Tensor)): _identity_projector,
     ("LossGrad", (Tensor, Tensor)): _identity_projector,
@@ -193,30 +194,8 @@ def project(
 
     state = Projector.interpret(fn, input_types, state=state)
 
-    # Erase all types in per_rank_fns:
-    # TODO don't use singleton types, and remove this
     result_fns = {}
     for d, per_rank_fn in state.per_rank_fns.items():
-        value_map = {}
-        new_fn = FunctionMaker(name=f"{fn.name}_{d.device_id-1}")
-        for v in per_rank_fn.inputs:
-            value_map[v] = new_fn.add_input_value(v.name, None)
-        for op in per_rank_fn.ops:
-            new_inputs = tuple(value_map[v] for v in op.inputs)
-            for v in op.outputs:
-                value_map[v] = Value(v.name, None)
-            new_outputs = tuple(value_map[v] for v in op.outputs)
-            new_fn.ops.append(
-                Op(
-                    op.op_type,
-                    name=op.name,
-                    inputs=new_inputs,
-                    attributes=op.attributes,
-                    subfunctions=op.subfunctions,
-                    output_values=new_outputs,
-                )
-            )
-        new_fn.set_outputs(tuple(value_map[v] for v in per_rank_fn.outputs))
-        result_fns[d] = new_fn.finalize()
+        result_fns[d] = per_rank_fn.finalize()
 
     return result_fns, state.groups

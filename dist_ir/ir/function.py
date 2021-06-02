@@ -174,7 +174,7 @@ class FunctionMaker:
             op_type,
             name=name,
             inputs=None if inputs is None else tuple(inputs),
-            attributes=None if attributes is None else frozendict(attributes),
+            attributes=frozendict({}) if attributes is None else frozendict(attributes),
             subfunctions=() if subfunctions is None else tuple(subfunctions),
             output_names=None if output_names is None else tuple(output_names),
         )

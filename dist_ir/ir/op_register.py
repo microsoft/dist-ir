@@ -21,6 +21,7 @@ OpRegister = {
     "Div": OpRegisterEntry(num_inputs=2, num_outputs=1),
     "Dropout": OpRegisterEntry(num_inputs=3, num_outputs=2),
     "DropoutGrad": OpRegisterEntry(num_inputs=4, num_outputs=1),
+    "Dummy": OpRegisterEntry(num_inputs=1, num_outputs=1), # NOTE: Only for debug purposes
     "Expand": OpRegisterEntry(num_inputs=2, num_outputs=1),
     "Gather": OpRegisterEntry(num_inputs=2, num_outputs=1),
     "GatherGrad": OpRegisterEntry(num_inputs=3, num_outputs=1),

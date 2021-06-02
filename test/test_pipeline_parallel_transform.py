@@ -3,7 +3,7 @@ import numpy as np
 from dist_ir.ir import cpprint
 from dist_ir.transforms import PipelineParallelTransform
 from dist_ir.executor import SequentialExecutor
-import pipeline_parallel_utils as utils
+from . import pipeline_parallel_utils as utils
 
 
 def test_mnist_fw_bw():

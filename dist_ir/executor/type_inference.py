@@ -440,6 +440,7 @@ TypePropRegister = {
     # ("Concat", (TupleType,)): _concat_prop_fn,
     ("Concat", (Tensor, Tensor)): _concat_prop_fn,
     ("Dropout", (Tensor, Tensor, type(Bool()))): _dropout_prop_fn,
+    ("Dummy", (Tensor,)): _identity_prop_fn,
     ("Expand", (Tensor, Tensor)): _expand_prop_fn,
     ("Gather", (Tensor, Tensor)): _gather_prop_fn,
     ("Identity", (Tensor,)): _identity_prop_fn,

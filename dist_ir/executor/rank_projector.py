@@ -115,6 +115,7 @@ def _send_projector(op: Op, state: ProjectorState):
 ProjectorRegister = {
     ("Add", (Tensor, Tensor)): _identity_projector,
     ("Concat", (Tensor, Tensor)): _identity_projector,
+    ("Dummy", (Tensor,)): _identity_projector,
     ("Identity", (Tensor,)): _identity_projector,
     ("Loss", (Tensor, Tensor)): _identity_projector,
     ("LossGrad", (Tensor, Tensor)): _identity_projector,

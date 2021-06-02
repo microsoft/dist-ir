@@ -64,7 +64,6 @@ def _export_onnx_helper(fn):
         outputs=[value_map[output.name] for output in fn.outputs],
     )
     model_def = helper.make_model(graph_def)
-    onnx.checker.check_model(model_def)
     return model_def
 
 

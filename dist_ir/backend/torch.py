@@ -346,7 +346,7 @@ def run_pytorch(
     debug_mock=False,
 ):
     """Project `fn` and run on `inputs` over `num_devices` devices using the
-    PyTorch backend.
+    PyTorch backend. `inputs` is an iterable of the same length as `fn.inputs`.
     """
     # print(*(x.shape for x in inputs))
     # cpprint(fn)
@@ -373,6 +373,7 @@ def run_pytorch(
     per_rank_inputs = [[] for _ in range(world_size)]
     for v, a in zip(fn.inputs, inputs):
         per_rank_inputs[device_to_rank[v.type.device]].append(a)
+    assert len(fn.inputs) == len(inputs)
 
     # for xs, per_rank_fn in zip(per_rank_inputs, per_rank_fns):
     #     print(*(x.shape for x in xs))

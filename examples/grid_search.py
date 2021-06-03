@@ -1,24 +1,13 @@
-import argparse
-from collections import defaultdict, OrderedDict
 import csv
-import logging
+from itertools import product
 import numpy as np
-import time
-import matplotlib as mpl
-import matplotlib.pyplot as plt
 from multiprocessing import Pool
 
-import dist_ir
-from dist_ir.importer import import_from_onnx, parse_tensor_from_file
-from dist_ir.ir import FunctionMaker, cpprint, pformat, Device, Topology, Value
-from dist_ir.executor import infer_types, SequentialExecutor, Simulator
+from dist_ir.ir import Topology
+from dist_ir.executor import infer_types, Simulator
 from dist_ir.executor.cost_model import CostModel
-from dist_ir.ir.type import Bool, Float, Int64, Tensor
-from dist_ir.transforms import (
-    parallel_transform_3d,
-    PipeDreamScheduler,
-)
-from mlp import mlp
+from dist_ir.transforms import mlp_dhp_transform
+from .mlp import mlp
 
 DGX_BANDWIDTH_GBPS = 200
 
@@ -30,7 +19,6 @@ def add_devices_to_topology(topology, num_devices):
     for i in range(0, len(devices)):
         for j in range(i + 1, len(devices)):
             topology.set_bandwidth(devices[i], devices[j], DGX_BANDWIDTH_GBPS)
-    return topology
 
 
 def get_all_degrees(n):
@@ -78,7 +66,7 @@ def run_experiment(config):
     world_size = dp_degree * hp_degree * pp_degree
     add_devices_to_topology(topology, world_size)
 
-    transformed_function = parallel_transform_3d(
+    transformed_function = mlp_dhp_transform(
         function,
         dp_degree,
         hp_degree,
@@ -101,43 +89,62 @@ def run_experiment(config):
     return throughput
 
 
-def grid_search():
-    input_dim = 8192
-    hidden_dim = input_dim
-    output_dim = input_dim
-    all_cluster_sizes = [1, 2, 4, 8, 16, 32]
-    all_num_hidden_layers = [64]
-    all_batch_sizes = [8192]
-    configs = []
-    for num_hidden_layers in all_num_hidden_layers:
-        for batch_size in all_batch_sizes:
-            for i, cluster_size in enumerate(all_cluster_sizes):
-                all_degrees = get_all_degrees(cluster_size)
-                for (dp_degree, hp_degree, pp_degree) in all_degrees:
-                    if num_hidden_layers % pp_degree != 0:
-                        continue
-                    dp_batch_size = batch_size // dp_degree
-                    if pp_degree == 1:
-                        all_num_microbatches = [1]
-                    else:
-                        all_num_microbatches = [
-                            int(2 ** k)
-                            for k in range(1, int(np.floor(np.log2(dp_batch_size) / 2)))
-                        ]
-                    for num_microbatches in all_num_microbatches:
-                        if pp_degree == 1:
-                            num_microbatches == 1
-                        configs.append(
-                            (
-                                batch_size,
-                                input_dim,
-                                num_hidden_layers,
-                                dp_degree,
-                                hp_degree,
-                                pp_degree,
-                                num_microbatches,
-                            )
-                        )
+def mlp_dist(
+    mlp_fn,
+    dp_degree,
+    hp_degree,
+    pp_degree,
+    num_microbatches,
+    topology,
+):
+    init_function, transformed_function = mlp_dhp_transform(
+        mlp_fn,
+        dp_degree,
+        hp_degree,
+        pp_degree,
+        topology.devices,
+        num_microbatches,
+    )
+    init_function = infer_types(init_function, init_function.inputs)
+    # init_function.outputs = transformed_function.inputs, so get types from there:
+    transformed_function = infer_types(transformed_function, init_function.outputs)
+    return init_function, transformed_function
+
+
+def gen_configurations(hidden_dims, cluster_sizes, all_num_layers, all_batch_sizes):
+    for hidden_dim, num_hidden_layers, batch_size, cluster_size in product(
+        hidden_dims, all_num_layers, all_batch_sizes, cluster_sizes
+    ):
+        all_degrees = get_all_degrees(cluster_size)
+        for (dp_degree, hp_degree, pp_degree) in all_degrees:
+            if num_hidden_layers % pp_degree != 0:
+                continue
+            dp_batch_size = batch_size // dp_degree
+            if pp_degree == 1:
+                all_num_microbatches = [1]
+            else:
+                all_num_microbatches = [
+                    int(2 ** k)
+                    for k in range(1, int(np.floor(np.log2(dp_batch_size) / 2)))
+                ]
+            for num_microbatches in all_num_microbatches:
+                if pp_degree == 1:
+                    num_microbatches == 1
+                yield (
+                    batch_size,
+                    hidden_dim,
+                    num_hidden_layers,
+                    dp_degree,
+                    hp_degree,
+                    pp_degree,
+                    num_microbatches,
+                )
+
+
+def grid_search(hidden_dims, cluster_sizes, all_num_layers, all_batch_sizes):
+    configs = list(
+        gen_configurations(hidden_dims, cluster_sizes, all_num_layers, all_batch_sizes)
+    )
 
     with Pool() as p:
         results = p.map(run_experiment, configs)
@@ -174,4 +181,10 @@ def grid_search():
 
 
 if __name__ == "__main__":
-    grid_search()
+    # grid_search(
+    #     hidden_dims=[8192],
+    #     cluster_sizes=[1, 2, 4, 8, 16, 32],
+    #     all_num_layers=[64],
+    #     all_batch_sizes=[8192],
+    # )
+    pass

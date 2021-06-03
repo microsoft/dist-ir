@@ -47,7 +47,7 @@ class SequentialExecutor:
           inputs: A sequence of input data represented in the specified backend.
 
         Returns:
-          A map from output value to output data.
+          A tuple of outputs.
         """
         state = self.interpreter.interpret(function, inputs)
         return tuple(state.env[v] for v in function.outputs)

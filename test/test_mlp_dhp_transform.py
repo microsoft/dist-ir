@@ -88,11 +88,12 @@ def add_devices_to_topology(topology, num_devices):
 
 
 def _verify_no_hp(outputs, transformed_outputs, dp=False):
-    for output, transformed_output in zip(outputs, transformed_outputs):
-        if dp:
-            np.testing.assert_array_almost_equal(output, transformed_output[0])
+    for i in range(len(outputs)):
+        if not dp:
+            j = i
         else:
-            np.testing.assert_array_almost_equal(output, transformed_output)
+            j = 2 * i
+        np.testing.assert_array_almost_equal(outputs[i], transformed_outputs[j])
 
 
 def _verify_hp(function, transformed_function, outputs, transformed_outputs, dp=False):
@@ -105,10 +106,7 @@ def _verify_hp(function, transformed_function, outputs, transformed_outputs, dp=
         match = re.search(f"(.*)_dp_(.*)_hp_(.*)_pp_(.*){device_suffix}", output.name)
         assert match is not None
         key = (match.group(1), match.group(2), match.group(4))
-        if dp:
-            aggregated_outputs[key].append(v[0])
-        else:
-            aggregated_outputs[key].append(v)
+        aggregated_outputs[key].append(v)
     for key in aggregated_outputs:
         output_name = key[0]
         if "dw" in output_name:
@@ -138,7 +136,7 @@ def _test_helper(
     world_size = dp_degree * hp_degree * pp_degree
     add_devices_to_topology(topology, world_size)
 
-    transformed_function = mlp_dhp_transform(
+    init_function, transformed_function = mlp_dhp_transform(
         function,
         dp_degree,
         hp_degree,
@@ -146,14 +144,15 @@ def _test_helper(
         topology.devices,
         num_microbatches,
     )
-    transformed_function = infer_types(
-        transformed_function, transformed_function.inputs
-    )
+    init_function = infer_types(init_function, init_function.inputs)
+    # init_function.outputs = transformed_function.inputs, so get types from there:
+    transformed_function = infer_types(transformed_function, init_function.outputs)
 
     input_data = [np.random.normal(size=inp.type.shape) for inp in function.inputs]
     ex = SequentialExecutor("numpy")
     outputs = ex.compute(function, input_data)
-    transformed_outputs = ex.compute(transformed_function, input_data)
+    dist_input_data = ex.compute(init_function, input_data)
+    transformed_outputs = ex.compute(transformed_function, dist_input_data)
 
     if hp_degree > 1:
         _verify_hp(
@@ -189,3 +188,7 @@ def test_hp_pp():
 
 def test_dp_hp_pp():
     _test_helper(dp_degree=2, hp_degree=2, pp_degree=2, num_microbatches=2)
+
+
+if __name__ == "__main__":
+    test_dp_only()

@@ -309,7 +309,8 @@ def mlp_dhp_transform(
     function, dp_degree, hp_degree, pp_degree, devices, num_microbatches
 ):
     """Automatically distributes an MLP function using D/H/P hybrid parallelism."""
-    transformed_function = FunctionMaker(name=function.name)
+    fn_name = f"{function.name}_{dp_degree}_{hp_degree}_{pp_degree}_{num_microbatches}"
+    transformed_function = FunctionMaker(name=fn_name)
     device_tree = _get_device_tree(dp_degree, hp_degree, pp_degree, devices)
     device_tree_root = tuple(device_tree.keys())[0]
     dp_devices = tuple(sorted(device_tree[device_tree_root].keys()))
@@ -324,22 +325,28 @@ def mlp_dhp_transform(
         )
     )
 
-    # Add inputs to the transformed function.
+    # An init function that moves weights/inputs to correct devices
+    init_function = FunctionMaker(name=fn_name + "_init")
     transformed_inputs = {}
     for inp in function.inputs:
-        v = transformed_function.add_input_value(inp.name, inp.type)
+        v = init_function.add_input_value(inp.name, inp.type)
         transformed_inputs[inp] = v
 
     # Partition inputs across each parallelism dimension.
-    dp_inputs = _partition_inputs_dp(transformed_function, device_tree)
-    hp_inputs = _partition_inputs_hp(transformed_function, device_tree, dp_inputs)
+    dp_inputs = _partition_inputs_dp(init_function, device_tree)
+    hp_inputs = _partition_inputs_hp(init_function, device_tree, dp_inputs)
     pp_inputs = _partition_inputs_pp(
-        transformed_function,
+        init_function,
         device_tree,
         dp_inputs,
         hp_inputs,
         num_microbatches,
     )
+    init_function = init_function.finalize()
+
+    # Inputs of transformed_function are outputs of init_function
+    for v in init_function.outputs:
+        transformed_function.inputs.append(v)
 
     dp_outputs = defaultdict(list)
     for i, dp_device in enumerate(device_tree[device_tree_root]):
@@ -670,7 +677,9 @@ def mlp_dhp_transform(
                         hp_group,
                         transformed_function,
                         output_names=[
-                            f"{output.name}_dp_all_hp_{hp_device_group_str}_pp_all"
+                            # TODO how to get device?
+                            f"{output.name}_dp_all_hp_{hp_device_group_str}_pp_all_{j}"
+                            for j in range(len(hp_group))
                         ],
                     )
             else:
@@ -679,6 +688,10 @@ def mlp_dhp_transform(
                         hp_group,
                         transformed_function,
                         dim=0,
-                        output_names=[f"{output.name}_dp_all_hp_all_pp_all"],
+                        output_names=[
+                            f"{output.name}_dp_all_hp_all_pp_all_{j}"
+                            for j in range(len(hp_group))
+                        ],
                     )
-    return transformed_function.finalize()
+    # TODO transformed_function should output loss/grads?
+    return init_function, transformed_function.finalize()

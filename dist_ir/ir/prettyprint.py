@@ -47,7 +47,7 @@ from prettyprinter.prettyprinter import (
 )
 from prettyprinter.utils import intersperse
 
-from .function import Function
+from .function import Function, FunctionMaker
 from .value import Value
 from .type import Type, Int32, Int64, Float, Tensor, TupleType
 from .device import Device
@@ -120,10 +120,32 @@ def _(function: Function, ctx):
     )
 
 
+@register_pretty(FunctionMaker)
+def _(function: FunctionMaker, ctx):
+    ops = _pprint_function_body(function, ctx)
+    return concat(
+        [
+            annotate(Token.KEYWORD_CONSTANT, "function* "),
+            pretty_call(ctx, pp_fnname(function.name), *function.inputs),
+            nest(ctx.indent, concat([COLON, HARDLINE, interline(*ops)])),
+        ]
+    )
+
+
 @register_pretty(Op)
 def _(op: Op, ctx):
-    results = concat(_join(*(pretty_dispatch(r, ctx) for r in op.outputs)))
-    args = concat(_join(*(v.name for v in op.inputs)))
+    attributes = ()
+    if op.attributes is not None:
+        attributes = (
+            concat((key, ASSIGN_OP, pretty_dispatch(value, ctx)))
+            for key, value in op.attributes.items()
+        )
+    args = concat(_join(*(v.name for v in op.inputs), *attributes))
+
+    if len(op.outputs) == 0:
+        results = "_"
+    else:
+        results = concat(_join(*(pretty_dispatch(r, ctx) for r in op.outputs)))
 
     if op.op_type == "Pmap":
         lambda_body = _pprint_function_body(op.subfunctions[0], ctx)

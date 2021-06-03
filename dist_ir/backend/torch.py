@@ -4,7 +4,7 @@ import os
 import sys
 from time import perf_counter
 from traceback import print_exc
-from typing import Any, Dict, Iterable, List, NamedTuple, Tuple
+from typing import Any, Dict, Iterable, List, NamedTuple, Sequence, Tuple
 
 import torch
 import torch.distributed as dist
@@ -25,6 +25,8 @@ DistributedContext = NamedTuple(
     groups=Dict[Tuple[int], Any],
     # Temp store of group IDs until threads can create ProcessGroups
     groups_list=Iterable[Tuple[int]],
+    # Debug flag
+    debug_stacktrace=bool,
 )
 
 
@@ -121,6 +123,7 @@ _op_to_torch = {
     "SendP2P": _send,
     "MPIAllgather": _allgather,
     "MPIAllreduce": _allreduce,
+    # TODO rename MPI<opname> to Comm<opname> or Dist<opname>
 }
 
 # Some mock communication ops that return zero tensors of appropriate shape
@@ -239,7 +242,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
     `num_warmup_steps + num_repetitions` times. The outputs of the last run are
     returned, along with the last `num_repetitions` runtimes.
     """
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
+    os.environ["MASTER_ADDR"] = "127.0.0.1"  # TODO make these configurable
     os.environ["MASTER_PORT"] = "29500"
     backend = "nccl" if ctx.use_gpu else "gloo"
     dist.init_process_group(backend, rank=rank, world_size=ctx.world_size)
@@ -263,24 +266,25 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
         else:
             events.append(perf_counter())
 
-    # Time a bunch of executions, then execute once for output values
     add_event()
-    for _ in range(num_warmup_steps + num_repetitions):
-        # try:
-        #     outputs = run_function(ctx, fn, inputs)
-        # except Exception as e:
-        #     print_exc()
-        #     sys.exit(1)
-        outputs = run_function(ctx, fn, inputs)
-        if ctx.world_size > 1:
-            torch.distributed.barrier()
-        add_event()
+    if ctx.debug_stacktrace:
+        try:
+            outputs = run_function(ctx, fn, inputs)
+            add_event()
+        except Exception as e:
+            print_exc()
+            sys.exit(1)
+    else:
+        # Time a bunch of executions, use last run's output values
+        for _ in range(num_warmup_steps + num_repetitions):
+            outputs = run_function(ctx, fn, inputs)
+            if ctx.world_size > 1:
+                torch.distributed.barrier()
+            add_event()
 
     if ctx.use_gpu:
         # Move outputs back to cpu
         outputs = [t.cpu() for t in outputs]
-
-    if ctx.use_gpu:
         torch.cuda.synchronize()
         runtimes = [
             events[i].elapsed_time(events[i + 1]) / 1e3 for i in range(len(events) - 1)
@@ -338,15 +342,26 @@ def run_multiprocesses(
 
 
 def run_pytorch(
-    fn,
-    inputs,
+    fn: Function,
+    inputs: Sequence[Any],
     use_gpu=False,
     num_repetitions=1,
     num_warmup=0,
     debug_mock=False,
+    debug_stacktrace=False,
 ):
     """Project `fn` and run on `inputs` over `num_devices` devices using the
-    PyTorch backend. `inputs` is an iterable of the same length as `fn.inputs`.
+    PyTorch backend.
+
+    `inputs` is a list/tuple of the same length as `fn.inputs`.
+    The run is repeated 'num_warmup + num_repetitions` times, and runtimes from
+    the last `num_repetitions` runs are returned along with the outputs of the
+    last run.
+
+    `debug_mock` runs the function sequentially, replacing communication ops with
+    mock versions that return arbitrary values. `debug_stacktrace` wraps the
+    run function with a try-catch block and prints the stack trace and exits if
+    any thread raises an exception.
     """
     # print(*(x.shape for x in inputs))
     # cpprint(fn)
@@ -368,6 +383,7 @@ def run_pytorch(
         groups={},
         groups_list=list(groups),
         device_to_rank=device_to_rank,
+        debug_stacktrace=debug_stacktrace,
     )
 
     per_rank_inputs = [[] for _ in range(world_size)]

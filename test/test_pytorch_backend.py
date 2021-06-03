@@ -135,7 +135,9 @@ def test_owt(num_devices, num_layers):
     assert all(np.allclose(y, o) for y, o in zip(ys, output_arrays))
 
     # Run per-rank modules using PyTorch backend:
-    per_rank_outputs, _ = run_pytorch(fn, [torch.tensor(a) for a in input_arrays])
+    per_rank_outputs, _ = run_pytorch(
+        fn, [torch.tensor(a) for a in input_arrays], use_gpu=True
+    )
 
     # Check outputs:
     assert all(np.allclose(y[0], o) for y, o in zip(per_rank_outputs, output_arrays))
@@ -181,7 +183,7 @@ def test_mlp_grid_search():
     # hidden_dims = [2 ** i for i in range(8, 13)]
     batch_sizes = [64]
     hidden_dims = [64]
-    world_sizes = [1, 2, 4, 8]
+    world_sizes = [1, 2]
     all_num_layers = [32]
 
     results = []
@@ -224,7 +226,7 @@ def test_mlp_grid_search():
         _, runtimes = run_pytorch(
             fn,
             dist_input_data,
-            use_gpu=False,
+            use_gpu=True,
             num_repetitions=1,  # TODO use 100
             num_warmup=1,
         )
@@ -245,7 +247,7 @@ def test_single_device():
 
     x = torch.randn(4, 4)
     inputs = (x,)
-    outputs, _ = run_pytorch(fn, inputs)
+    outputs, _ = run_pytorch(fn, inputs, use_gpu=True)
     print(outputs)
     assert torch.allclose(torch.matmul(x, x), outputs[0][0])
 
@@ -262,7 +264,7 @@ def test_send_recv():
 
     x = torch.randn(4, 4)
     inputs = (x,)
-    outputs, _ = run_pytorch(fn, inputs)
+    outputs, _ = run_pytorch(fn, inputs, use_gpu=True)
     assert torch.allclose(x, outputs[1][0])
 
 
@@ -298,7 +300,9 @@ def test_dp_mlp():
         y = torch.relu(y)
 
     # Project and run on backend:
-    per_rank_outputs, runtimes = run_pytorch(fn, convert_inputs_dp(weights, x))
+    per_rank_outputs, runtimes = run_pytorch(
+        fn, convert_inputs_dp(weights, x), use_gpu=True
+    )
 
     # Check outputs:
     assert torch.allclose(y, torch.cat([o[0] for o in per_rank_outputs], 0))
@@ -311,6 +315,18 @@ if __name__ == "__main__":
     # test_dp_mlp()
     # test_send_recv()
     # test_single_device()
-    test_dp_mp_matmuls()
+    # test_dp_mp_matmuls()
 
-    test_mlp_grid_search()
+    # test_mlp_grid_search()
+
+    topology = Topology()
+    d0 = topology.add_device("gpu")
+    seq_mlp = mlp(64, 64, 64, 64, 4, d0)
+    seq_mlp = infer_types(seq_mlp, seq_mlp.inputs)
+
+    cpprint(seq_mlp)
+
+    # input_data = tuple(torch.randn(*v.type.shape) for v in seq_mlp.inputs)
+    # _, _ = run_pytorch(
+    #     seq_mlp, input_data, use_gpu=True, num_warmup=2, num_repetitions=2
+    # )

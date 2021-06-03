@@ -203,6 +203,12 @@ def run_function(
         value_map[v] = x
     assert len(fn.inputs) == len(inputs)
 
+    def print_memory_usage():
+        t = torch.cuda.get_device_properties(0).total_memory
+        r = torch.cuda.memory_reserved(0)
+        a = torch.cuda.memory_allocated(0)
+        print(f"Total: {t} Reserved: {r} Allocated: {a} Free: {r-a}")
+
     # Run ops
     for op in fn.ops:
         # op_str = pformat(op).replace("\n", " ")
@@ -264,17 +270,31 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
             events.append(perf_counter())
 
     # Time a bunch of executions, then execute once for output values
-    add_event()
-    for _ in range(num_warmup_steps + num_repetitions):
-        # try:
-        #     outputs = run_function(ctx, fn, inputs)
-        # except Exception as e:
-        #     print_exc()
-        #     sys.exit(1)
-        outputs = run_function(ctx, fn, inputs)
-        if ctx.world_size > 1:
-            torch.distributed.barrier()
+    with torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.CUDA,
+        ],
+        schedule=torch.profiler.schedule(
+            wait=0, warmup=num_warmup_steps, active=num_repetitions
+        ),
+        # on_trace_ready=lambda p: p.export_chrome_trace(f"{rank}_profile.json"),
+        on_trace_ready=torch.profiler.tensorboard_trace_handler(
+            f"{fn.name}_{rank}_profile"
+        ),
+    ) as p:
         add_event()
+        for _ in range(num_warmup_steps + num_repetitions):
+            # try:
+            #     outputs = run_function(ctx, fn, inputs)
+            # except Exception as e:
+            #     print_exc()
+            #     sys.exit(1)
+            outputs = run_function(ctx, fn, inputs)
+            if ctx.world_size > 1:
+                torch.distributed.barrier()
+            add_event()
+            p.step()
 
     if ctx.use_gpu:
         # Move outputs back to cpu

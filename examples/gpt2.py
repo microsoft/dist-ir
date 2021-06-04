@@ -183,7 +183,6 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
             f"{torch.cuda.device_count()} GPUs available"
         )
     per_rank_outputs, runtimes = torch_backend.run_pytorch(
-        world_size,
         function,
         pytorch_input_data,
         use_gpu=use_gpu,

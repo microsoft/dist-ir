@@ -14,7 +14,11 @@ from dist_ir.ir.type import Float32, Tensor
 from dist_ir.ir.topology import Topology
 
 # TODO make examples submodule of dist_ir?
-from examples.mlp_grid_search import add_devices_to_topology, gen_configurations, mlp_dist
+from examples.mlp_grid_search import (
+    add_devices_to_topology,
+    gen_configurations,
+    mlp_dist,
+)
 from examples.mlp import mlp, mlp_inference_dp
 
 
@@ -135,21 +139,54 @@ def test_owt(num_devices, num_layers):
     assert all(np.allclose(y, o) for y, o in zip(ys, output_arrays))
 
     # Run per-rank modules using PyTorch backend:
-    per_rank_outputs, _ = run_pytorch(
-        num_devices, fn, [torch.tensor(a) for a in input_arrays]
-    )
+    per_rank_outputs, _ = run_pytorch(fn, [torch.tensor(a) for a in input_arrays])
 
     # Check outputs:
     assert all(np.allclose(y[0], o) for y, o in zip(per_rank_outputs, output_arrays))
 
 
+def test_dp_mp_matmuls():
+    fn = FunctionMaker("dp_mp_matmuls")
+    B = 64
+    d0 = Device(0, "gpu")
+    d1 = Device(1, "gpu")
+    x_0 = fn.add_input_value("x_0", Tensor(Float32(), (B // 2, B), d0))
+    x_1 = fn.add_input_value("x_1", Tensor(Float32(), (B // 2, B), d1))
+    wA_0 = fn.add_input_value("wA_0", Tensor(Float32(), (B, B), d0))
+    wA_1 = fn.add_input_value("wA_1", Tensor(Float32(), (B, B), d1))
+    wB_0 = fn.add_input_value("wB_0", Tensor(Float32(), (B, B), d0))
+    wC_1 = fn.add_input_value("wC_1", Tensor(Float32(), (B, B), d1))
+    a0_0 = fn.add_op("MatMul", inputs=[x_0, wA_0], output_names=["a0"])
+    a1_1 = fn.add_op("MatMul", inputs=[x_1, wA_1], output_names=["a1"])
+    a_0 = fn.add_op(
+        "MPIGather",
+        inputs=[a0_0, a1_1],
+        output_names=["a_0"],
+        attributes={"device": d0, "axis": 0},
+    )
+    b_0 = fn.add_op("MatMul", inputs=[a_0, wB_0], output_names=["b_0"])
+    b_1 = fn.add_op(
+        "Send", inputs=[b_0], output_names=["b_1"], attributes={"device": d1}
+    )
+    c_1 = fn.add_op("MatMul", inputs=[b_1, wC_1], output_names=["c_1"])
+    fn = fn.finalize()
+    fn = infer_types(fn, fn.inputs)
+    cpprint(fn)
+
+    from dist_ir.executor.rank_projector import project
+
+    per_rank_fns, groups = project(fn, tuple(v.type for v in fn.inputs))
+    for per_rank_fn in per_rank_fns.values():
+        cpprint(per_rank_fn)
+
+
 def test_mlp_grid_search():
     # batch_sizes = [2 ** i for i in range(10, 15)]
     # hidden_dims = [2 ** i for i in range(8, 13)]
-    batch_sizes = [2 ** 10]
-    hidden_dims = [2 ** 10]
-    world_sizes = [2, 4]
-    all_num_layers = [8, 16, 32]
+    batch_sizes = [64]
+    hidden_dims = [64]
+    world_sizes = [1, 2, 4, 8]
+    all_num_layers = [32]
 
     results = []
     for (batch_size, hidden_dim, num_layers, d, h, p, m) in gen_configurations(
@@ -189,7 +226,6 @@ def test_mlp_grid_search():
         # TODO check outputs match?
         # _, runtimes = run_pytorch(world_size, fn, dist_input_data)
         _, runtimes = run_pytorch(
-            world_size,
             fn,
             dist_input_data,
             use_gpu=False,
@@ -200,133 +236,10 @@ def test_mlp_grid_search():
         actual_time = max(np.median(times) for times in runtimes)
 
         print(fn.name, simulated_time, actual_time)
-        results.append(
-            (
-                world_size,
-                num_layers,
-                batch_size,
-                hidden_dim,
-                simulated_time,
-                actual_time,
-            )
-        )
-
-    fieldnames = [
-        "world_size",
-        "num_layers",
-        "batch_size",
-        "hidden_dim",
-        "simulated_time",
-        "actual_time",
-    ]
-
-    with open("mlp_grid_search.csv", "w") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for (
-            world_size,
-            num_layers,
-            batch_size,
-            hidden_dim,
-            simulated_time,
-            actual_time,
-        ) in results:
-            writer.writerow(
-                {
-                    "world_size": world_size,
-                    "num_layers": num_layers,
-                    "batch_size": batch_size,
-                    "hidden_dim": hidden_dim,
-                    "simulated_time": simulated_time,
-                    "actual_time": actual_time,
-                }
-            )
 
 
-def plot_mlp_grid_search_results():
-    import matplotlib as mpl
-    import matplotlib.pyplot as plt
-    from scipy.interpolate import interp1d
-    from scipy.stats import pearsonr, spearmanr
-
-    results = []
-    with open("mlp_grid_search.csv", "r") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            results.append(
-                (
-                    int(row["world_size"]),
-                    int(row["num_layers"]),
-                    int(row["batch_size"]),
-                    int(row["hidden_dim"]),
-                    float(row["simulated_time"]),
-                    float(row["actual_time"]),
-                )
-            )
-    real_throughputs = defaultdict(list)
-    simulated_throughputs = defaultdict(list)
-    for world_size, _, batch_size, _, simulated_time, actual_time in results:
-        real_throughputs[world_size].append(batch_size / actual_time / 1000)
-        simulated_throughputs[world_size].append(batch_size / simulated_time / 1000)
-    plt.rcParams["font.size"] = 12
-    all_simulated_throughputs = []
-    all_real_throughputs = []
-    lines = []
-    labels = ["Ideal", "Best fit"]
-    for world_size in simulated_throughputs:
-        all_real_throughputs += real_throughputs[world_size]
-    for world_size in simulated_throughputs:
-        all_simulated_throughputs += simulated_throughputs[world_size]
-    all_simulated_throughputs = np.array(all_simulated_throughputs)
-    all_real_throughputs = np.array(all_real_throughputs)
-    r, p = pearsonr(all_simulated_throughputs, all_real_throughputs)
-    print(f"Pearson's correlation: {r} (p={p})")
-    r, p = spearmanr(all_simulated_throughputs, all_real_throughputs)
-    print(f"Spearman's correlation: {r} (p={p})")
-    x_new = np.linspace(
-        min(all_simulated_throughputs.min(), all_real_throughputs.min()),
-        max(all_simulated_throughputs.max(), all_real_throughputs.max()),
-        500,
-    )
-    lines.append(
-        plt.plot(x_new, x_new, color="black", linestyle="--", label="Ideal")[0]
-    )
-    m, b = np.polyfit(all_simulated_throughputs, all_real_throughputs, 1)
-    f = interp1d(
-        all_simulated_throughputs, m * all_simulated_throughputs + b, kind="linear"
-    )
-    x_new = np.linspace(
-        all_simulated_throughputs.min(), all_simulated_throughputs.max(), 500
-    )
-    y_smooth = f(x_new)
-    lines.append(
-        plt.plot(x_new, y_smooth, color="orange", linestyle="-.", label="Best fit")[0]
-    )
-    colors = ["b", "orange", "g", "purple"]
-    markers = ["x", "o", "^"]
-    plt.scatter(all_simulated_throughputs, all_real_throughputs, marker="x")
-    plt.grid()
-    plt.xticks([0, 200, 400, 600, 800, 1000])
-    plt.yticks([0, 200, 400, 600, 800, 1000])
-    plt.xlabel("Simulated throughput\n(1000 samples / second)")
-    plt.ylabel("Real throughput\n(1000 samples / second)")
-    plt.gca().set_aspect("equal", adjustable="box")
-    leg = plt.figlegend(lines, labels, loc="upper center", ncol=2)
-    leg.get_frame().set_linewidth(0.0)
-    bb = leg.get_bbox_to_anchor().transformed(plt.gca().transAxes.inverted())
-    yOffset = 0
-    bb.y0 += yOffset
-    bb.y1 += yOffset
-    leg.set_bbox_to_anchor(bb, transform=plt.gca().transAxes)
-    plt.tight_layout()
-    plt.savefig(
-        "data_parallel_simulation_performance.pdf", dpi=600, bbox_inches="tight"
-    )
-
-
-def test_empty_device():
+def test_single_device():
     d1 = Device(1, "gpu")
-    d2 = Device(2, "gpu")
     fn = FunctionMaker()
     x = fn.add_input_value("x", Tensor(Float32(), (4, 4), d1))
     y = fn.add_op("MatMul", inputs=(x, x))
@@ -336,7 +249,7 @@ def test_empty_device():
 
     x = torch.randn(4, 4)
     inputs = (x,)
-    outputs, _ = run_pytorch(2, fn, inputs)
+    outputs, _ = run_pytorch(fn, inputs)
     print(outputs)
     assert torch.allclose(torch.matmul(x, x), outputs[0][0])
 
@@ -353,7 +266,7 @@ def test_send_recv():
 
     x = torch.randn(4, 4)
     inputs = (x,)
-    outputs, _ = run_pytorch(2, fn, inputs)
+    outputs, _ = run_pytorch(fn, inputs, debug_stacktrace=True)
     assert torch.allclose(x, outputs[1][0])
 
 
@@ -389,9 +302,7 @@ def test_dp_mlp():
         y = torch.relu(y)
 
     # Project and run on backend:
-    per_rank_outputs, runtimes = run_pytorch(
-        num_devices, fn, convert_inputs_dp(weights, x)
-    )
+    per_rank_outputs, runtimes = run_pytorch(fn, convert_inputs_dp(weights, x))
 
     # Check outputs:
     assert torch.allclose(y, torch.cat([o[0] for o in per_rank_outputs], 0))
@@ -400,10 +311,9 @@ def test_dp_mlp():
 
 
 if __name__ == "__main__":
-    # test_owt(2, 4)
-    # test_dp_mlp()
-    # test_send_recv()
-    # test_empty_device()
-
+    #test_owt(2, 4)
+    #test_dp_mlp()
+    #test_send_recv()
+    #test_single_device()
+    test_dp_mp_matmuls()
     test_mlp_grid_search()
-    # plot_mlp_grid_search_results()

@@ -69,6 +69,10 @@ class Function:
         # TODO can we use the prettyprint output as __str__?
         return self.get_summary()
 
+    def last_use(self, value):
+        """Returns the last op that uses the given value `value`."""
+        return self.consumers[value][-1]
+
     def get_summary(self):
         output = ""
         output += "Function inputs:\n"

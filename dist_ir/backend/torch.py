@@ -1,28 +1,39 @@
 from functools import partial
-import logging
 import numpy as np
 from operator import getitem
 import os
-from tempfile import TemporaryDirectory
+import sys
 from time import perf_counter
-from typing import Any, Dict, Iterable, List, NamedTuple, Tuple
+from traceback import print_exc
+from typing import Any, Dict, Iterable, List, NamedTuple, Sequence, Tuple
 
 import torch
 import torch.distributed as dist
 from torch import fx
 
 from ..executor.rank_projector import project
-from ..ir import Function, cpprint
+from ..ir import Function, cpprint, pformat
+from ..ir.device import Device
 from ..ir.type import Int64, Float32
+
+torch.multiprocessing.set_sharing_strategy('file_system')
 
 DistributedContext = NamedTuple(
     "DistributedContext",
+    world_size=int,
     use_gpu=bool,
-    groups=Dict[Tuple[int, int], Any],  # Maps tuple of ranks to ProcessGroup
-    groups_list=Iterable[
-        Tuple[int]
-    ],  # to store group IDs until threads can create ProcessGroups
+    # Map from DistIR device to PyTorch backend rank
+    device_to_rank=Dict[Device, int],
+    # Maps tuple of ranks to ProcessGroup
+    groups=Dict[Tuple[int], Any],
+    # Temp store of group IDs until threads can create ProcessGroups
+    groups_list=Iterable[Tuple[int]],
+    # Debug flag
+    debug_stacktrace=bool,
 )
+
+
+# TODO organize by category
 
 
 def _add(x, y, ctx=None):
@@ -88,7 +99,7 @@ def _gather(x, y, axis=0, ctx=None):
     # TODO: Find the best Torch equivalent for this
     # torch.gather and torch.index_select do not work
     output = torch.tensor(np.take(x.cpu().numpy(), y.cpu().numpy(), axis=axis))
-    #output = torch.gather(x, index=torch.LongTensor(y), dim=axis)
+    # output = torch.gather(x, index=torch.LongTensor(y), dim=axis)
     if output.shape == (1,):
         return output[0]
     if ctx.use_gpu:
@@ -137,28 +148,6 @@ def _pow(x, y, ctx=None):
     return torch.pow(x, y)
 
 
-def _recv(shape=None, device=None, dtype=None, ctx=None):
-    if isinstance(dtype, Int64):
-        x = torch.zeros(shape).long()
-    elif isinstance(dtype, Float32):
-        x = torch.zeros(shape).float()
-
-    # TODO pytorch rank = device_id - 1
-    if ctx.use_gpu:
-        x = x.cuda(dist.get_rank())
-        src_rank = device - 1
-        dst_rank = dist.get_rank()
-        group_key = (device, dst_rank + 1)
-        # group_key = (src_rank, dst_rank)
-        if group_key not in ctx.groups:
-            raise ValueError(f"No group for {src_rank} -> {dst_rank}")
-        group = ctx.groups[group_key]
-        dist.broadcast(x, src_rank, group=group)
-    else:
-        dist.recv(x, device - 1)
-    return x
-
-
 def _reduce_mean(x, axes, keepdims=1, ctx=None):
     return torch.mean(x, dim=axes, keepdim=bool(keepdims))
 
@@ -166,6 +155,21 @@ def _reduce_mean(x, axes, keepdims=1, ctx=None):
 def _reshape(x, y, ctx=None):
     new_shape = tuple(int(v.item()) for v in list(y))
     return torch.reshape(x, new_shape)
+
+
+def _recv(shape=None, from_d=None, group=None, dtype=None, ctx=None):
+    if isinstance(dtype, Int64):
+        x = torch.zeros(shape).long()
+    elif isinstance(dtype, Float32):
+        x = torch.zeros(shape).float()
+
+    src_rank = ctx.device_to_rank[from_d]
+    if ctx.use_gpu:
+        x = x.cuda(dist.get_rank())
+        dist.broadcast(x, src_rank, group=ctx.groups[group])
+    else:
+        dist.recv(x, src_rank)
+    return x
 
 
 def _relu(x, ctx=None):
@@ -178,17 +182,13 @@ def _relu_grad(x, dy, ctx=None):
     return dx
 
 
-def _send(x, device=None, ctx=None):
-    # TODO pytorch rank = device_id - 1
+def _send(x, to_d=None, group=None, ctx=None):
     if ctx.use_gpu:
         src_rank = dist.get_rank()
-        dst_rank = device - 1
-        # group_key = (src_rank, dst_rank)
-        group_key = (src_rank + 1, device)
-        group = ctx.groups[group_key]
-        dist.broadcast(x, src_rank, group=group)
+        dist.broadcast(x, src_rank, group=ctx.groups[group])
     else:
-        dist.send(x, device - 1)
+        dst_rank = ctx.device_to_rank[to_d]
+        dist.send(x, dst_rank)
     # Note: in a proper backend, might want to concatenate multiple tensors into
     # a single buffer and call a single send op
 
@@ -292,6 +292,7 @@ _op_to_torch = {
     "Tanh": _tanh,
     "Transpose": _transpose,
     "Unsqueeze": _unsqueeze,
+    # TODO rename MPI<opname> to Comm<opname> or Dist<opname>
 }
 
 # Some mock communication ops that return zero tensors of appropriate shape
@@ -333,10 +334,11 @@ _mock_op_to_torch = {**_op_to_torch, **_mock_comm_ops}
 
 
 def function_to_module(fn: Function) -> torch.nn.Module:
+    """Deprecated. Converts a DistIR Function to a PyTorch nn.Module using
+    torch.fx.
+    """
     g = fx.Graph()
     value_map = {}
-
-    # TODO need to check that fn has unique value names
 
     # Convert inputs
     for v in fn.inputs:
@@ -361,12 +363,13 @@ def function_to_module(fn: Function) -> torch.nn.Module:
 
 def run_function(
     ctx: DistributedContext,
-    rank: int,
     fn: Function,
     inputs: List[Any],
     debug_mock=False,
 ):
-    # TODO free values when no longer needed
+    """Runs DistIR Function `fn` on `inputs` in a distributed context `ctx` by
+    converting each DistIR op to its torch implementation as given in _op_to_torch.
+    """
     op_to_torch = _mock_op_to_torch if debug_mock else _op_to_torch
     value_map = {}
 
@@ -377,51 +380,54 @@ def run_function(
 
     # Run ops
     for op in fn.ops:
-        first_output = (
-            op.outputs[0].name
-            if op.outputs is not None and len(op.outputs) > 0
-            else "None"
-        )
-        logging.info(f"{rank}: {first_output} {op.op_type}")
+        # op_str = pformat(op).replace("\n", " ")
+        # print(f"{rank}: {op_str}")
+        # sys.stdout.flush()
         inputs = tuple(value_map[v] for v in op.inputs)
-        logging.info(f"{op}: {tuple(x.is_cuda for x in inputs)}")
         kwargs = {} if op.attributes is None else {**op.attributes}
         kwargs["ctx"] = ctx
+
         output = op_to_torch[op.op_type](*inputs, **kwargs)
+
         if len(op.outputs) > 1:
             assert isinstance(output, tuple)
             for i, v in enumerate(op.outputs):
                 value_map[v] = output[i]
         elif len(op.outputs) == 1:
             value_map[op.outputs[0]] = output
-        logging.info(f"{rank}: {first_output} {op.op_type}")
+
+        # Free tensors that are not used again
+        for v in op.inputs:
+            if v in value_map and fn.last_use(v) == op and not (v in fn.outputs):
+                del value_map[v]
+
+        # print(f"{rank}: {op_str}")
+        # sys.stdout.flush()
 
     # Return outputs
     return tuple(value_map[v] for v in fn.outputs)
 
 
-def run_process(ctx, world_size, io_dir, num_warmup_steps, num_repetitions, rank, fn):
-    """The Python function on rank `rank` that runs module `module`."""
-    os.environ["MASTER_ADDR"] = "127.0.0.1"
+def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
+    """The Python function on rank `rank` that runs DistIR function `fn` on
+    (torch) inputs `inputs`. The function is run
+    `num_warmup_steps + num_repetitions` times. The outputs of the last run are
+    returned, along with the last `num_repetitions` runtimes.
+    """
+    os.environ["MASTER_ADDR"] = "127.0.0.1"  # TODO make these configurable
     os.environ["MASTER_PORT"] = "29500"
     backend = "nccl" if ctx.use_gpu else "gloo"
-    dist.init_process_group(backend, rank=rank, world_size=world_size)
+    dist.init_process_group(backend, rank=rank, world_size=ctx.world_size)
+
     # Create the process groups used by fn's communication ops
     for group in ctx.groups_list:
-        ranks = tuple(d - 1 for d in group)  # TODO fixme
-        # ranks = tuple(d for d in group)  # TODO fixme
+        ranks = [ctx.device_to_rank[d] for d in group]
+        # ctx is a curried arg, hence is thread-local and can be modified:
         ctx.groups[group] = dist.new_group(ranks)
 
-    per_rank_inputs = torch.load(os.path.join(io_dir.name, f"in.{rank}.pt"))
-
-    # # Convert per-rank DistIR function to torch.nn.Module:
-    # module = function_to_module(fn)
-
     if ctx.use_gpu:
-        # Move module and inputs to GPU
-        # TODO how to move interpreted non-module code to GPU?
-        # module = module.cuda(rank)
-        per_rank_inputs = [t.cuda(rank) for t in per_rank_inputs]
+        # Move inputs to GPU
+        inputs = [t.cuda(rank) for t in inputs]
 
     events = []
 
@@ -432,34 +438,37 @@ def run_process(ctx, world_size, io_dir, num_warmup_steps, num_repetitions, rank
         else:
             events.append(perf_counter())
 
-    # Time a bunch of executions, then execute once for output values
-    with torch.profiler.profile(
-        activities=[
-            torch.profiler.ProfilerActivity.CPU,
-            torch.profiler.ProfilerActivity.CUDA,
-        ],
-        schedule=torch.profiler.schedule(
-            wait=0,
-            warmup=num_warmup_steps,
-            active=num_repetitions),
-        on_trace_ready=lambda p: p.export_chrome_trace(f"{rank}_profile.json")
-    ) as p:
-        add_event()
-        for _ in range(num_warmup_steps + num_repetitions):
-            # res = module(*per_rank_inputs)
-            res = run_function(ctx, rank, fn, per_rank_inputs)
-            if world_size > 1:
-                torch.distributed.barrier()
+    add_event()
+    if ctx.debug_stacktrace:
+        try:
+            outputs = run_function(ctx, fn, inputs)
             add_event()
-            p.step()
+        except Exception as e:
+            print_exc()
+            sys.exit(1)
+    else:
+        # Time a bunch of executions, use last run's output values
+        # TODO: Add a flag to disable PyTorch profiling
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            schedule=torch.profiler.schedule(
+                wait=0, warmup=num_warmup_steps, active=num_repetitions
+            ),
+            on_trace_ready=lambda p: p.export_chrome_trace(f"{rank}_profile.json"),
+        ) as p:
+            for _ in range(num_warmup_steps + num_repetitions):
+                outputs = run_function(ctx, fn, inputs)
+                if ctx.world_size > 1:
+                    torch.distributed.barrier()
+                add_event()
+                p.step()
 
     if ctx.use_gpu:
         # Move outputs back to cpu
-        res = [t.cpu() for t in res]
-
-    torch.save(res, os.path.join(io_dir.name, f"out.{rank}.pt"))
-
-    if ctx.use_gpu:
+        outputs = [t.cpu() for t in outputs]
         torch.cuda.synchronize()
         runtimes = [
             events[i].elapsed_time(events[i + 1]) / 1e3 for i in range(len(events) - 1)
@@ -468,7 +477,7 @@ def run_process(ctx, world_size, io_dir, num_warmup_steps, num_repetitions, rank
         runtimes = [events[i + 1] - events[i] for i in range(len(events) - 1)]
 
     dist.destroy_process_group()
-    return runtimes[num_warmup_steps:]
+    return outputs, runtimes[num_warmup_steps:]
 
 
 def run_mock_multiprocess(
@@ -483,7 +492,7 @@ def run_mock_multiprocess(
     ctx = DistributedContext(use_gpu=False, groups=None)
 
     per_rank_outputs = [
-        run_function(ctx, rank, fn, inputs, debug_mock=True)
+        run_function(ctx, fn, inputs, debug_mock=True)
         for rank, fn, inputs in zip(
             range(_mock_world_size), per_rank_functions, per_rank_inputs
         )
@@ -500,63 +509,75 @@ def run_multiprocesses(
     per_rank_functions: Tuple[Function],
     per_rank_inputs: Tuple[Any],
     num_repetitions=1,
-    num_warmup=0,
+    num_warmup=5,
 ):
     assert len(per_rank_functions) == len(per_rank_inputs)
-    world_size = len(per_rank_functions)
-
-    # TODO just pass tensors instead
-    # Save inputs for each per-rank function:
-    io_dir = TemporaryDirectory()
-    # print("run_multiprocess: saving I/O to:", io_dir.name)
-    # TODO lowered pytorch file numbers devices 0...num_devices-1
-    for d, inps in enumerate(per_rank_inputs):
-        torch.save(inps, os.path.join(io_dir.name, f"in.{d}.pt"))
-
-    global run_process
-    per_rank_runner = partial(
-        run_process, ctx, world_size, io_dir, num_warmup, num_repetitions
-    )
-    mp = torch.multiprocessing.get_context("spawn")
-    with mp.Pool(world_size) as p:
-        runtimes = p.starmap(per_rank_runner, enumerate(per_rank_functions))
-
-    # Load outputs:
-    per_rank_outputs = [
-        torch.load(os.path.join(io_dir.name, f"out.{d}.pt")) for d in range(world_size)
+    args = [
+        (r, f, x) for (r, (f, x)) in enumerate(zip(per_rank_functions, per_rank_inputs))
     ]
-    io_dir.cleanup()
 
+    per_rank_runner = partial(run_process, ctx, num_warmup, num_repetitions)
+    mp = torch.multiprocessing.get_context("spawn")
+    with mp.Pool(ctx.world_size) as p:
+        outputs = p.starmap(per_rank_runner, args)
+
+    per_rank_outputs, runtimes = zip(*outputs)
     return per_rank_outputs, runtimes
 
 
 def run_pytorch(
-    num_devices,
-    fn,
-    inputs,
+    fn: Function,
+    inputs: Sequence[Any],
     use_gpu=False,
     num_repetitions=1,
     num_warmup=5,
-    run_type_inference=True,
     debug_mock=False,
+    debug_stacktrace=False,
+    run_type_inference=True,
 ):
     """Project `fn` and run on `inputs` over `num_devices` devices using the
     PyTorch backend.
-    """
-    # TODO check that fn uses devices [0...num_devices),
-    # or run through and find max device used
 
+    `inputs` is a list/tuple of the same length as `fn.inputs`.
+    The run is repeated 'num_warmup + num_repetitions` times, and runtimes from
+    the last `num_repetitions` runs are returned along with the outputs of the
+    last run.
+
+    `debug_mock` runs the function sequentially, replacing communication ops with
+    mock versions that return arbitrary values. `debug_stacktrace` wraps the
+    run function with a try-catch block and prints the stack trace and exits if
+    any thread raises an exception.
+    """
     # print(*(x.shape for x in inputs))
     # cpprint(fn)
 
-    per_rank_fns, groups = project(
-        fn, tuple(v.type for v in fn.inputs), num_devices, run_type_inference
+    device_to_fns, groups = project(
+        fn, tuple(v.type for v in fn.inputs), run_type_inference
     )
-    ctx = DistributedContext(use_gpu=use_gpu, groups={}, groups_list=groups)
 
-    per_rank_inputs = [[] for _ in range(num_devices)]
+    # Map between DistIR devices and pytorch ranks:
+    device_to_rank = {}
+    world_size = 0
+    per_rank_fns = []
+    for d in device_to_fns:
+        device_to_rank[d] = world_size
+        per_rank_fns.append(device_to_fns[d])
+        world_size += 1
+
+    ctx = DistributedContext(
+        world_size=world_size,
+        use_gpu=use_gpu,
+        groups={},
+        groups_list=list(groups),
+        device_to_rank=device_to_rank,
+        debug_stacktrace=debug_stacktrace,
+    )
+
+    per_rank_inputs = [[] for _ in range(world_size)]
     for v, a in zip(fn.inputs, inputs):
-        per_rank_inputs[v.type.device.device_id - 1].append(a)
+        per_rank_inputs[device_to_rank[v.type.device]].append(a)
+    assert len(fn.inputs) == len(inputs)
+
     # for xs, per_rank_fn in zip(per_rank_inputs, per_rank_fns):
     #     print(*(x.shape for x in xs))
     #     cpprint(per_rank_fn)

@@ -189,6 +189,22 @@ def function_to_module(fn: Function) -> torch.nn.Module:
     return fx.GraphModule({}, g)
 
 
+def _new_timing_event(ctx):
+    if ctx.use_gpu:
+        event = torch.cuda.Event(enable_timing=True)
+        event.record()
+    else:
+        event = perf_counter()
+    return event
+
+
+def _time_between_events(ctx, event1, event2):
+    if ctx.use_gpu:
+        return event1.elapsed_time(event2) / 1e3
+    else:
+        return event2 - event1
+
+
 def run_function(
     ctx: DistributedContext,
     fn: Function,
@@ -259,18 +275,11 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
 
     events = []
 
-    def add_event():
-        if ctx.use_gpu:
-            events.append(torch.cuda.Event(enable_timing=True))
-            events[-1].record()
-        else:
-            events.append(perf_counter())
-
-    add_event()
+    events.append(_new_timing_event(ctx))
     if ctx.debug_stacktrace:
         try:
             outputs = run_function(ctx, fn, inputs)
-            add_event()
+            events.append(_new_timing_event(ctx))
         except Exception as e:
             print_exc()
             sys.exit(1)
@@ -280,17 +289,17 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
             outputs = run_function(ctx, fn, inputs)
             if ctx.world_size > 1:
                 torch.distributed.barrier()
-            add_event()
+            events.append(_new_timing_event(ctx))
 
     if ctx.use_gpu:
         # Move outputs back to cpu
         outputs = [t.cpu() for t in outputs]
         torch.cuda.synchronize()
-        runtimes = [
-            events[i].elapsed_time(events[i + 1]) / 1e3 for i in range(len(events) - 1)
-        ]
-    else:
-        runtimes = [events[i + 1] - events[i] for i in range(len(events) - 1)]
+
+    runtimes = [
+        _time_between_events(ctx, events[i], events[i + 1])
+        for i in range(len(events) - 1)
+    ]
 
     dist.destroy_process_group()
     return outputs, runtimes[num_warmup_steps:]

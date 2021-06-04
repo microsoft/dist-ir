@@ -269,8 +269,7 @@ def test_send_recv():
 def test_dp_mlp():
     num_devices = 2
     num_layers = 4
-    batch_size = 4
-    hidden_dim = 6  # Also input/output dim for simplicity
+    batch_size = hidden_dim = 6  # Also input/output dim for simplicity
     devices = [Device(d, "gpu") for d in range(num_devices + 1)]
 
     fn = mlp_inference_dp(
@@ -280,7 +279,8 @@ def test_dp_mlp():
     cpprint(fn)
 
     def convert_inputs_dp(weights, x):
-        xs = torch.split(x, num_devices)
+        assert batch_size % num_devices == 0
+        xs = torch.split(x, batch_size // num_devices)
 
         def new_inputs():
             for d in range(num_devices):
@@ -298,12 +298,15 @@ def test_dp_mlp():
         y = torch.relu(y)
 
     # Project and run on backend:
-    per_rank_outputs, runtimes = run_pytorch(fn, convert_inputs_dp(weights, x))
+    per_rank_outputs, runtimes = run_pytorch(
+        fn, convert_inputs_dp(weights, x), num_repetitions=5
+    )
 
     # Check outputs:
     assert torch.allclose(y, torch.cat([o[0] for o in per_rank_outputs], 0))
 
-    return runtimes
+    print(runtimes)
+    print(np.mean(runtimes[0]), np.mean(runtimes[1]))
 
 
 if __name__ == "__main__":

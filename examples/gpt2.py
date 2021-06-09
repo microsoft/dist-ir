@@ -1,6 +1,7 @@
 import argparse
 from collections import defaultdict
 import numpy as np
+import re
 from transformers import GPT2Tokenizer
 import torch
 
@@ -81,8 +82,168 @@ def _filter_extra_outputs(function):
     return filtered_function.finalize()
 
 
-def import_function_and_get_input_data(model_path, batch_size, default_device):
-    function, input_data = import_from_onnx(
+def _set_model_size(function, num_transformer_blocks):
+    function, attribute_map = sanitize_unhashable_attributes(function)
+
+    # Prepare a list of the existing Transformer blocks in the function.
+    blocks = []
+    cur_block = []
+    cur_block_id = 0
+    orig_block_id_map = {}
+    for op in function.ops:
+        orig_block_id_map[op] = cur_block_id
+        cur_block.append(op)
+        if op.op_type == "Gemm" and any(
+            "mlp.c_proj.weight" in inp.name for inp in op.inputs
+        ):
+            blocks.append(cur_block)
+            cur_block_id += 1
+            cur_block = []
+    final_ops = cur_block
+    for op in final_ops:
+        orig_block_id_map[op] = cur_block_id
+
+    # Verify that all blocks other than the first block are identical.
+    transformer_block = tuple(op.op_type for op in blocks[1])
+    for i in range(2, len(blocks)):
+        assert tuple(op.op_type for op in blocks[i]) == transformer_block
+
+    # Initialize a new function using the Transformer blocks from the original function.
+    # We discard any original blocks beyond the requested number of new blocks.
+    transformed_function = FunctionMaker(name=function.name)
+
+    # A map from values in the original function to values in the transformed function.
+    value_map = {}
+
+    # A map from values in the transformed function to a tuple of
+    # 1) the op which produced the value and
+    # 2) the index of this op in the list of block ops.
+    producer_map = {}
+
+    # Add inputs from the original function to the transformed function.
+    for inp in function.inputs:
+        # Only add inputs if they are used by blocks that will appear
+        # in the transformed function.
+        max_consumer_block_id = max(
+            [orig_block_id_map[consumer] for consumer in function.consumers[inp]]
+        )
+        if (
+            max_consumer_block_id < num_transformer_blocks
+            or max_consumer_block_id == len(blocks)
+        ):
+            value_map[inp] = transformed_function.add_input_value(inp.name, inp.type)
+
+    # A map from ops in the transformed function to block id.
+    block_id_map = {}
+    transformed_blocks = []
+    for i in range(min(num_transformer_blocks, len(blocks))):
+        cur_block = []
+        for k, op in enumerate(blocks[i]):
+            inputs = tuple(value_map[inp] for inp in op.inputs)
+            new_op = Op(
+                name=op.name,
+                op_type=op.op_type,
+                inputs=inputs,
+                attributes=op.attributes,
+                subfunctions=op.subfunctions,
+                output_names=tuple(output.name for output in op.outputs),
+                output_types=tuple(output.type for output in op.outputs),
+            )
+            transformed_function.ops.append(new_op)
+            for orig_output, new_output in zip(op.outputs, new_op.outputs):
+                value_map[orig_output] = new_output
+                producer_map[new_output] = (new_op, k)
+            cur_block.append(new_op)
+            block_id_map[new_op] = i
+        transformed_blocks.append(cur_block)
+
+    # Add any additional Transformer blocks if necessary.
+    for j in range(len(blocks), num_transformer_blocks):
+        cur_block = []
+        for k, op in enumerate(transformed_blocks[-1]):
+            # Collect the inputs for the new op.
+            inputs = []
+            for inp in op.inputs:
+                if inp in transformed_function.inputs:
+                    if "weight" in inp.name or "bias" in inp.name:
+                        block_id = re.search("h\.(\d+)\.", inp.name).group(1)
+                        new_name = inp.name.replace(block_id, str(j))
+                        inputs.append(
+                            transformed_function.add_input_value(new_name, inp.type)
+                        )
+                    else:
+                        inputs.append(inp)
+                else:
+                    producer, producer_op_id = producer_map[inp]
+                    output_index = producer.outputs.index(inp)
+                    if block_id_map[producer] == j - 2:
+                        # If the input value was produced in the previous block,
+                        # the input for the next block will come from the
+                        # corresponding op in the current block.
+                        inputs.append(
+                            transformed_blocks[-1][producer_op_id].outputs[output_index]
+                        )
+                    elif block_id_map[producer] == j - 1:
+                        # If the input value was produced in the current block,
+                        # the input for the next block will come from earlier in
+                        # the next block.
+                        inputs.append(cur_block[producer_op_id].outputs[output_index])
+                    else:
+                        # There can be no input from any other block because each
+                        # block is self-contained with the exception of function
+                        # inputs and outputs from the immediately preceding block.
+                        raise ValueError(
+                            f"Op {op} in block {j-1} has an input from "
+                            f"block {block_id_map[producer]}"
+                        )
+            # TODO: Update op name
+            # TODO: Update output names
+            new_op = Op(
+                name=op.name,
+                op_type=op.op_type,
+                inputs=tuple(inputs),
+                attributes=op.attributes,
+                subfunctions=op.subfunctions,
+                output_names=tuple(output.name for output in op.outputs),
+                output_types=tuple(output.type for output in op.outputs),
+            )
+            for output in new_op.outputs:
+                producer_map[output] = (new_op, k)
+            transformed_function.ops.append(new_op)
+            cur_block.append(new_op)
+            block_id_map[new_op] = j
+        transformed_blocks.append(cur_block)
+
+    # Add the final ops.
+    for op, transformed_op in zip(blocks[-1], transformed_blocks[-1]):
+        for output, transformed_output in zip(op.outputs, transformed_op.outputs):
+            value_map[output] = transformed_output
+    for op in final_ops:
+        inputs = [value_map[inp] for inp in op.inputs]
+        new_op = Op(
+            name=op.name,
+            op_type=op.op_type,
+            inputs=tuple(inputs),
+            attributes=op.attributes,
+            subfunctions=op.subfunctions,
+            output_names=tuple(output.name for output in op.outputs),
+            output_types=tuple(output.type for output in op.outputs),
+        )
+        transformed_function.ops.append(new_op)
+        for output, transformed_output in zip(op.outputs, new_op.outputs):
+            value_map[output] = transformed_output
+
+    transformed_function = restore_unhashable_attributes(
+        transformed_function, attribute_map
+    )
+
+    return transformed_function.finalize()
+
+
+def import_function_and_get_input_data(
+    model_path, batch_size, num_transformer_blocks, default_device
+):
+    function, input_data_map = import_from_onnx(
         model_path,
         name="GPT-2",
         default_device=default_device,
@@ -90,6 +251,7 @@ def import_function_and_get_input_data(model_path, batch_size, default_device):
     )
 
     function = _filter_extra_outputs(function)
+    function = _set_model_size(function, num_transformer_blocks)
 
     tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
     tokens = tokenizer.encode(
@@ -97,19 +259,19 @@ def import_function_and_get_input_data(model_path, batch_size, default_device):
     )
     input_ids = torch.tensor([[tokens] for _ in range(batch_size)])
     input_ids = _to_numpy(input_ids)
-
-    inputs_with_shapes = [
-        Value(
-            function.inputs[0].name,
-            Tensor(
-                dtype=Float32(),
-                shape=tuple(input_ids.shape),
-                device=default_device,
-            ),
-        )
-    ]
-    inputs_with_shapes += list(input_data.keys())
-    input_data = [input_ids] + list(input_data.values())
+    input_data = [input_ids] + list(input_data_map.values())
+    # If any extra input weights were added, use the last occurence of the
+    # corresponding weights in the original function as the initial weights.
+    # This minimizes risk of numerical stability issues.
+    if len(input_data) < len(function.inputs):
+        extra_weight_map = {}
+        for inp in input_data_map:
+            base_input_name = re.sub("h\.(\d+)", "", inp.name)
+            extra_weight_map[base_input_name] = input_data_map[inp]
+        input_data += [
+            extra_weight_map[re.sub("h\.(\d+)", "", inp.name)]
+            for inp in function.inputs[len(input_data) :]
+        ]
     return function, input_data
 
 
@@ -195,7 +357,10 @@ def main(args):
     topology = Topology()
     d0 = topology.add_device("gpu")
     function, input_data = import_function_and_get_input_data(
-        args.model_path, batch_size=args.batch_size, default_device=d0
+        args.model_path,
+        batch_size=args.batch_size,
+        num_transformer_blocks=args.num_transformer_blocks,
+        default_device=d0,
     )
     ex = SequentialExecutor("numpy")
     function = ex.infer_types(
@@ -251,6 +416,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-k", "--num_microbatches", type=int, default=1, help="Num microbatches"
+    )
+    parser.add_argument(
+        "--num_transformer_blocks", type=int, default=12, help="Num transformer blocks"
     )
     parser.add_argument(
         "--backend",

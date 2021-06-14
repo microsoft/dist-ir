@@ -1,4 +1,4 @@
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from functools import reduce
 from operator import add, mul
 import numpy as np
@@ -164,7 +164,7 @@ def import_from_onnx(
     dist_ir_function = FunctionMaker(name)
 
     inputs = {}
-    input_data = {}
+    input_data = OrderedDict()
     output_src = {}
 
     def add_input(value):

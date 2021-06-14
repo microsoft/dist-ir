@@ -2,6 +2,7 @@ from collections import defaultdict, Hashable
 import math
 import logging
 import re
+import roundrobin
 
 from ..ir import cpprint, Op
 from ..ir.function import Function, FunctionMaker
@@ -262,13 +263,11 @@ def _pipeline_parallel_partition(function, pp_degree, devices):
     ]
 
     # Places blocks on each device.
-    num_blocks_per_device = len(subfunctions) // pp_degree
+    get_roundrobin = roundrobin.basic(list(range(pp_degree)))
+    device_order = sorted([get_roundrobin() for _ in range(len(subfunctions))])
     partition_map = {}
     for i in range(len(subfunctions)):
-        partition_map[subfunctions[i]] = devices[
-            min(i // num_blocks_per_device, len(devices) - 1)
-        ]
-
+        partition_map[subfunctions[i]] = devices[device_order[i]]
     return partition_map
 
 
@@ -327,12 +326,24 @@ def _get_device_tree(dp_degree, hp_degree, pp_degree, devices):
 
 
 def gpt2_dhp_transform(
-    function, dp_degree, hp_degree, pp_degree, devices, num_microbatches
+    function,
+    dp_degree,
+    hp_degree,
+    pp_degree,
+    devices,
+    num_microbatches,
+    embedding_dim,
+    debug=False,
 ):
     """Automatically distributes a GPT-2 function using D/H/P hybrid parallelism."""
 
-    if num_microbatches > pp_degree:
-        raise ValueError(f"# of microbatches must not exceed pipeline parallel degree")
+    if debug:
+        logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.DEBUG)
+
+    if pp_degree > 1 and num_microbatches == 1:
+        raise ValueError(
+            "# of microbatches must be > 1 for pipeline parallel degree > 1"
+        )
 
     # Temporarily remove unhashable attributes.
     (function, attribute_map) = sanitize_unhashable_attributes(function)
@@ -419,9 +430,9 @@ def gpt2_dhp_transform(
         )
 
         # Jointly iterate through all the schedules, timestep by timestep.
-        # Timesteps will be a tuple of dicts corresponding to the schedules
-        # at this timestep (represented as a dict) for each horizontal parallel
-        # partition. The keys (devices) for each schedule will be different,
+        # Timesteps will be a tuple of dicts corresponding to the pipeline parallel
+        # schedules at this timestep (represented as a dict) for each horizontal
+        # parallel partition. The keys (devices) for each schedule will be different,
         # but the values should be the same. This iteration strategy is necessary
         # for Megatron-style synchronization.
         hp_devices = tuple(sorted(device_tree[device_tree_root][dp_device].keys()))
@@ -436,9 +447,16 @@ def gpt2_dhp_transform(
                 )
                 assert len(devices) == hp_degree
                 stage, microbatch_id = timesteps[0][devices[0]]
+                logging.debug(
+                    f"Scheduling stage {stage.name}, microbatch {microbatch_id} "
+                    f"on device(s) {devices}"
+                )
                 for op in stage.ops:
                     # Collect inputs for this op.
                     for j, device in enumerate(devices):
+                        # logging.debug(
+                        #    f"Scheduling op {op} on device {device.device_id}"
+                        # )
                         pp_devices = device_tree[device_tree_root][dp_device][
                             hp_devices[j]
                         ]
@@ -463,12 +481,12 @@ def gpt2_dhp_transform(
                         attributes = op.attributes
                         if op.op_type == "Split":
                             if "split" in attributes and attributes["split"] == (
-                                768,
-                                768,
-                                768,
+                                embedding_dim,
+                                embedding_dim,
+                                embedding_dim,
                             ):
                                 assert len(attributes) == 2
-                                new_dim = 768 // hp_degree
+                                new_dim = embedding_dim // hp_degree
                                 attributes = {
                                     "axis": attributes["axis"],
                                     "split": (new_dim, new_dim, new_dim),
@@ -563,9 +581,9 @@ def gpt2_dhp_transform(
                     for output in op.outputs:
                         if output in function.outputs:
                             for j, device in enumerate(devices):
-                                pp_devices = device_tree[device_tree_root][
-                                    dp_device
-                                ][hp_devices[j]]
+                                pp_devices = device_tree[device_tree_root][dp_device][
+                                    hp_devices[j]
+                                ]
                                 k = pp_devices.index(device)
                                 mb_k_output = intermediate_value_map[j][k][
                                     microbatch_id
@@ -624,6 +642,7 @@ def gpt2_dhp_transform(
             # Forward any timestep outputs to the next pipeline parallel partition.
             if pp_degree > 1:
                 for devices in zip(*tuple(sorted(ts.keys()) for ts in timesteps)):
+                    logging.debug(f"Forwarding outputs for stage {stage.name}...")
                     stage, microbatch_id = timesteps[0][devices[0]]
                     for j, device in enumerate(devices):
                         pp_devices = device_tree[device_tree_root][dp_device][
@@ -643,8 +662,13 @@ def gpt2_dhp_transform(
                                 pp_devices,
                                 partition_maps[i][j],
                             )
+                            logging.debug(
+                                f"Consumer devices for output {output.name}, "
+                                f"microbatch {microbatch_id}, "
+                                f"device {device.device_id}: "
+                                f"{[d.device_id for d in consumer_devices]}"
+                            )
                             for consumer_device in consumer_devices:
-
                                 if device != consumer_device:
                                     logging.debug(
                                         f"Sending value {output.name} to "
@@ -662,6 +686,7 @@ def gpt2_dhp_transform(
                                             f"{consumer_device.device_id}"
                                         ),
                                     )
+
         # Collect the pipeline parallel aggregated function outputs
         # from horizontal parallel partitions to do data parallel aggregation.
         for output in function.outputs:

@@ -1,6 +1,7 @@
 import argparse
 from collections import defaultdict, OrderedDict
 import csv
+import itertools
 import logging
 import numpy as np
 import time
@@ -21,7 +22,14 @@ from dist_ir.executor import (
     PostTypeInferenceSimulator,
 )
 from dist_ir.transforms import gpt2_dhp_transform, filter_transform
-import gpt2
+from . import gpt2
+
+MODEL_PARAMS = {
+    "gpt2": (12, 12, 768),
+    "gpt2-medium": (24, 16, 1024),
+    "gpt2-large": (36, 20, 1280),
+    "gpt2-xl": (48, 25, 1600),
+}
 
 
 def get_all_degrees(n):
@@ -56,18 +64,25 @@ def simulate(config):
         device_throughput,
         dram_bandwidth,
         network_bandwidth,
+        model_size,
         batch_size,
         dp_degree,
         hp_degree,
         pp_degree,
         num_microbatches,
     ) = config
+    n_layer, n_head, n_embd = MODEL_PARAMS[model_size]
     topology = Topology()
     d0 = topology.add_device(
         "gpu", throughput=device_throughput, dram_bandwidth=dram_bandwidth
     )
     function, input_data = gpt2.import_function_and_get_input_data(
-        model_path, batch_size=batch_size, default_device=d0
+        model_path,
+        batch_size=batch_size,
+        n_layer=n_layer,
+        n_head=n_head,
+        n_embd=n_embd,
+        default_device=d0,
     )
     ex = SequentialExecutor("numpy")
     function = ex.infer_types(
@@ -85,6 +100,7 @@ def simulate(config):
             hp_degree,
             pp_degree,
             num_microbatches,
+            n_embd,
             device_throughput=device_throughput,
             dram_bandwidth=dram_bandwidth,
             network_bandwidth=network_bandwidth,
@@ -92,16 +108,14 @@ def simulate(config):
         simulation = gpt2.simulate(
             transformed_function, initialized_input_data, topology
         )
-        throughput = batch_size / max(
-            [simulation.timestamps[d] for d in simulation.timestamps]
-        )
+        latency = max([simulation.timestamps[d] for d in simulation.timestamps])
         peak_memory = max(
             [simulation.peak_memory[d] for d in simulation.peak_memory]
         ) / (2.0 ** 20)
     except Exception as e:
-        throughput = 0
-        peak_memory = 0
-    return condensed_config, throughput, peak_memory
+        latency = -1
+        peak_memory = -1
+    return condensed_config, latency, peak_memory
 
 
 def run_pytorch(config):
@@ -140,7 +154,7 @@ def run_pytorch(config):
             num_microbatches,
         )
     except Exception as e:
-        return condensed_config, 0, 0
+        return condensed_config, -1, -1
     per_rank_outputs, runtimes = gpt2.run_pytorch(
         transformed_function, initialized_input_data, world_size
     )
@@ -152,9 +166,90 @@ def run_pytorch(config):
 
 def grid_search(args):
     # TODO: Make search space configuration part of args
-    all_cluster_sizes = [4]
-    all_batch_sizes = [64, 128, 256]
+    all_cluster_sizes = [1, 2, 4, 8]
+    all_batch_sizes = [1, 2, 4, 8, 64, 128, 256]
+    all_model_sizes = ["gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"]
     configs = []
+    for model_size, cluster_size, batch_size in itertools.product(
+        all_model_sizes, all_cluster_sizes, all_batch_sizes
+    ):
+        all_degrees = get_all_degrees(cluster_size)
+        for (dp_degree, hp_degree, pp_degree) in all_degrees:
+            if dp_degree > batch_size:
+                continue
+            elif pp_degree == 1:
+                all_num_microbatches = [1]
+            else:
+                all_num_microbatches = [
+                    int(2 ** k)
+                    for k in range(
+                        1,
+                        floor(
+                            min(
+                                np.log2(pp_degree) + 1,
+                                np.log2(dp_batch_size) / 2,
+                            )
+                        ),
+                    )
+                ]
+            for num_microbatches in all_num_microbatches:
+                configs.append(
+                    (
+                        args.model_path,
+                        args.device_throughput,
+                        args.dram_bandwidth,
+                        args.network_bandwidth,
+                        model_size,
+                        batch_size,
+                        dp_degree,
+                        hp_degree,
+                        pp_degree,
+                        num_microbatches,
+                    )
+                )
+    with open("gpt2_grid_search_results.csv", "w", newline="") as f:
+        fieldnames = [
+            "model_size",
+            "batch_size",
+            "dp_degree",
+            "hp_degree",
+            "pp_degree",
+            "num_microbatches",
+            "latency",
+            "peak_memory",
+        ]
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for config in tqdm.tqdm(configs):
+            _, latency, peak_memory = simulate(config)
+            (
+                _,
+                _,
+                _,
+                _,
+                model_size,
+                batch_size,
+                dp_degree,
+                hp_degree,
+                pp_degree,
+                num_microbatches,
+            ) = config
+
+            writer.writerow(
+                {
+                    "model_size": model_size,
+                    "batch_size": batch_size,
+                    "dp_degree": dp_degree,
+                    "hp_degree": hp_degree,
+                    "pp_degree": pp_degree,
+                    "num_microbatches": num_microbatches,
+                    "latency": latency,
+                    "peak_memory": peak_memory,
+                }
+            )
+            f.flush()
+
+    """
     for batch_size in all_batch_sizes:
         for i, cluster_size in enumerate(all_cluster_sizes):
             all_degrees = get_all_degrees(cluster_size)
@@ -239,6 +334,7 @@ def grid_search(args):
                     "peak_memory": peak_memory,
                 }
             )
+    """
 
 
 if __name__ == "__main__":
@@ -250,13 +346,13 @@ if __name__ == "__main__":
         "--model_path", type=str, required=True, help="Path to GPT-2 ONNX model"
     )
     parser.add_argument(
-        "--network_bandwidth", type=float, default=77, help="Network bandwidth in Gbps"
+        "--network_bandwidth", type=float, default=64, help="Network bandwidth in Gbps"
     )
     parser.add_argument(
-        "--device_throughput", type=float, default=1.38e13, help="Device throughput"
+        "--device_throughput", type=float, default=1.4e13, help="Device throughput"
     )
     parser.add_argument(
-        "--dram_bandwidth", type=float, default=7e11, help="DRAM Bandwidth"
+        "--dram_bandwidth", type=float, default=9e11, help="DRAM Bandwidth"
     )
     args = parser.parse_args()
     grid_search(args)

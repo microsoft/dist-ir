@@ -3,11 +3,13 @@ from collections import defaultdict, OrderedDict
 import csv
 import itertools
 import logging
+import math
 import numpy as np
 import time
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import multiprocessing
+import os
 from transformers import GPT2Tokenizer
 import torch
 import tqdm
@@ -24,11 +26,23 @@ from dist_ir.executor import (
 from dist_ir.transforms import gpt2_dhp_transform, filter_transform
 from . import gpt2
 
-MODEL_PARAMS = {
+"""
+model_params = {
     "gpt2": (12, 12, 768),
     "gpt2-medium": (24, 16, 1024),
     "gpt2-large": (36, 20, 1280),
     "gpt2-xl": (48, 25, 1600),
+    "gpt2-xl": (48, 25, 1600),
+}
+"""
+MODEL_PARAMS = {
+    "gpt3": (12, 12, 768),
+    "gpt3-medium": (24, 16, 1024),
+    "gpt3-large": (24, 16, 1536),
+    "gpt3-xl": (24, 24, 2048),
+    "gpt3-2.7B": (32, 32, 2560),
+    "gpt3-6.7B": (32, 32, 4096),
+    "gpt3-13B": (40, 40, 5140),
 }
 
 
@@ -166,9 +180,26 @@ def run_pytorch(config):
 
 def grid_search(args):
     # TODO: Make search space configuration part of args
-    all_cluster_sizes = [1, 2, 4, 8]
-    all_batch_sizes = [1, 2, 4, 8, 64, 128, 256]
-    all_model_sizes = ["gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"]
+    if os.path.exists(args.output_file):
+        if (
+            input(f'File "{args.output_file}" already exists. Overwrite? [y/n] ')
+            .lower()
+            .strip()[0]
+            != "y"
+        ):
+            return
+    all_cluster_sizes = [8]
+    all_batch_sizes = [1, 4, 64, 256]
+    # all_model_sizes = ["gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"]
+    all_model_sizes = [
+        "gpt3",
+        "gpt3-medium",
+        "gpt3-large",
+        "gpt3-xl",
+        "gpt3-2.7B",
+        "gpt3-6.7B",
+        "gpt3-13B",
+    ]
     configs = []
     for model_size, cluster_size, batch_size in itertools.product(
         all_model_sizes, all_cluster_sizes, all_batch_sizes
@@ -184,10 +215,9 @@ def grid_search(args):
                     int(2 ** k)
                     for k in range(
                         1,
-                        floor(
-                            min(
-                                np.log2(pp_degree) + 1,
-                                np.log2(dp_batch_size) / 2,
+                        int(
+                            np.floor(
+                                np.log2(batch_size // dp_degree) / 2,
                             )
                         ),
                     )
@@ -353,6 +383,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--dram_bandwidth", type=float, default=9e11, help="DRAM Bandwidth"
+    )
+    parser.add_argument(
+        "--output_file",
+        type=str,
+        default="gpt2_grid_search_results.csv",
+        help="Output file",
     )
     args = parser.parse_args()
     grid_search(args)

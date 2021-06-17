@@ -72,7 +72,7 @@ def get_all_degrees(n):
     return all_degrees
 
 
-def simulate(config):
+def get_transformed_function_and_input_data(config):
     (
         model_path,
         device_throughput,
@@ -105,20 +105,30 @@ def simulate(config):
         input_devices=[topology.devices[0] for _ in range(len(input_data))],
     )
     condensed_config = (batch_size, dp_degree, hp_degree, pp_degree, num_microbatches)
+    init_function, transformed_function, initialized_input_data = gpt2.transform(
+        function,
+        input_data,
+        topology,
+        dp_degree,
+        hp_degree,
+        pp_degree,
+        num_microbatches,
+        n_embd,
+        device_throughput=device_throughput,
+        dram_bandwidth=dram_bandwidth,
+        network_bandwidth=network_bandwidth,
+    )
+    return condensed_config, transformed_function, initialized_input_data, topology
+
+
+def simulate(config):
     try:
-        init_function, transformed_function, initialized_input_data = gpt2.transform(
-            function,
-            input_data,
+        (
+            condensed_config,
+            transformed_function,
+            initialized_input_data,
             topology,
-            dp_degree,
-            hp_degree,
-            pp_degree,
-            num_microbatches,
-            n_embd,
-            device_throughput=device_throughput,
-            dram_bandwidth=dram_bandwidth,
-            network_bandwidth=network_bandwidth,
-        )
+        ) = get_transformed_function_and_input_data(config)
         simulation = gpt2.simulate(
             transformed_function, initialized_input_data, topology
         )
@@ -133,49 +143,23 @@ def simulate(config):
 
 
 def run_pytorch(config):
-    (
-        model_path,
-        _,
-        _,
-        _,
-        batch_size,
-        dp_degree,
-        hp_degree,
-        pp_degree,
-        num_microbatches,
-    ) = config
-    world_size = dp_degree * hp_degree * pp_degree
-    topology = Topology()
-    d0 = topology.add_device("gpu")
-    function, input_data = gpt2.import_function_and_get_input_data(
-        MODEL_PATH, batch_size=batch_size, default_device=d0
-    )
-    ex = SequentialExecutor("numpy")
-    function = ex.infer_types(
-        function,
-        input_data,
-        input_devices=[topology.devices[0] for _ in range(len(input_data))],
-    )
-    condensed_config = (batch_size, dp_degree, hp_degree, pp_degree, num_microbatches)
     try:
-        init_function, transformed_function, initialized_input_data = gpt2.transform(
-            function,
-            input_data,
+        (
+            condensed_config,
+            transformed_function,
+            initialized_input_data,
             topology,
-            dp_degree,
-            hp_degree,
-            pp_degree,
-            num_microbatches,
+        ) = get_transformed_function_and_input_data(config)
+        world_size = len(topology.devices) - 1
+        per_rank_outputs, runtimes = gpt2.run_pytorch(
+            transformed_function, initialized_input_data, world_size
         )
     except Exception as e:
         return condensed_config, -1, -1
-    per_rank_outputs, runtimes = gpt2.run_pytorch(
-        transformed_function, initialized_input_data, world_size
-    )
-    throughput = batch_size / np.median(runtimes[-1])
+    latency = np.median(runtimes[-1])
     # TODO: Measure peak memory?
     peak_memory = 0
-    return condensed_config, throughput, peak_memory
+    return condensed_config, latency, peak_memory
 
 
 def grid_search(args):
@@ -188,7 +172,7 @@ def grid_search(args):
             != "y"
         ):
             return
-    all_cluster_sizes = [8]
+    all_cluster_sizes = [4]
     all_batch_sizes = [1, 4, 64, 256]
     # all_model_sizes = ["gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"]
     all_model_sizes = [
@@ -237,7 +221,11 @@ def grid_search(args):
                         num_microbatches,
                     )
                 )
-    with open("gpt2_grid_search_results.csv", "w", newline="") as f:
+    if args.pytorch:
+        func = run_pytorch
+    else:
+        func = simulate
+    with open(args.output_file, "w", newline="") as f:
         fieldnames = [
             "model_size",
             "batch_size",
@@ -251,7 +239,7 @@ def grid_search(args):
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for config in tqdm.tqdm(configs):
-            _, latency, peak_memory = simulate(config)
+            _, latency, peak_memory = func(config)
             (
                 _,
                 _,
@@ -278,93 +266,6 @@ def grid_search(args):
                 }
             )
             f.flush()
-
-    """
-    for batch_size in all_batch_sizes:
-        for i, cluster_size in enumerate(all_cluster_sizes):
-            all_degrees = get_all_degrees(cluster_size)
-            for (dp_degree, hp_degree, pp_degree) in all_degrees:
-                dp_batch_size = batch_size // dp_degree
-                if pp_degree == 1:
-                    all_num_microbatches = [1]
-                else:
-                    all_num_microbatches = [
-                        int(2 ** k)
-                        for k in range(
-                            1,
-                            int(
-                                np.floor(
-                                    min(
-                                        np.log2(pp_degree) + 1,
-                                        np.log2(dp_batch_size) / 2,
-                                    )
-                                )
-                            ),
-                        )
-                    ]
-                for num_microbatches in all_num_microbatches:
-                    if pp_degree == 1:
-                        assert num_microbatches == 1
-                    else:
-                        assert num_microbatches > 1
-                    configs.append(
-                        (
-                            args.model_path,
-                            args.device_throughput,
-                            args.dram_bandwidth,
-                            args.network_bandwidth,
-                            batch_size,
-                            dp_degree,
-                            hp_degree,
-                            pp_degree,
-                            num_microbatches,
-                        )
-                    )
-    for config in configs:
-        print(config)
-    if not args.pytorch:
-        n = multiprocessing.cpu_count()
-        with multiprocessing.Pool(n) as pool:
-            results = list(
-                tqdm.tqdm(pool.imap_unordered(simulate, configs), total=len(configs))
-            )
-    else:
-        results = []
-        for config in tqdm.tqdm(configs):
-            results.append(run_pytorch(config))
-
-    with open("grid_search_results.csv", "w", newline="") as f:
-        fieldnames = [
-            "batch_size",
-            "dp_degree",
-            "hp_degree",
-            "pp_degree",
-            "num_microbatches",
-            "throughput",
-            "peak_memory",
-        ]
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for (config, throughput, peak_memory) in results:
-            (
-                batch_size,
-                dp_degree,
-                hp_degree,
-                pp_degree,
-                num_microbatches,
-            ) = config
-            writer.writerow(
-                {
-                    "batch_size": batch_size,
-                    "dp_degree": dp_degree,
-                    "hp_degree": hp_degree,
-                    "pp_degree": pp_degree,
-                    "num_microbatches": num_microbatches,
-                    "throughput": throughput,
-                    "peak_memory": peak_memory,
-                }
-            )
-    """
 
 
 if __name__ == "__main__":

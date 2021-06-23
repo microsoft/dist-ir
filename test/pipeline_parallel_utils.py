@@ -16,8 +16,12 @@ def construct_function_and_partition_map():
     z = function.add_input_value(
         "z", Tensor(dtype=Float32(), shape=(batch_size, 1), device=d0)
     )
-    wA = function.add_input_value("wA", Tensor(dtype=Float32(), shape=(4, 2), device=d0))
-    wB = function.add_input_value("wB", Tensor(dtype=Float32(), shape=(2, 1), device=d0))
+    wA = function.add_input_value(
+        "wA", Tensor(dtype=Float32(), shape=(4, 2), device=d0)
+    )
+    wB = function.add_input_value(
+        "wB", Tensor(dtype=Float32(), shape=(2, 1), device=d0)
+    )
     a = function.add_op("MatMul", "MatMul0", inputs=[x, wA], output_names=["a"])
     y = function.add_op("MatMul", "MatMul1", inputs=[a, wB], output_names=["y"])
     l = function.add_op(

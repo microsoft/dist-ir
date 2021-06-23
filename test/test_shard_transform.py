@@ -136,7 +136,11 @@ def test_single_variable_horizontal_parallel():
         ops=[function.ops[0]],
         input_dims={function.inputs[1]: 1},
         reduction_params={
-            function.ops[0].outputs[0]: {"op_type": "MPIGather", "axis": 1, "device": d0}
+            function.ops[0].outputs[0]: {
+                "op_type": "MPIGather",
+                "axis": 1,
+                "device": d0,
+            }
         },
         devices=[d0, d1],
     )

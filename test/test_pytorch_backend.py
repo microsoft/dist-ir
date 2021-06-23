@@ -311,9 +311,9 @@ def test_dp_mlp():
 
 
 if __name__ == "__main__":
-    #test_owt(2, 4)
-    #test_dp_mlp()
-    #test_send_recv()
-    #test_single_device()
+    # test_owt(2, 4)
+    # test_dp_mlp()
+    # test_send_recv()
+    # test_single_device()
     test_dp_mp_matmuls()
     test_mlp_grid_search()

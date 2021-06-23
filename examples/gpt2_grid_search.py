@@ -27,7 +27,7 @@ from dist_ir.transforms import gpt2_dhp_transform, filter_transform
 from . import gpt2
 
 """
-model_params = {
+MODEL_PARAMS = {
     "gpt2": (12, 12, 768),
     "gpt2-medium": (24, 16, 1024),
     "gpt2-large": (36, 20, 1280),
@@ -39,11 +39,12 @@ MODEL_PARAMS = {
     "gpt3": (12, 12, 768),
     "gpt3-medium": (24, 16, 1024),
     "gpt3-large": (24, 16, 1536),
-    "gpt3-xl": (24, 24, 2048),
+    "gpt3-xl": (24, 16, 2048),
     "gpt3-2.7B": (32, 32, 2560),
     "gpt3-6.7B": (32, 32, 4096),
-    "gpt3-13B": (40, 40, 5140),
+    "gpt3-13B": (40, 40, 5120),
 }
+""
 
 
 def get_all_degrees(n):
@@ -122,6 +123,7 @@ def get_transformed_function_and_input_data(config):
 
 
 def simulate(config):
+    condensed_config = None
     try:
         (
             condensed_config,
@@ -143,6 +145,7 @@ def simulate(config):
 
 
 def run_pytorch(config):
+    condensed_config = None
     try:
         (
             condensed_config,
@@ -172,8 +175,8 @@ def grid_search(args):
             != "y"
         ):
             return
-    all_cluster_sizes = [4]
-    all_batch_sizes = [1, 4, 64, 256]
+    all_cluster_sizes = [4, 8, 16]
+    all_batch_sizes = [64, 256]
     # all_model_sizes = ["gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"]
     all_model_sizes = [
         "gpt3",

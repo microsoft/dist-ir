@@ -254,9 +254,9 @@ def _create_post_type_inference_semantics(projector_register):
             projector(op, state)
 
             # If op involves more than one device, create a group
-            devices = [v.type.device for v in op.outputs if v.type.device is not None] + [
-                v.type.device for v in op.inputs if v.type.device is not None
-            ]
+            devices = [
+                v.type.device for v in op.outputs if v.type.device is not None
+            ] + [v.type.device for v in op.inputs if v.type.device is not None]
             group = _make_group(devices)
             if len(group) > 1:
                 state.groups.add(group)

@@ -375,7 +375,9 @@ def slice_conc(op, x, starts, ends, axes, steps=None):
         steps = [steps] * len(starts)
     else:
         assert len(steps) == len(starts)
-    slices = {axis: slice(s, e, step) for (s, e, axis, step) in zip(starts, ends, axes, steps)}
+    slices = {
+        axis: slice(s, e, step) for (s, e, axis, step) in zip(starts, ends, axes, steps)
+    }
     slices = tuple(slices.get(d, slice(None)) for d in range(x.ndim))
     return x[slices]
 
@@ -614,7 +616,9 @@ def split(op, x):
         return tuple(y for y in np.split(x, num_splits, axis=dim))
     except Exception as e:
         import pdb
+
         pdb.set_trace()
+
 
 # NOTE: This is the ONNX version of Split
 def split_v2(op, x):
@@ -626,6 +630,7 @@ def split_v2(op, x):
         n += s
     axis = op.attributes["axis"]
     return np.split(x, sections, axis=axis)
+
 
 def sub(op, x, y):
     return x - y
@@ -763,7 +768,7 @@ NumPyRegister = {
     ("Mul", (np.ndarray, np.float32)): mul,
     ("Mul", (np.int64, np.int64)): mul,
     ("NonZero", (np.ndarray,)): lambda op, x: np.array(np.nonzero(x)),
-    ("Pow", (np.ndarray, np.float32)): lambda op, x, y: pow(x, y), 
+    ("Pow", (np.ndarray, np.float32)): lambda op, x, y: pow(x, y),
     ("ReduceAllL2", tuple(np.ndarray for i in range(60))): reduce_all_l2,
     ("ReduceAllL2", tuple(np.ndarray for i in range(61))): reduce_all_l2,
     ("ReduceAllL2", tuple(np.ndarray for i in range(62))): reduce_all_l2,

@@ -16,7 +16,7 @@ from ..ir import Function, cpprint, pformat
 from ..ir.device import Device
 from ..ir.type import Int64, Float32
 
-torch.multiprocessing.set_sharing_strategy('file_system')
+torch.multiprocessing.set_sharing_strategy("file_system")
 
 DistributedContext = NamedTuple(
     "DistributedContext",

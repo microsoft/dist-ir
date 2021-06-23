@@ -215,8 +215,8 @@ def import_from_onnx(
         if node.name == "":
             node.name = f"{node.op_type}_{type_count[node.op_type]}"
         type_count[node.op_type] += 1
-    #adjacency_list = _get_adjacency_list(nodes)
-    #nodes = _topo_sort(nodes, adjacency_list)
+    # adjacency_list = _get_adjacency_list(nodes)
+    # nodes = _topo_sort(nodes, adjacency_list)
     for node in nodes:
         per_node_inputs = []
         if verbose:

@@ -228,14 +228,21 @@ def _partition_inputs_pp(
                             partition_maps[i][j],
                         )
                         for consumer_device in consumer_devices:
-                            forwarded_value = _send_value(
-                                hp_input,
-                                init_function,
-                                consumer_device,
-                                output_name=f"{hp_input.name}_pp_all",
-                            )
+                            if consumer_device != hp_device:
+                                pp_input = _send_value(
+                                    hp_input,
+                                    init_function,
+                                    consumer_device,
+                                    output_name=f"{hp_input.name}_pp_all",
+                                )
+                            else:
+                                pp_input = _identity(
+                                    hp_input,
+                                    init_function,
+                                    output_name=f"{hp_input.name}_pp_all",
+                                )
                             pp_inputs[hp_input][pp_devices.index(consumer_device)] = [
-                                forwarded_value for _ in range(num_microbatches)
+                                pp_input for _ in range(num_microbatches)
                             ]
                 else:
                     # If not using pipeline parallelism, no action necessary here.

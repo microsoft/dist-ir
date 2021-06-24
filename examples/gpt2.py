@@ -32,16 +32,6 @@ def _to_numpy(x):
     return x
 
 
-def _get_mixed_inputs(inputs, input_data):
-    mixed_inputs = []
-    for i, inp in enumerate(inputs):
-        if "weight" in inp.name or "bias" in inp.name:
-            mixed_inputs.append(inp.type)
-        else:
-            mixed_inputs.append(input_data[i])
-    return mixed_inputs
-
-
 def _filter_extra_outputs(function):
     function, attribute_map = sanitize_unhashable_attributes(function)
 
@@ -373,7 +363,13 @@ def get_stats(function):
 
 
 def import_function_and_get_input_data(
-    model_path, batch_size, n_layer, n_head, n_embd, default_device
+    model_path,
+    batch_size,
+    n_layer,
+    n_head,
+    n_embd,
+    default_device,
+    use_real_weights=False,
 ):
     function, input_data_map = import_from_onnx(
         model_path,
@@ -381,6 +377,11 @@ def import_function_and_get_input_data(
         default_device=default_device,
         parse_input_data=True,
     )
+
+    if not use_real_weights:
+        for inp in input_data_map:
+            if "weight" in inp.name or "bias" in inp.name:
+                input_data_map[inp] = inp.type
 
     function = _filter_extra_outputs(function)
     function = _set_model_size(function, n_layer, n_head, n_embd)
@@ -392,19 +393,30 @@ def import_function_and_get_input_data(
     input_ids = torch.tensor([[tokens] for _ in range(batch_size)])
     input_ids = _to_numpy(input_ids)
     input_data = [input_ids] + list(input_data_map.values())
-    # If any weight shapes were changed, zero-pad the new weights.
+    # Update the input data if any weight shapes were changed.
     for i in range(1, len(input_data)):
         old_shape = input_data[i].shape
         if old_shape != function.inputs[i].type.shape:
-            new_tensor = np.zeros(
-                function.inputs[i].type.shape, dtype=input_data[i].dtype
+            assert (
+                "weight" in function.inputs[i].name or "bias" in function.inputs[i].name
             )
-            if len(old_shape) == 1:
-                new_tensor[: old_shape[0]] = input_data[i]
-            elif len(old_shape) == 2:
-                new_tensor[: old_shape[0], : old_shape[1]] = input_data[i]
-            input_data[i] = new_tensor
+            if use_real_weights:
+                # Zero-pad the new weights.
+                new_tensor = np.zeros(
+                    function.inputs[i].type.shape, dtype=input_data[i].dtype
+                )
+                if len(old_shape) == 1:
+                    new_tensor[: old_shape[0]] = input_data[i]
+                elif len(old_shape) == 2:
+                    new_tensor[: old_shape[0], : old_shape[1]] = input_data[i]
+                input_data[i] = new_tensor
+            else:
+                input_data[i] = function.inputs[i].type
         elif old_shape == (1,):
+            assert (
+                "weight" not in function.inputs[i].name
+                and "bias" not in function.inputs[i].name
+            )
             if input_data[i][0] == 768:
                 input_data[i] = np.array([n_embd], dtype=input_data[i].dtype)
             elif input_data[i][0] == 768 * 3:
@@ -466,24 +478,26 @@ def transform(
     )
     # Manual adjustments for horizontal parallelism
     for i in range(len(input_data)):
-        if input_data[i].shape == (1,) and (
-            input_data[i][0] == embedding_dim * 3
-            or input_data[i][0] == embedding_dim * 4
+        if (
+            isinstance(input_data[i], np.ndarray)
+            and input_data[i].shape == (1,)
+            and (
+                input_data[i][0] == embedding_dim * 3
+                or input_data[i][0] == embedding_dim * 4
+            )
         ):
             input_data[i] = np.array([input_data[i][0] // hp_degree])
     ex = SequentialExecutor("numpy")
 
-    mixed_inputs = _get_mixed_inputs(init_function.inputs, input_data)
     init_function = ex.infer_types(
         init_function,
-        mixed_inputs,
+        input_data,
         input_devices=[topology.devices[0] for _ in range(len(input_data))],
     )
     initialized_input_data = ex.compute(init_function, input_data)
-    mixed_inputs = _get_mixed_inputs(init_function.outputs, initialized_input_data)
     transformed_function = ex.infer_types(
         transformed_function,
-        mixed_inputs,
+        initialized_input_data,
         [output.type.device for output in init_function.outputs],
     )
     return init_function, transformed_function, initialized_input_data
@@ -526,12 +540,12 @@ def main(args):
         n_head=args.n_head,
         n_embd=args.n_embd,
         default_device=d0,
+        use_real_weights=args.use_real_weights,
     )
     ex = SequentialExecutor("numpy")
-    mixed_inputs = _get_mixed_inputs(function.inputs, input_data)
     function = ex.infer_types(
         function,
-        mixed_inputs,
+        input_data,
         input_devices=[topology.devices[0] for _ in range(len(input_data))],
     )
     parameter_count, model_size, parameter_count_str, model_size_str = get_stats(
@@ -611,6 +625,12 @@ if __name__ == "__main__":
         action="store_true",
         default=False,
         help="Use GPU with PyTorch backend",
+    )
+    parser.add_argument(
+        "--use_real_weights",
+        action="store_true",
+        default=False,
+        help="Use real weights",
     )
     parser.add_argument(
         "--network_bandwidth", type=float, default=64, help="Network bandwidth in Gbps"

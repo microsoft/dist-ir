@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Sequence
 from .absint import AbstractInterpreter, convert_impls_to_semantics
 from .type_inference import TypePropRegister, _type_function
 from .backend_register import BackendRegister
+from .mixed_register import MixedImplementations
 from ..ir import Device, Function, Op, Value
 from ..ir.type import Int32, Int64, Float32, Float64, Tensor
 
@@ -14,6 +15,7 @@ class SequentialExecutor:
             raise ValueError(f"Unknown backend {backend}")
         semantics = convert_impls_to_semantics(BackendRegister[backend])
         semantics.update(convert_impls_to_semantics(TypePropRegister))
+        semantics.update(convert_impls_to_semantics(MixedImplementations))
         self.interpreter = AbstractInterpreter(semantics=semantics)
 
     def _compute_op(self, op: Op, inputs: List[Any]):

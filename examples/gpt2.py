@@ -32,6 +32,16 @@ def _to_numpy(x):
     return x
 
 
+def _get_mixed_inputs(inputs, input_data):
+    mixed_inputs = []
+    for i, inp in enumerate(inputs):
+        if "weight" in inp.name or "bias" in inp.name:
+            mixed_inputs.append(inp.type)
+        else:
+            mixed_inputs.append(input_data[i])
+    return mixed_inputs
+
+
 def _filter_extra_outputs(function):
     function, attribute_map = sanitize_unhashable_attributes(function)
 
@@ -386,7 +396,9 @@ def import_function_and_get_input_data(
     for i in range(1, len(input_data)):
         old_shape = input_data[i].shape
         if old_shape != function.inputs[i].type.shape:
-            new_tensor = np.zeros(function.inputs[i].type.shape)
+            new_tensor = np.zeros(
+                function.inputs[i].type.shape, dtype=input_data[i].dtype
+            )
             if len(old_shape) == 1:
                 new_tensor[: old_shape[0]] = input_data[i]
             elif len(old_shape) == 2:
@@ -394,13 +406,13 @@ def import_function_and_get_input_data(
             input_data[i] = new_tensor
         elif old_shape == (1,):
             if input_data[i][0] == 768:
-                input_data[i] = np.array([n_embd])
+                input_data[i] = np.array([n_embd], dtype=input_data[i].dtype)
             elif input_data[i][0] == 768 * 3:
-                input_data[i] = np.array([n_embd * 3])
+                input_data[i] = np.array([n_embd * 3], dtype=input_data[i].dtype)
             elif input_data[i][0] == 768 * 4:
-                input_data[i] = np.array([n_embd * 4])
+                input_data[i] = np.array([n_embd * 4], dtype=input_data[i].dtype)
             elif input_data[i][0] == 12:
-                input_data[i] = np.array([n_head])
+                input_data[i] = np.array([n_head], dtype=input_data[i].dtype)
     # If any extra input weights were added, use the last occurence of the
     # corresponding weights in the original function as the initial weights.
     # This minimizes risk of numerical stability issues.
@@ -460,15 +472,18 @@ def transform(
         ):
             input_data[i] = np.array([input_data[i][0] // hp_degree])
     ex = SequentialExecutor("numpy")
+
+    mixed_inputs = _get_mixed_inputs(init_function.inputs, input_data)
     init_function = ex.infer_types(
         init_function,
-        input_data,
+        mixed_inputs,
         input_devices=[topology.devices[0] for _ in range(len(input_data))],
     )
     initialized_input_data = ex.compute(init_function, input_data)
+    mixed_inputs = _get_mixed_inputs(init_function.outputs, initialized_input_data)
     transformed_function = ex.infer_types(
         transformed_function,
-        initialized_input_data,
+        mixed_inputs,
         [output.type.device for output in init_function.outputs],
     )
     return init_function, transformed_function, initialized_input_data
@@ -513,9 +528,10 @@ def main(args):
         default_device=d0,
     )
     ex = SequentialExecutor("numpy")
+    mixed_inputs = _get_mixed_inputs(function.inputs, input_data)
     function = ex.infer_types(
         function,
-        input_data,
+        mixed_inputs,
         input_devices=[topology.devices[0] for _ in range(len(input_data))],
     )
     parameter_count, model_size, parameter_count_str, model_size_str = get_stats(

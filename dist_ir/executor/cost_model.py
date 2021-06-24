@@ -127,7 +127,8 @@ class CostModel:
             ("Send", (Tensor,)): self._send_cost_fn,
             ("Send", (type(Int64()),)): lambda op, x: {},
             ("Split", (Tensor,)): self._split_cost_fn,
-            ("SplitDistIR", (Tensor,)): self._split_cost_fn,
+            ("SplitUniform", (Tensor,)): self._split_cost_fn,
+            ("SplitUniformToTupleType", (Tensor,)): self._split_cost_fn,
             ("Shape", (Tensor,)): self._shape_cost_fn,
             ("Slice", (Tensor, Tensor, Tensor, Tensor)): self._slice_cost_fn,
             (

@@ -525,7 +525,9 @@ def _send_prop_fn(op, x):
 def _shape_prop_fn(op, x):
     if not isinstance(x, Tensor):
         _raise_type_error(op, x)
-    return np.array(x.shape, dtype=np.int64)  # Tensor(dtype=Int64(), shape=None, device=x.device)
+    return np.array(
+        x.shape, dtype=np.int64
+    )  # Tensor(dtype=Int64(), shape=None, device=x.device)
 
 
 def _slice_prop_fn(op, x, starts, ends, axes, steps):
@@ -594,7 +596,7 @@ def _split_prop_fn(op, x):
     return tuple(output_types)
 
 
-def _split_v2_prop_fn(op, x):
+def _split_uniform_prop_fn(op, x):
     if not isinstance(x, Tensor):
         _raise_type_error(op, x)
     num_splits = op.attributes["num_splits"]
@@ -604,12 +606,14 @@ def _split_v2_prop_fn(op, x):
     assert output_shape[split_dim] % num_splits == 0
     output_shape[split_dim] //= num_splits
     output_shape = tuple(output_shape)
-    return TupleType(
-        tuple(
-            Tensor(dtype=x.dtype, shape=output_shape, device=x.device)
-            for i in range(num_splits)
-        )
+    output_types = tuple(
+        Tensor(dtype=x.dtype, shape=output_shape, device=x.device)
+        for i in range(num_splits)
     )
+    if op.op_type == "SplitUniformToTupleType":
+        return TupleType(output_types)
+    else:
+        return output_types
 
 
 def _softmax_prop_fn(op, x):
@@ -776,8 +780,8 @@ TypePropRegister = {
     ("Select", (TupleType,)): _select_prop_fn,
     ("Send", (Tensor,)): _send_prop_fn,
     ("Shape", (Tensor,)): _shape_prop_fn,
-    ("SplitDistIR", (Tensor,)): _split_prop_fn,
-    ("Split_v2", (Tensor,)): _split_v2_prop_fn,
+    ("SplitUniform", (Tensor,)): _split_uniform_prop_fn,
+    ("SplitUniformToTupleType", (Tensor,)): _split_uniform_prop_fn,
     ("Split", (Tensor,)): _split_prop_fn,
     # ("Shape", (Tensor,)): TODO
     ("Slice", (Tensor, Tensor, Tensor, Tensor)): _slice_prop_fn,

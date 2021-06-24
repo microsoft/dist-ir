@@ -31,7 +31,7 @@ def _split_value(v, function, num_splits, parallelism_level):
     assert parallelism_level == "pp"
     output_names = [f"{v.name}_{parallelism_level}_{i}" for i in range(num_splits)]
     return function.add_op(
-        "SplitDistIR",
+        "SplitUniform",
         inputs=[v],
         attributes={"axis": 0, "num_splits": num_splits},
         output_names=output_names,

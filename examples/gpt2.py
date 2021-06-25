@@ -381,8 +381,8 @@ def get_stats(function):
     return parameter_count, model_size, parameter_count_str, model_size_str
 
 
-def import_function(
-    model_path, n_layer, n_head, n_embd, default_device, use_real_weights=False
+def import_function_and_get_input_data(
+    model_path, default_device, use_real_weights=False
 ):
     function, input_data_map = import_from_onnx(
         model_path,
@@ -391,13 +391,18 @@ def import_function(
         parse_input_data=True,
     )
 
+    function = _filter_extra_outputs(function)
+
     if not use_real_weights:
         for inp in input_data_map:
             if "weight" in inp.name or "bias" in inp.name:
                 input_data_map[inp] = inp.type
     input_data = list(input_data_map.values())
 
-    function = _filter_extra_outputs(function)
+    return function, input_data
+
+
+def resize_function_and_input_data(function, input_data, n_layer, n_head, n_embd):
     function = _set_model_size(function, n_layer, n_head, n_embd)
 
     # Update the input data if any weight shapes were changed.
@@ -406,7 +411,7 @@ def import_function(
         old_shape = input_data[i].shape
         if old_shape != inp.type.shape:
             assert "weight" in inp.name or "bias" in inp.name
-            if use_real_weights:
+            if isinstance(input_data[i], np.ndarray):
                 # Zero-pad the new weights.
                 new_tensor = np.zeros(inp.type.shape, dtype=input_data[i].dtype)
                 if len(old_shape) == 1:
@@ -415,6 +420,7 @@ def import_function(
                     new_tensor[: old_shape[0], : old_shape[1]] = input_data[i]
                 input_data[i] = new_tensor
             else:
+                assert isinstance(input_data[i], Tensor)
                 input_data[i] = inp.type
         elif old_shape == (1,):
             assert "weight" not in inp.name and "bias" not in inp.name
@@ -431,7 +437,7 @@ def import_function(
     # This minimizes risk of numerical stability issues.
     if len(input_data) < len(function.inputs) - 1:
         extra_weight_map = {}
-        for i, inp in enumerate(input_data_map):
+        for i, inp in enumerate(function.inputs[1 : 1 + len(input_data)]):
             base_input_name = re.sub("h\.(\d+)", "", inp.name)
             extra_weight_map[base_input_name] = input_data[i]
         input_data += [
@@ -529,13 +535,13 @@ def main(args):
     topology = get_topology(
         world_size, args.device_throughput, args.dram_bandwidth, args.network_bandwidth
     )
-    function, input_data = import_function(
+    function, input_data = import_function_and_get_input_data(
         args.model_path,
-        n_layer=args.n_layer,
-        n_head=args.n_head,
-        n_embd=args.n_embd,
         default_device=topology.devices[0],
         use_real_weights=args.use_real_weights,
+    )
+    function, input_data = resize_function_and_input_data(
+        function, input_data, args.n_layer, args.n_head, args.n_embd
     )
     input_ids = create_input_ids(args.batch_size)
     input_data = [input_ids] + input_data

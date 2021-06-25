@@ -1,41 +1,21 @@
 import argparse
-from collections import defaultdict, OrderedDict
+import copy
 import csv
 import itertools
-import logging
-import math
+import filelock
 import numpy as np
-import time
-import matplotlib as mpl
-import matplotlib.pyplot as plt
-import multiprocessing
 import os
-from transformers import GPT2Tokenizer
-import torch
-import tqdm
+from tqdm.contrib.concurrent import process_map
 
-import dist_ir
-from dist_ir.importer import import_from_onnx
-from dist_ir.ir import FunctionMaker, cpprint, pformat, Device, Topology, Value
-from dist_ir.ir.type import Float32, Tensor
-from dist_ir.executor import (
-    CostModel,
-    SequentialExecutor,
-    PostTypeInferenceSimulator,
-)
-from dist_ir.transforms import gpt2_dhp_transform, filter_transform
 from . import gpt2
+from dist_ir.executor import SequentialExecutor
 
-"""
 MODEL_PARAMS = {
     "gpt2": (12, 12, 768),
     "gpt2-medium": (24, 16, 1024),
     "gpt2-large": (36, 20, 1280),
     "gpt2-xl": (48, 25, 1600),
     "gpt2-xl": (48, 25, 1600),
-}
-"""
-MODEL_PARAMS = {
     "gpt3": (12, 12, 768),
     "gpt3-medium": (24, 16, 1024),
     "gpt3-large": (24, 16, 1536),
@@ -44,10 +24,48 @@ MODEL_PARAMS = {
     "gpt3-6.7B": (32, 32, 4096),
     "gpt3-13B": (40, 40, 5120),
 }
-""
+
+FILELOCK_PATH = ".gpt2_grid_search.lock"
+
+FIELDNAMES = [
+    "model_size",
+    "world_size",
+    "batch_size",
+    "dp_degree",
+    "hp_degree",
+    "pp_degree",
+    "num_microbatches",
+    "latency",
+    "peak_memory",
+]
 
 
-def get_all_degrees(n):
+def _get_condensed_config(config):
+    (
+        function,
+        input_data,
+        topology,
+        model_size,
+        world_size,
+        batch_size,
+        dp_degree,
+        hp_degree,
+        pp_degree,
+        num_microbatches,
+    ) = config
+    condensed_config = (
+        model_size,
+        world_size,
+        batch_size,
+        dp_degree,
+        hp_degree,
+        pp_degree,
+        num_microbatches,
+    )
+    return condensed_config
+
+
+def _get_all_degrees(n):
     all_degrees = []
     d = 1
     h = 1
@@ -73,13 +91,14 @@ def get_all_degrees(n):
     return all_degrees
 
 
-def get_transformed_function_and_input_data(config):
+def _get_transformed_function_and_input_data(config):
     (
-        model_path,
-        device_throughput,
-        dram_bandwidth,
-        network_bandwidth,
+        function,
+        input_data,
+        topology,
+        output_file,
         model_size,
+        world_size,
         batch_size,
         dp_degree,
         hp_degree,
@@ -87,25 +106,13 @@ def get_transformed_function_and_input_data(config):
         num_microbatches,
     ) = config
     n_layer, n_head, n_embd = MODEL_PARAMS[model_size]
-    topology = Topology()
-    d0 = topology.add_device(
-        "gpu", throughput=device_throughput, dram_bandwidth=dram_bandwidth
-    )
-    function, input_data = gpt2.import_function_and_get_input_data(
-        model_path,
-        batch_size=batch_size,
-        n_layer=n_layer,
-        n_head=n_head,
-        n_embd=n_embd,
-        default_device=d0,
-    )
     ex = SequentialExecutor("numpy")
     function = ex.infer_types(
         function,
         input_data,
         input_devices=[topology.devices[0] for _ in range(len(input_data))],
     )
-    condensed_config = (batch_size, dp_degree, hp_degree, pp_degree, num_microbatches)
+    input_data = copy.deepcopy(input_data)
     init_function, transformed_function, initialized_input_data = gpt2.transform(
         function,
         input_data,
@@ -115,43 +122,71 @@ def get_transformed_function_and_input_data(config):
         pp_degree,
         num_microbatches,
         n_embd,
-        device_throughput=device_throughput,
-        dram_bandwidth=dram_bandwidth,
-        network_bandwidth=network_bandwidth,
     )
-    return condensed_config, transformed_function, initialized_input_data, topology
+    return topology, transformed_function, initialized_input_data
+
+
+def _write_row(config, latency, peak_memory):
+    (
+        function,
+        input_data,
+        topology,
+        output_file,
+        model_size,
+        world_size,
+        batch_size,
+        dp_degree,
+        hp_degree,
+        pp_degree,
+        num_microbatches,
+    ) = config
+    lock = filelock.FileLock(FILELOCK_PATH)
+    with lock:
+        with open(output_file, "a+", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+            writer.writerow(
+                {
+                    "model_size": model_size,
+                    "world_size": world_size,
+                    "batch_size": batch_size,
+                    "dp_degree": dp_degree,
+                    "hp_degree": hp_degree,
+                    "pp_degree": pp_degree,
+                    "num_microbatches": num_microbatches,
+                    "latency": latency,
+                    "peak_memory": peak_memory,
+                }
+            )
+            f.flush()
 
 
 def simulate(config):
-    condensed_config = None
-    try:
-        (
-            condensed_config,
-            transformed_function,
-            initialized_input_data,
-            topology,
-        ) = get_transformed_function_and_input_data(config)
-        simulation = gpt2.simulate(
-            transformed_function, initialized_input_data, topology
-        )
-        latency = max([simulation.timestamps[d] for d in simulation.timestamps])
-        peak_memory = max(
-            [simulation.peak_memory[d] for d in simulation.peak_memory]
-        ) / (2.0 ** 20)
+    # try:
+    (
+        topology,
+        transformed_function,
+        initialized_input_data,
+    ) = _get_transformed_function_and_input_data(config)
+    simulation = gpt2.simulate(transformed_function, initialized_input_data, topology)
+    latency = max([simulation.timestamps[d] for d in simulation.timestamps])
+    peak_memory = max([simulation.peak_memory[d] for d in simulation.peak_memory]) / (
+        2.0 ** 20
+    )
+    """
     except Exception as e:
         latency = -1
         peak_memory = -1
-    return condensed_config, latency, peak_memory
+    """
+    _write_row(config, latency, peak_memory)
 
 
 def run_pytorch(config):
-    condensed_config = None
+    condensed_config = _get_condensed_config(config)
     try:
         (
-            condensed_config,
+            topology,
             transformed_function,
             initialized_input_data,
-            topology,
         ) = get_transformed_function_and_input_data(config)
         world_size = len(topology.devices) - 1
         per_rank_outputs, runtimes = gpt2.run_pytorch(
@@ -166,6 +201,8 @@ def run_pytorch(config):
 
 
 def grid_search(args):
+    if args.pytorch:
+        raise NotImplementedError("Only grid search with simulation supported for now")
     # TODO: Make search space configuration part of args
     if os.path.exists(args.output_file):
         if (
@@ -175,7 +212,7 @@ def grid_search(args):
             != "y"
         ):
             return
-    all_cluster_sizes = [4, 8, 16]
+    all_world_sizes = [4, 8, 16]
     all_batch_sizes = [64, 256]
     # all_model_sizes = ["gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"]
     all_model_sizes = [
@@ -187,11 +224,36 @@ def grid_search(args):
         "gpt3-6.7B",
         "gpt3-13B",
     ]
+
+    topology = gpt2.get_topology(
+        max(all_world_sizes),
+        args.device_throughput,
+        args.dram_bandwidth,
+        args.network_bandwidth,
+    )
+    base_model, base_input_data = gpt2.import_function_and_get_input_data(
+        args.model_path, topology.devices[0]
+    )
+    models_and_input_data = {}
+    for model_size in all_model_sizes:
+        n_layer, n_head, n_embd = MODEL_PARAMS[model_size]
+        models_and_input_data[model_size] = gpt2.resize_function_and_input_data(
+            base_model,
+            copy.deepcopy(base_input_data),
+            n_layer,
+            n_head,
+            n_embd,
+        )
+    all_input_ids = gpt2.create_input_ids(max(all_batch_sizes))
+
     configs = []
-    for model_size, cluster_size, batch_size in itertools.product(
-        all_model_sizes, all_cluster_sizes, all_batch_sizes
+    for model_size, world_size, batch_size in itertools.product(
+        all_model_sizes, all_world_sizes, all_batch_sizes
     ):
-        all_degrees = get_all_degrees(cluster_size)
+        model, input_data = models_and_input_data[model_size]
+        input_ids = all_input_ids[:batch_size]
+        input_data = [input_ids] + input_data
+        all_degrees = _get_all_degrees(world_size)
         for (dp_degree, hp_degree, pp_degree) in all_degrees:
             if dp_degree > batch_size:
                 continue
@@ -212,11 +274,12 @@ def grid_search(args):
             for num_microbatches in all_num_microbatches:
                 configs.append(
                     (
-                        args.model_path,
-                        args.device_throughput,
-                        args.dram_bandwidth,
-                        args.network_bandwidth,
+                        model,
+                        input_data,
+                        topology,
+                        args.output_file,
                         model_size,
+                        world_size,
                         batch_size,
                         dp_degree,
                         hp_degree,
@@ -229,46 +292,9 @@ def grid_search(args):
     else:
         func = simulate
     with open(args.output_file, "w", newline="") as f:
-        fieldnames = [
-            "model_size",
-            "batch_size",
-            "dp_degree",
-            "hp_degree",
-            "pp_degree",
-            "num_microbatches",
-            "latency",
-            "peak_memory",
-        ]
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
         writer.writeheader()
-        for config in tqdm.tqdm(configs):
-            _, latency, peak_memory = func(config)
-            (
-                _,
-                _,
-                _,
-                _,
-                model_size,
-                batch_size,
-                dp_degree,
-                hp_degree,
-                pp_degree,
-                num_microbatches,
-            ) = config
-
-            writer.writerow(
-                {
-                    "model_size": model_size,
-                    "batch_size": batch_size,
-                    "dp_degree": dp_degree,
-                    "hp_degree": hp_degree,
-                    "pp_degree": pp_degree,
-                    "num_microbatches": num_microbatches,
-                    "latency": latency,
-                    "peak_memory": peak_memory,
-                }
-            )
-            f.flush()
+    process_map(func, configs)
 
 
 if __name__ == "__main__":

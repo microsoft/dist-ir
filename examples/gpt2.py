@@ -333,6 +333,25 @@ def _set_model_size(
     return transformed_function.finalize()
 
 
+def get_topology(world_size, device_throughput, dram_bandwidth, network_bandwidth):
+    topology = Topology()
+    d0 = topology.add_device("gpu")
+    for i in range(1, world_size + 1):
+        topology.add_device(
+            "gpu", throughput=device_throughput, dram_bandwidth=dram_bandwidth
+        )
+        for j in range(0, i):
+            if j == 0:
+                topology.set_bandwidth(
+                    topology.devices[i], topology.devices[j], network_bandwidth
+                )
+            else:
+                topology.set_bandwidth(
+                    topology.devices[i], topology.devices[j], network_bandwidth
+                )
+    return topology
+
+
 def get_stats(function):
     parameter_count = 0
     model_size = 0
@@ -362,14 +381,8 @@ def get_stats(function):
     return parameter_count, model_size, parameter_count_str, model_size_str
 
 
-def import_function_and_get_input_data(
-    model_path,
-    batch_size,
-    n_layer,
-    n_head,
-    n_embd,
-    default_device,
-    use_real_weights=False,
+def import_function(
+    model_path, n_layer, n_head, n_embd, default_device, use_real_weights=False
 ):
     function, input_data_map = import_from_onnx(
         model_path,
@@ -382,41 +395,29 @@ def import_function_and_get_input_data(
         for inp in input_data_map:
             if "weight" in inp.name or "bias" in inp.name:
                 input_data_map[inp] = inp.type
+    input_data = list(input_data_map.values())
 
     function = _filter_extra_outputs(function)
     function = _set_model_size(function, n_layer, n_head, n_embd)
 
-    tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-    tokens = tokenizer.encode(
-        "Here is some text to encode Hello World", add_special_tokens=True
-    )
-    input_ids = torch.tensor([[tokens] for _ in range(batch_size)])
-    input_ids = _to_numpy(input_ids)
-    input_data = [input_ids] + list(input_data_map.values())
     # Update the input data if any weight shapes were changed.
-    for i in range(1, len(input_data)):
+    for i in range(len(input_data)):
+        inp = function.inputs[i + 1]
         old_shape = input_data[i].shape
-        if old_shape != function.inputs[i].type.shape:
-            assert (
-                "weight" in function.inputs[i].name or "bias" in function.inputs[i].name
-            )
+        if old_shape != inp.type.shape:
+            assert "weight" in inp.name or "bias" in inp.name
             if use_real_weights:
                 # Zero-pad the new weights.
-                new_tensor = np.zeros(
-                    function.inputs[i].type.shape, dtype=input_data[i].dtype
-                )
+                new_tensor = np.zeros(inp.type.shape, dtype=input_data[i].dtype)
                 if len(old_shape) == 1:
                     new_tensor[: old_shape[0]] = input_data[i]
                 elif len(old_shape) == 2:
                     new_tensor[: old_shape[0], : old_shape[1]] = input_data[i]
                 input_data[i] = new_tensor
             else:
-                input_data[i] = function.inputs[i].type
+                input_data[i] = inp.type
         elif old_shape == (1,):
-            assert (
-                "weight" not in function.inputs[i].name
-                and "bias" not in function.inputs[i].name
-            )
+            assert "weight" not in inp.name and "bias" not in inp.name
             if input_data[i][0] == 768:
                 input_data[i] = np.array([n_embd], dtype=input_data[i].dtype)
             elif input_data[i][0] == 768 * 3:
@@ -428,16 +429,25 @@ def import_function_and_get_input_data(
     # If any extra input weights were added, use the last occurence of the
     # corresponding weights in the original function as the initial weights.
     # This minimizes risk of numerical stability issues.
-    if len(input_data) < len(function.inputs):
+    if len(input_data) < len(function.inputs) - 1:
         extra_weight_map = {}
         for i, inp in enumerate(input_data_map):
             base_input_name = re.sub("h\.(\d+)", "", inp.name)
-            extra_weight_map[base_input_name] = input_data[i + 1]
+            extra_weight_map[base_input_name] = input_data[i]
         input_data += [
             extra_weight_map[re.sub("h\.(\d+)", "", inp.name)]
-            for inp in function.inputs[len(input_data) :]
+            for inp in function.inputs[1 + len(input_data) :]
         ]
     return function, input_data
+
+
+def create_input_ids(batch_size):
+    tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+    tokens = tokenizer.encode(
+        "Here is some text to encode Hello World", add_special_tokens=True
+    )
+    input_ids = torch.tensor([[tokens] for _ in range(batch_size)])
+    return _to_numpy(input_ids)
 
 
 def transform(
@@ -449,30 +459,14 @@ def transform(
     pp_degree,
     num_microbatches,
     embedding_dim,
-    device_throughput,
-    dram_bandwidth,
-    network_bandwidth,
 ):
     world_size = dp_degree * hp_degree * pp_degree
-    for i in range(1, world_size + 1):
-        topology.add_device(
-            "gpu", throughput=device_throughput, dram_bandwidth=dram_bandwidth
-        )
-        for j in range(0, i):
-            if j == 0:
-                topology.set_bandwidth(
-                    topology.devices[i], topology.devices[j], network_bandwidth
-                )
-            else:
-                topology.set_bandwidth(
-                    topology.devices[i], topology.devices[j], network_bandwidth
-                )
     init_function, transformed_function = gpt2_dhp_transform(
         function,
         dp_degree,
         hp_degree,
         pp_degree,
-        topology.devices,
+        topology.devices[: world_size + 1],
         num_microbatches,
         embedding_dim,
     )
@@ -529,19 +523,22 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
 def main(args):
     if args.n_embd % args.n_head != 0:
         raise ValueError(
-            "Embedding dimension must be divisible by " "number of attention heads"
+            "Embedding dimension must be divisible by number of attention heads"
         )
-    topology = Topology()
-    d0 = topology.add_device("gpu")
-    function, input_data = import_function_and_get_input_data(
+    world_size = args.dp_degree * args.hp_degree * args.pp_degree
+    topology = get_topology(
+        world_size, args.device_throughput, args.dram_bandwidth, args.network_bandwidth
+    )
+    function, input_data = import_function(
         args.model_path,
-        batch_size=args.batch_size,
         n_layer=args.n_layer,
         n_head=args.n_head,
         n_embd=args.n_embd,
-        default_device=d0,
+        default_device=topology.devices[0],
         use_real_weights=args.use_real_weights,
     )
+    input_ids = create_input_ids(args.batch_size)
+    input_data = [input_ids] + input_data
     ex = SequentialExecutor("numpy")
     function = ex.infer_types(
         function,
@@ -551,6 +548,8 @@ def main(args):
     parameter_count, model_size, parameter_count_str, model_size_str = get_stats(
         function
     )
+    print("Parameter count:", parameter_count_str)
+    print("Model size:", model_size_str)
     init_function, transformed_function, initialized_input_data = transform(
         function,
         input_data,
@@ -560,12 +559,7 @@ def main(args):
         args.pp_degree,
         args.num_microbatches,
         args.n_embd,
-        args.device_throughput,
-        args.dram_bandwidth,
-        args.network_bandwidth,
     )
-    print("Parameter count:", parameter_count_str)
-    print("Model size:", model_size_str)
     if args.backend == "simulate":
         simulation = simulate(transformed_function, initialized_input_data, topology)
         if args.trace_file is not None:
@@ -573,6 +567,7 @@ def main(args):
         distributed_running_time = max(
             [simulation.timestamps[d] for d in simulation.timestamps]
         )
+        print(f"Latency: {distributed_running_time*1000:.2f} ms")
         print(
             f"Throughput: {args.batch_size / distributed_running_time:.2f} "
             f"samples/second"
@@ -582,6 +577,7 @@ def main(args):
         per_rank_outputs, runtimes = run_pytorch(
             transformed_function, initialized_input_data, world_size, args.use_gpu
         )
+        print(f"Latency: {np.median(runtimes[-1])*1000:.2f} ms")
         print(
             f"Throughput: {args.batch_size / np.median(runtimes[-1]):.2f} "
             f"samples/second"

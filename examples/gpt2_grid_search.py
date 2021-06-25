@@ -161,22 +161,20 @@ def _write_row(config, latency, peak_memory):
 
 
 def simulate(config):
-    # try:
-    (
-        topology,
-        transformed_function,
-        initialized_input_data,
-    ) = _get_transformed_function_and_input_data(config)
-    simulation = gpt2.simulate(transformed_function, initialized_input_data, topology)
-    latency = max([simulation.timestamps[d] for d in simulation.timestamps])
-    peak_memory = max([simulation.peak_memory[d] for d in simulation.peak_memory]) / (
-        2.0 ** 20
-    )
-    """
+    try:
+        (
+            topology,
+            transformed_function,
+            initialized_input_data,
+        ) = _get_transformed_function_and_input_data(config)
+        simulation = gpt2.simulate(transformed_function, initialized_input_data, topology)
+        latency = max([simulation.timestamps[d] for d in simulation.timestamps])
+        peak_memory = max([simulation.peak_memory[d] for d in simulation.peak_memory]) / (
+            2.0 ** 20
+        )
     except Exception as e:
         latency = -1
         peak_memory = -1
-    """
     _write_row(config, latency, peak_memory)
 
 

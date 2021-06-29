@@ -103,6 +103,7 @@ def _elementwise_tensor_op_prop_fn(op, x, y):
         and x.device == y.device
     ):
         _raise_type_error(op, x, y)
+    # Handle broadcasting according to https://numpy.org/doc/stable/user/basics.broadcasting.html.
     shape = []
     for i in range(max(len(x.shape), len(y.shape))):
         x_idx = len(x.shape) - 1 - i
@@ -227,11 +228,6 @@ def _min_prop_fn(op, x, y):
         and x.device == y.device
     ):
         _raise_type_error(op, x, y)
-    return x
-
-
-def _nonzero_prop_fn(op, x):
-    # TODO: Make x a constant
     return x
 
 
@@ -625,7 +621,6 @@ TypePropRegister = {
     ("MatMul", (Tensor, Tensor)): _matmul_prop_fn,
     ("MatMulGrad", (Tensor, Tensor, Tensor)): _matmul_grad_prop_fn,
     ("Min", (Tensor, Tensor)): _min_prop_fn,
-    ("NonZero", (Tensor,)): _nonzero_prop_fn,
     ("Relu", (Tensor,)): _relu_prop_fn,
     ("ReluGrad", (Tensor, Tensor)): _relu_grad_prop_fn,
     ("Reshape", (Tensor, Tensor)): _reshape_prop_fn,

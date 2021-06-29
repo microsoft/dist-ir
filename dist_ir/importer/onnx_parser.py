@@ -9,40 +9,6 @@ from ..ir import FunctionMaker, Value
 from ..ir.type import Bool, Float16, Float32, Int32, Int64, Tensor
 
 
-def _topo_sort_util(nodes, adjacency_list, cur_node, visited, sorted_nodes):
-    visited[cur_node] = True
-    for next_node in adjacency_list[cur_node]:
-        if not visited[next_node]:
-            _topo_sort_util(nodes, adjacency_list, next_node, visited, sorted_nodes)
-    sorted_nodes.insert(0, cur_node)
-
-
-def _topo_sort(nodes, adjacency_list):
-    node_map = {node.name: node for node in nodes}
-    visited = {node.name: False for node in nodes}
-    sorted_nodes = []
-    for node in nodes:
-        if not visited[node.name]:
-            _topo_sort_util(nodes, adjacency_list, node.name, visited, sorted_nodes)
-    return [node_map[node] for node in sorted_nodes]
-
-
-def _get_adjacency_list(nodes):
-    consumers = defaultdict(set)
-    adjacency_list = defaultdict(set)
-
-    for node in nodes:
-        for inp in node.input:
-            consumers[inp].add(node.name)
-
-    for node in nodes:
-        for output in node.output:
-            for consumer in consumers[output]:
-                adjacency_list[node.name].add(consumer)
-
-    return adjacency_list
-
-
 def _get_dist_ir_dtype_from_onnx_dtype(onnx_dtype):
     if onnx_dtype == 0:
         raise ValueError("Undefined onnx_dtype")

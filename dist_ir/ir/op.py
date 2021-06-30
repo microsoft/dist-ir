@@ -33,7 +33,8 @@ class Op:
             given_num_outputs = list(given_num_outputs)[0]
         else:
             raise ValueError(
-                "output_{names,types,values} must have same length. Got:\n"
+                "output_names, output_types, and output_values (if provided) "
+                "must have same length. Got:\n"
                 f"{output_names}\n{output_types}\n{output_values}"
             )
 
@@ -63,7 +64,8 @@ class Op:
                 if given_num_outputs is None:
                     raise ValueError(
                         f"Op {self.name} ({self.op_type}) has variadic "
-                        "outputs, so one of output_{names,values} must be specified"
+                        "outputs, so one of output_names or output_values must "
+                        "be specified"
                     )
                 num_outputs = given_num_outputs
             else:

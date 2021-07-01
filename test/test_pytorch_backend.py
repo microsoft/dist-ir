@@ -266,7 +266,7 @@ def test_send_recv():
 
     x = torch.randn(4, 4)
     inputs = (x,)
-    outputs, _ = run_pytorch(fn, inputs, debug_stacktrace=True)
+    outputs, _ = run_pytorch(fn, inputs)
     assert torch.allclose(x, outputs[1][0])
 
 

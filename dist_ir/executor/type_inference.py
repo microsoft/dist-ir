@@ -436,8 +436,8 @@ def _select_prop_fn(op, x):
         # and len(set(t.device for t in x.types)) == 1
     ):
         _raise_type_error(op, x)
-    dim = op.attributes["dim"]
-    return x.types[dim]
+    index = op.attributes["index"]
+    return x.types[index]
 
 
 def _send_prop_fn(op, x):

@@ -26,6 +26,7 @@ def test_single_device():
 
 
 # Disable test until we fix Pmap device assignment for simulation
+# TODO remove pmap, or add simulator support for pmap
 def _test_data_parallel():
     function = FunctionMaker()
     topology = Topology()
@@ -66,7 +67,7 @@ def _test_data_parallel():
     # TODO: Check specific values
 
 
-def _test_chrome_trace():
+def test_chrome_trace():
     function = FunctionMaker()
     topology = Topology()
 

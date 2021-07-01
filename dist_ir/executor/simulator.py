@@ -19,6 +19,7 @@ class SimulatorState(AbstractState):
         AbstractState.__init__(self, function, inputs)
         self.timestamps = defaultdict(float)
         self.peak_memory = defaultdict(lambda: 0)
+        # Values are tuples of (device, memory_used)
         self.live_memory = defaultdict(lambda: [(0, 0)])
         self.consumers = defaultdict(int)
         self.trace = []

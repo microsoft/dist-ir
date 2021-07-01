@@ -7,6 +7,20 @@ from ..ir.op import Op
 
 
 def sanitize_unhashable_attributes(function):
+    """Replaces unhashable op attributes with hashable byte representations.
+
+    Certain attribute values are not hashable (e.g. NumPy ndarrays) so this
+    transform constructs a transformed, hashable function without these values.
+    This function also returns a map to help restore the replaced values.
+
+    Args:
+      function: A DistIR function.
+
+    Returns:
+      A DistIR function with fully hashable attributes as well as a map from
+      (attribute name, hashable value) -> original (potentially unhashable)
+      value.
+    """
     assert isinstance(function, Function)
     attribute_map = {}
     value_map = {}
@@ -46,6 +60,17 @@ def sanitize_unhashable_attributes(function):
 
 
 def restore_unhashable_attributes(function, attribute_map):
+    """Undos the sanitized attribute transform by restoring unhashable attributes.
+
+    Args:
+      function: An unfinalized DistIR function (FunctionMaker).
+      attribute_map: A map from (attribute name, hashable value) ->
+      original (potentially unhashable) value.
+
+    Returns:
+      An unfinalized DistIR function with the hashable attributes replaced
+      with their unhashable original values.
+    """
     assert isinstance(function, FunctionMaker)
 
     restored_function = FunctionMaker(function.name)

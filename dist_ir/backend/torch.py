@@ -12,7 +12,7 @@ import torch.distributed as dist
 from torch import fx
 
 from ..executor.rank_projector import project
-from ..ir import Function, cpprint, pformat
+from ..ir import Function, cpprint
 from ..ir.device import Device
 from ..ir.type import Int64, Float32
 
@@ -381,9 +381,6 @@ def run_function(
 
     # Run ops
     for op in fn.ops:
-        # op_str = pformat(op).replace("\n", " ")
-        # print(f"{rank}: {op_str}")
-        # sys.stdout.flush()
         inputs = tuple(value_map[v] for v in op.inputs)
         kwargs = {} if op.attributes is None else {**op.attributes}
         kwargs["ctx"] = ctx

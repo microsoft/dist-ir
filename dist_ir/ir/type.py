@@ -4,7 +4,6 @@ from operator import add, mul
 from typing import Optional, Set, Tuple
 
 from .device import Device
-from .utils import singleton
 
 
 @dataclass(frozen=True)
@@ -24,9 +23,8 @@ class Type:
         return set()
 
 
-# @singleton
 class Int32(Type):
-    """The 32-bit integer type. A singleton class."""
+    """The 32-bit integer type."""
 
     def __repr__(self):
         return f"Int32[device={self.device}]"
@@ -35,9 +33,8 @@ class Int32(Type):
         return 4
 
 
-# @singleton
 class Int64(Type):
-    """The 64-bit integer type. A singleton class."""
+    """The 64-bit integer type."""
 
     def __repr__(self):
         return f"Int64[device={self.device}]"
@@ -46,9 +43,8 @@ class Int64(Type):
         return 8
 
 
-# @singleton
 class Float16(Type):
-    """The 16-bit float type. A singleton class."""
+    """The 16-bit float type."""
 
     def __repr__(self):
         return f"Float16[device={self.device}]"
@@ -57,7 +53,6 @@ class Float16(Type):
         return 2
 
 
-# @singleton
 class Float32(Type):
     """The 32-bit float type. A singleton class."""
 
@@ -70,7 +65,7 @@ class Float32(Type):
 
 # @singleton
 class Float64(Type):
-    """The 64-bit float type. A singleton class."""
+    """The 64-bit float type."""
 
     def __repr__(self):
         return f"Float64[device={self.device}]"
@@ -79,9 +74,8 @@ class Float64(Type):
         return 8
 
 
-# @singleton
 class Bool(Type):
-    """The boolean type. A singleton class."""
+    """The boolean type."""
 
     def __repr__(self):
         return f"Bool[device={self.device}]"

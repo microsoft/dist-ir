@@ -147,9 +147,9 @@ class CostModel:
         }
 
     def _elementwise_cost_fn(self, op, x, y=None):
-        if x.device is None:
-            return {}
-        n = reduce(mul, [x.shape[i] for i in range(len(x.shape))])
+        #if x.device is None:
+        #    return {}
+        n = reduce(mul, (x.shape[i] for i in range(len(x.shape))))
         data_size = x.dtype.size() * n
         if y is not None:
             data_size *= 2

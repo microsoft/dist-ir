@@ -359,8 +359,8 @@ def reshape(op, x, new_shape):
 
 
 def select(op, xs):
-    dim = op.attributes["dim"]
-    return xs[dim]
+    index = op.attributes["index"]
+    return xs[index]
 
 
 def shape(op, x):

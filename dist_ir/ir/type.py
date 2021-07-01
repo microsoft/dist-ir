@@ -54,7 +54,7 @@ class Float16(Type):
 
 
 class Float32(Type):
-    """The 32-bit float type. A singleton class."""
+    """The 32-bit float type."""
 
     def __repr__(self):
         return f"Float32[device={self.device}]"
@@ -63,7 +63,6 @@ class Float32(Type):
         return 4
 
 
-# @singleton
 class Float64(Type):
     """The 64-bit float type."""
 

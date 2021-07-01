@@ -13,6 +13,9 @@ def sanitize_unhashable_attributes(function):
     transform constructs a transformed, hashable function without these values.
     This function also returns a map to help restore the replaced values.
 
+    TODO: Explore converting unhashable attributes to tuples on ONNX import
+    so that we don't need a separate transform.
+
     Args:
       function: A DistIR function.
 

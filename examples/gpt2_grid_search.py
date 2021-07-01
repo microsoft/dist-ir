@@ -34,6 +34,9 @@ MODEL_PARAMS = {
 
 
 def get_all_degrees(n):
+    """Given power-of-two world size n, returns all power-of-two factorizations of n."""
+    if int(np.log2(n)) != np.log2(n):
+        raise ValueError("World size must be a power of two")
     all_degrees = []
     d = 1
     h = 1

@@ -23,8 +23,6 @@ from dist_ir.transforms import (
     restore_unhashable_attributes,
 )
 
-NETWORK_BANDWIDTH_Gbps = 200
-
 
 def _to_numpy(x):
     if type(x) is not np.ndarray:
@@ -351,7 +349,7 @@ def get_stats(function):
         parameter_count_str = str(parameter_count)
 
     if model_size >= 1e3 and model_size < 1e6:
-        model_count_str = f"{model_size / 1e3:.2f} KB"
+        model_size_str = f"{model_size / 1e3:.2f} KB"
     elif model_size >= 1e6 and model_size < 1e9:
         model_size_str = f"{model_size / 1e6:.2f} MB"
     elif model_size >= 1e9:
@@ -566,6 +564,7 @@ def main(args):
     )
     print("Parameter count:", parameter_count_str)
     print("Model size:", model_size_str)
+    cpprint(transformed_function)
     if args.backend == "simulate":
         simulation = simulate(transformed_function, initialized_input_data, topology)
         if args.trace_file is not None:

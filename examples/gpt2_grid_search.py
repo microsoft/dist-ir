@@ -1,22 +1,13 @@
 import argparse
-from collections import defaultdict, OrderedDict
 import csv
 import itertools
-import logging
-import math
 import numpy as np
-import time
-import matplotlib as mpl
-import matplotlib.pyplot as plt
 import multiprocessing
 import os
-from transformers import GPT2Tokenizer
-import torch
 import tqdm
 
-import dist_ir
 from dist_ir.importer import import_from_onnx
-from dist_ir.ir import FunctionMaker, cpprint, pformat, Device, Topology, Value
+from dist_ir.ir import FunctionMaker, cpprint, Device, Topology, Value
 from dist_ir.ir.type import Float32, Tensor
 from dist_ir.executor import (
     CostModel,
@@ -26,16 +17,12 @@ from dist_ir.executor import (
 from dist_ir.transforms import gpt2_dhp_transform, filter_transform
 from . import gpt2
 
-"""
 MODEL_PARAMS = {
     "gpt2": (12, 12, 768),
     "gpt2-medium": (24, 16, 1024),
     "gpt2-large": (36, 20, 1280),
     "gpt2-xl": (48, 25, 1600),
     "gpt2-xl": (48, 25, 1600),
-}
-"""
-MODEL_PARAMS = {
     "gpt3": (12, 12, 768),
     "gpt3-medium": (24, 16, 1024),
     "gpt3-large": (24, 16, 1536),
@@ -44,10 +31,12 @@ MODEL_PARAMS = {
     "gpt3-6.7B": (32, 32, 4096),
     "gpt3-13B": (40, 40, 5120),
 }
-""
 
 
 def get_all_degrees(n):
+    """Given power-of-two world size n, returns all power-of-two factorizations of n."""
+    if int(np.log2(n)) != np.log2(n):
+        raise ValueError("World size must be a power of two")
     all_degrees = []
     d = 1
     h = 1
@@ -277,7 +266,14 @@ if __name__ == "__main__":
         "--pytorch", action="store_true", default=False, help="Use PyTorch backend"
     )
     parser.add_argument(
-        "--model_path", type=str, required=True, help="Path to GPT-2 ONNX model"
+        "--model_path",
+        type=str,
+        required=True,
+        help=(
+            "Path to GPT-2 ONNX model downloaded from "
+            "https://github.com/onnx/models/blob/master/text/machine_comprehension/"
+            "gpt-2/model/gpt2-10.onnx"
+        ),
     )
     parser.add_argument(
         "--network_bandwidth", type=float, default=64, help="Network bandwidth in Gbps"

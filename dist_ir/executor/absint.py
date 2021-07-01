@@ -4,9 +4,6 @@ from ..ir import Function, Op, Value
 from ..ir.type import TupleType
 
 
-import numpy as np
-
-
 class AbstractState:
     """An abstract state. env is an environment, i.e. a mapping from Value
     objects to abstract values.
@@ -121,7 +118,7 @@ def convert_impls_to_semantics(impls):
     def convert_impl(impl_fn):
         def semantics(op: Op, state: AbstractState):
             # Find the op's inputs in state's environment
-            inputs = tuple(state.env[v] for v in op.inputs)
+            inputs = (state.env[v] for v in op.inputs)
             # Execute the implementation on the inputs
             outputs = impl_fn(op, *inputs)
             # Put the outputs back into the state's environment

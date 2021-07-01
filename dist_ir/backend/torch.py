@@ -12,10 +12,11 @@ import torch.distributed as dist
 from torch import fx
 
 from ..executor.rank_projector import project
-from ..ir import Function, cpprint, pformat
+from ..ir import Function, cpprint
 from ..ir.device import Device
 from ..ir.type import Int64, Float32
 
+# NOTE: This is to address this issue: https://github.com/pytorch/pytorch/issues/11201
 torch.multiprocessing.set_sharing_strategy("file_system")
 
 DistributedContext = NamedTuple(
@@ -380,9 +381,6 @@ def run_function(
 
     # Run ops
     for op in fn.ops:
-        # op_str = pformat(op).replace("\n", " ")
-        # print(f"{rank}: {op_str}")
-        # sys.stdout.flush()
         inputs = tuple(value_map[v] for v in op.inputs)
         kwargs = {} if op.attributes is None else {**op.attributes}
         kwargs["ctx"] = ctx
@@ -533,7 +531,7 @@ def run_pytorch(
     num_warmup=5,
     debug_mock=False,
     debug_stacktrace=False,
-    run_type_inference=True,
+    run_type_inference=True,  # TODO: Remove once we have mixed implementations
 ):
     """Project `fn` and run on `inputs` over `num_devices` devices using the
     PyTorch backend.

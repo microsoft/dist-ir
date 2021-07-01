@@ -103,6 +103,7 @@ def _elementwise_tensor_op_prop_fn(op, x, y):
         and x.device == y.device
     ):
         _raise_type_error(op, x, y)
+    # Handle broadcasting according to https://numpy.org/doc/stable/user/basics.broadcasting.html.
     shape = []
     for i in range(max(len(x.shape), len(y.shape))):
         x_idx = len(x.shape) - 1 - i
@@ -222,23 +223,6 @@ def _min_prop_fn(op, x, y):
         and x.device == y.device
     ):
         _raise_type_error(op, x, y)
-    return x
-
-
-def _mul_prop_fn(op, x, y):
-    if not (
-        isinstance(x, Tensor)
-        and isinstance(y, Tensor)
-        and x.shape == y.shape
-        and x.dtype == y.dtype
-        and x.device == y.device
-    ):
-        _raise_type_error(op, x, y)
-    return x
-
-
-def _nonzero_prop_fn(op, x):
-    # TODO: Make x a constant
     return x
 
 
@@ -413,6 +397,18 @@ def _mpi_scatter_prop_fn(op, x, to_tuple_type=False):
         )
 
 
+def _mul_prop_fn(op, x, y):
+    if not (
+        isinstance(x, Tensor)
+        and isinstance(y, Tensor)
+        and x.shape == y.shape
+        and x.dtype == y.dtype
+        and x.device == y.device
+    ):
+        _raise_type_error(op, x, y)
+    return x
+
+
 def _reduce_mean_prop_fn(op, x):
     if "keepdims" in op.attributes:
         keepdims = op.attributes["keepdims"]
@@ -459,8 +455,8 @@ def _select_prop_fn(op, x):
         # and len(set(t.device for t in x.types)) == 1
     ):
         _raise_type_error(op, x)
-    dim = op.attributes["dim"]
-    return x.types[dim]
+    index = op.attributes["index"]
+    return x.types[index]
 
 
 def _send_prop_fn(op, x):
@@ -468,7 +464,6 @@ def _send_prop_fn(op, x):
     if not isinstance(x, Tensor) or device == x.device:
         _raise_type_error(op, x)
     return Tensor(dtype=x.dtype, shape=x.shape, device=device)
-
 
 
 def _split_prop_fn(op, x):

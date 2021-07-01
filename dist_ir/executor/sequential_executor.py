@@ -58,6 +58,7 @@ class SequentialExecutor:
         state = self.interpreter.interpret(function, inputs)
         return tuple(state.env[v] for v in function.outputs)
 
+    # TODO: Remove once we have sequential execution with mixed types
     def infer_types(
         self, function: Function, inputs: Sequence[Any], input_devices: Sequence[Device]
     ) -> Function:

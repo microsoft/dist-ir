@@ -4,7 +4,6 @@ import logging
 import numpy as np
 import time
 
-import dist_ir
 from dist_ir.importer import import_from_onnx, parse_tensor_from_file
 from dist_ir.ir import FunctionMaker, cpprint, pformat, Device, Topology, Value
 from dist_ir.executor import infer_types, SequentialExecutor, Simulator

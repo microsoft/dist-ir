@@ -212,6 +212,7 @@ def Simulator(cost_model):
     )
 
 
+# TODO: Remove once we have simulation with mixed types
 def _create_post_type_inference_semantics(cost_functions):
     """Creates a semantics (dictionary mapping op signatures to abstract state
     modifiers) given a dictionary of cost functions (input values -> costs) and

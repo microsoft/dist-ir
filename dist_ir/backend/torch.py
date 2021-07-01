@@ -531,7 +531,7 @@ def run_pytorch(
     num_warmup=5,
     debug_mock=False,
     debug_stacktrace=False,
-    run_type_inference=True,
+    run_type_inference=True,  # TODO: Remove once we have mixed implementations
 ):
     """Project `fn` and run on `inputs` over `num_devices` devices using the
     PyTorch backend.

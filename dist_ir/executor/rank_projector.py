@@ -273,6 +273,7 @@ PostTypeInferenceProjector = AbstractInterpreter(
 )
 
 
+# TODO: Remove run_type_inference once we have mixed implementations
 def project(
     fn: Function, input_types: Sequence[Type], run_type_inference: bool = True
 ) -> Tuple[Dict[Device, Function], Set[Tuple[Device]]]:

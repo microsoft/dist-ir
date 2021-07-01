@@ -534,7 +534,6 @@ def main(args):
     )
     print("Parameter count:", parameter_count_str)
     print("Model size:", model_size_str)
-    cpprint(transformed_function)
     if args.backend == "simulate":
         simulation = simulate(transformed_function, initialized_input_data, topology)
         if args.trace_file is not None:

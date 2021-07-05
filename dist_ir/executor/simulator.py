@@ -32,7 +32,7 @@ class SimulatorState(AbstractState):
 
     def add_trace_event(self, op_type, device, start_time, duration):
         if device is None:
-            return
+            raise ValueError(f"No device specified for {op_type} op trace event")
         self.trace.append(
             {
                 "name": op_type,

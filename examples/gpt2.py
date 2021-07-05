@@ -209,7 +209,9 @@ def _set_model_size(
                     and value[0] == 12
                 ):
                     sanitized_value = np.array([num_attention_heads]).tobytes()
-                    attributes = frozendict({"value": sanitized_value})
+                    attributes = frozendict(
+                        {"value": sanitized_value, "device": attributes["device"]}
+                    )
                     attribute_map[("value", sanitized_value)] = np.array(
                         [num_attention_heads]
                     )

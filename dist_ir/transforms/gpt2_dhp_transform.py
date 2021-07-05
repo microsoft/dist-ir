@@ -1,4 +1,5 @@
 from collections import defaultdict, Hashable
+from frozendict import frozendict
 import math
 import logging
 import re
@@ -454,9 +455,9 @@ def gpt2_dhp_transform(
                 for op in stage.ops:
                     # Collect inputs for this op.
                     for j, device in enumerate(devices):
-                        # logging.debug(
-                        #    f"Scheduling op {op} on device {device.device_id}"
-                        # )
+                        logging.debug(
+                            f"Scheduling op {op} on device {device.device_id}"
+                        )
                         pp_devices = device_tree[device_tree_root][dp_device][
                             hp_devices[j]
                         ]
@@ -487,11 +488,17 @@ def gpt2_dhp_transform(
                             ):
                                 assert len(attributes) == 2
                                 new_dim = embedding_dim // hp_degree
-                                attributes = {
-                                    "axis": attributes["axis"],
-                                    "split": (new_dim, new_dim, new_dim),
-                                }
-
+                                attributes = frozendict(
+                                    {
+                                        "axis": attributes["axis"],
+                                        "split": (new_dim, new_dim, new_dim),
+                                    }
+                                )
+                        elif op.op_type == "Constant":
+                            assert len(attributes) == 2
+                            attributes = frozendict(
+                                {"value": attributes["value"], "device": device}
+                            )
                         transformed_outputs = transformed_function.add_op(
                             op.op_type,
                             name=op.name,

@@ -34,13 +34,13 @@ def _raise_type_error(op, *args):
 # TODO update the below prop functions to be as robust as _allreduce_prop_fn
 
 
-def _get_dist_ir_dtype_from_numpy_dtype(numpy_dtype):
+def _get_dist_ir_dtype_from_numpy_dtype(numpy_dtype, device=None):
     if numpy_dtype == np.int32:
-        return Int32()
+        return Int32(device=device)
     elif numpy_dtype == np.int64:
-        return Int64()
+        return Int64(device=device)
     elif numpy_dtype == np.float32:
-        return Float32()
+        return Float32(device=device)
     else:
         raise NotImplementedError(f"Unsupported numpy dtype {numpy_dtype}")
 
@@ -78,11 +78,13 @@ def _constant_prop_fn(op):
     if isinstance(op.attributes["value"], np.ndarray):
         return Tensor(
             shape=op.attributes["value"].shape,
-            device=None,
+            device=op.attributes["device"],
             dtype=_get_dist_ir_dtype_from_numpy_dtype(op.attributes["value"].dtype),
         )
     else:
-        return _get_dist_ir_dtype_from_numpy_dtype(op.attributes["value"].dtype)
+        return _get_dist_ir_dtype_from_numpy_dtype(
+            op.attributes["value"].dtype, device=op.attributes["device"]
+        )
 
 
 def _constant_of_shape_prop_fn(op, x):

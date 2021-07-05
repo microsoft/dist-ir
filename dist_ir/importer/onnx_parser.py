@@ -150,8 +150,6 @@ def import_from_onnx(
         if node.name == "":
             node.name = f"{node.op_type}_{type_count[node.op_type]}"
         type_count[node.op_type] += 1
-    # adjacency_list = _get_adjacency_list(nodes)
-    # nodes = _topo_sort(nodes, adjacency_list)
     for node in nodes:
         per_node_inputs = []
         logging.debug(f"Getting inputs for node {node.name} ({node.op_type})...")
@@ -169,6 +167,8 @@ def import_from_onnx(
                 raise ValueError(f"Could not find input {value}!")
         output_names = [v for v in node.output if v != ""]
         attributes = {k: v for k, v in [_parse_attribute(a) for a in node.attribute]}
+        if node.op_type == "Constant":
+            attributes["device"] = default_device
         outputs = dist_ir_function.add_op(
             op_type=node.op_type,
             name=node.name,

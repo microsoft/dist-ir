@@ -75,7 +75,7 @@ def _concat2(*args, axis=None, ctx=None):
     return torch.cat(args, dim=axis)
 
 
-def _constant(value, ctx=None):
+def _constant(value, device=None, ctx=None):
     output = torch.tensor(value)
     if output.shape == (1,):
         return output[0]

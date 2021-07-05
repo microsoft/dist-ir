@@ -59,13 +59,8 @@ def _collective_projector(op: Op, state: ProjectorState):
 
 
 def _constant_projector(op: Op, state: ProjectorState):
-    # Only add the Constant ops to devices which use the constants.
     assert len(op.outputs) == 1
-    output = op.outputs[0]
-    device = output.type.device
-    if device is None:
-        raise ValueError(f"Constant {op.name} output {output} has no device")
-    assert device == op.attributes["device"]
+    device = op.attributes["device"]
     state.per_rank_fns[device].ops.append(op)
 
 

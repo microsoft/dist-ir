@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Sequence, Tuple
 
 from .absint import AbstractInterpreter, convert_impls_to_semantics
 from .type_inference import _type_function
@@ -42,7 +42,7 @@ class SequentialExecutor:
             output_data = (output_data,)
         return output_data
 
-    def compute(self, function: Function, inputs: Sequence[Any]) -> Dict[Value, Any]:
+    def compute(self, function: Function, inputs: Sequence[Any]) -> Tuple[Any]:
         """Executes the function given the specified inputs and returns the final result.
 
         Args:

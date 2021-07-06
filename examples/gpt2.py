@@ -122,7 +122,8 @@ def _set_model_size(
     producer_map = {}
 
     # Add inputs from the original function to the transformed function.
-    for inp in function.inputs:
+    inputs_to_remove = []
+    for i, inp in enumerate(function.inputs):
         # Only add inputs if they are used by blocks that will appear
         # in the transformed function.
         max_consumer_block_id = max(
@@ -172,6 +173,8 @@ def _set_model_size(
             else:
                 typ = inp.type
             value_map[inp] = transformed_function.add_input_value(inp.name, typ)
+        else:
+            inputs_to_remove.append(i)
 
     # A map from ops in the transformed function to block id.
     block_id_map = {}
@@ -330,7 +333,7 @@ def _set_model_size(
         transformed_function, attribute_map
     )
 
-    return transformed_function.finalize()
+    return transformed_function.finalize(), inputs_to_remove
 
 
 def get_stats(function):
@@ -362,7 +365,7 @@ def get_stats(function):
     return parameter_count, model_size, parameter_count_str, model_size_str
 
 
-def import_function_and_get_input_data(
+def _import_function_and_get_input_data(
     model_path, batch_size, n_layer, n_head, n_embd, default_device
 ):
     function, input_data_map = import_from_onnx(
@@ -373,7 +376,7 @@ def import_function_and_get_input_data(
     )
 
     function = _filter_extra_outputs(function)
-    function = _set_model_size(function, n_layer, n_head, n_embd)
+    function, inputs_to_remove = _set_model_size(function, n_layer, n_head, n_embd)
 
     tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
     tokens = tokenizer.encode(
@@ -382,8 +385,13 @@ def import_function_and_get_input_data(
     input_ids = torch.tensor([[tokens] for _ in range(batch_size)])
     input_ids = _to_numpy(input_ids)
     input_data = [input_ids] + list(input_data_map.values())
+
+    # If we shrunk the model, remove any unnecessary inputs.
+    for i in inputs_to_remove[::-1]:
+        input_data.pop(i)
+
     # If any weight shapes were changed, zero-pad the new weights.
-    for i in range(1, len(input_data)):
+    for i in range(1, len(function.inputs)):
         old_shape = input_data[i].shape
         if old_shape != function.inputs[i].type.shape:
             new_tensor = np.zeros(function.inputs[i].type.shape)
@@ -416,7 +424,7 @@ def import_function_and_get_input_data(
     return function, input_data
 
 
-def transform(
+def _transform(
     function,
     input_data,
     topology,
@@ -474,6 +482,61 @@ def transform(
     return init_function, transformed_function, initialized_input_data
 
 
+def get_transformed_function_and_input_data(
+    model_path,
+    device_throughput,
+    dram_bandwidth,
+    network_bandwidth,
+    batch_size,
+    dp_degree,
+    hp_degree,
+    pp_degree,
+    num_microbatches,
+    n_layer,
+    n_head,
+    n_embd,
+    print_stats=False,
+):
+    topology = Topology()
+    d0 = topology.add_device(
+        "gpu", throughput=device_throughput, dram_bandwidth=dram_bandwidth
+    )
+    function, input_data = _import_function_and_get_input_data(
+        model_path,
+        batch_size=batch_size,
+        n_layer=n_layer,
+        n_head=n_head,
+        n_embd=n_embd,
+        default_device=d0,
+    )
+    ex = SequentialExecutor("numpy")
+    if print_stats:
+        function = ex.infer_types(
+            function,
+            input_data,
+            input_devices=[topology.devices[0] for _ in range(len(input_data))],
+        )
+        parameter_count, model_size, parameter_count_str, model_size_str = get_stats(
+            function
+        )
+        print("Parameter count:", parameter_count_str)
+        print("Model size:", model_size_str)
+    init_function, transformed_function, initialized_input_data = _transform(
+        function,
+        input_data,
+        topology,
+        dp_degree,
+        hp_degree,
+        pp_degree,
+        num_microbatches,
+        n_embd,
+        device_throughput=device_throughput,
+        dram_bandwidth=dram_bandwidth,
+        network_bandwidth=network_bandwidth,
+    )
+    return transformed_function, initialized_input_data, topology
+
+
 def simulate(function, input_data, topology):
     input_types = (v.type for v in function.inputs)
     simulator = PostTypeInferenceSimulator(CostModel(topology))
@@ -502,40 +565,26 @@ def main(args):
         raise ValueError(
             "Embedding dimension must be divisible by " "number of attention heads"
         )
-    topology = Topology()
-    d0 = topology.add_device("gpu")
-    function, input_data = import_function_and_get_input_data(
-        args.model_path,
-        batch_size=args.batch_size,
-        n_layer=args.n_layer,
-        n_head=args.n_head,
-        n_embd=args.n_embd,
-        default_device=d0,
-    )
-    ex = SequentialExecutor("numpy")
-    function = ex.infer_types(
-        function,
-        input_data,
-        input_devices=[topology.devices[0] for _ in range(len(input_data))],
-    )
-    parameter_count, model_size, parameter_count_str, model_size_str = get_stats(
-        function
-    )
-    init_function, transformed_function, initialized_input_data = transform(
-        function,
-        input_data,
+    (
+        transformed_function,
+        initialized_input_data,
         topology,
+    ) = get_transformed_function_and_input_data(
+        args.model_path,
+        args.device_throughput,
+        args.dram_bandwidth,
+        args.network_bandwidth,
+        args.batch_size,
         args.dp_degree,
         args.hp_degree,
         args.pp_degree,
         args.num_microbatches,
+        args.n_layer,
+        args.n_head,
         args.n_embd,
-        args.device_throughput,
-        args.dram_bandwidth,
-        args.network_bandwidth,
+        print_stats=True,
     )
-    print("Parameter count:", parameter_count_str)
-    print("Model size:", model_size_str)
+
     if args.backend == "simulate":
         simulation = simulate(transformed_function, initialized_input_data, topology)
         if args.trace_file is not None:

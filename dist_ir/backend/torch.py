@@ -16,9 +16,9 @@ from ..ir import Function, cpprint
 from ..ir.device import Device
 from ..ir.type import Int64, Float32
 
-# NOTE: This is necessary to address this issue:
+# NOTE: The code currently suffers from this issue, more investigation needed:
 # https://github.com/pytorch/pytorch/issues/11201
-torch.multiprocessing.set_sharing_strategy("file_system")
+# torch.multiprocessing.set_sharing_strategy("file_system")
 
 DistributedContext = NamedTuple(
     "DistributedContext",
@@ -447,23 +447,11 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
             sys.exit(1)
     else:
         # Time a bunch of executions, use last run's output values
-        # TODO: Add a flag to disable PyTorch profiling
-        with torch.profiler.profile(
-            activities=[
-                torch.profiler.ProfilerActivity.CPU,
-                torch.profiler.ProfilerActivity.CUDA,
-            ],
-            schedule=torch.profiler.schedule(
-                wait=0, warmup=num_warmup_steps, active=num_repetitions
-            ),
-            on_trace_ready=lambda p: p.export_chrome_trace(f"{rank}_profile.json"),
-        ) as p:
-            for _ in range(num_warmup_steps + num_repetitions):
-                outputs = run_function(ctx, fn, inputs)
-                if ctx.world_size > 1:
-                    torch.distributed.barrier()
-                add_event()
-                p.step()
+        for _ in range(num_warmup_steps + num_repetitions):
+            outputs = run_function(ctx, fn, inputs)
+            if ctx.world_size > 1:
+                torch.distributed.barrier()
+            add_event()
 
     if ctx.use_gpu:
         # Move outputs back to cpu
@@ -508,7 +496,7 @@ def run_multiprocesses(
     per_rank_functions: Tuple[Function],
     per_rank_inputs: Tuple[Any],
     num_repetitions=1,
-    num_warmup=5,
+    num_warmup=0,
 ):
     assert len(per_rank_functions) == len(per_rank_inputs)
     args = [
@@ -529,7 +517,7 @@ def run_pytorch(
     inputs: Sequence[Any],
     use_gpu=False,
     num_repetitions=1,
-    num_warmup=5,
+    num_warmup=0,
     debug_mock=False,
     debug_stacktrace=False,
     run_type_inference=True,  # TODO: Remove once we have mixed implementations

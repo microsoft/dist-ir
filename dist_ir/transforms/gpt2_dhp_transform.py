@@ -527,41 +527,11 @@ def gpt2_dhp_transform(
                                 ][inp]
                                 input_values.append(output_value)
                         # Add the op once for each device to the transformed function.
-                        attributes = op.attributes
-                        if op.op_type == "Split":
-                            if "split" in attributes and attributes["split"] == (
-                                d_embd,
-                                d_embd,
-                                d_embd,
-                            ):
-                                assert len(attributes) == 2
-                                new_dim = d_embd // hp_degree
-                                attributes = frozendict(
-                                    {
-                                        "axis": attributes["axis"],
-                                        "split": (new_dim, new_dim, new_dim),
-                                    }
-                                )
-                        elif op.op_type == "Constant":
-                            assert len(attributes) == 2
-                            sanitized_value = attributes["value"]
-                            value = attribute_map[("value", sanitized_value)]
-                            if (
-                                isinstance(value, np.ndarray)
-                                and value.shape == (1,)
-                                and value[0] == n_head
-                            ):
-                                value = np.array([n_head // hp_degree])
-                                sanitized_value = value.tobytes()
-                                attribute_map[("value", sanitized_value)] = value
-                            attributes = frozendict(
-                                {"value": sanitized_value, "device": device}
-                            )
                         transformed_outputs = transformed_function.add_op(
                             op.op_type,
                             name=op.name,
                             inputs=input_values,
-                            attributes=attributes,
+                            attributes=op.attributes,
                             output_names=[
                                 (
                                     f"{v.name}_dp_{i}_hp_{j}_pp_{microbatch_id}"

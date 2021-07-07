@@ -81,7 +81,7 @@ def _filter_extra_outputs(function):
     return filtered_function.finalize()
 
 
-def _set_model_size(function, n_layer, n_head, d_embd):
+def _set_model_size(function, n_layer, n_head, d_embd, hp_degree):
     function, attribute_map = sanitize_unhashable_attributes(function)
 
     # Prepare a list of the existing Transformer blocks in the function.
@@ -196,7 +196,11 @@ def _set_model_size(function, n_layer, n_head, d_embd):
                     attributes = frozendict(
                         {
                             "axis": attributes["axis"],
-                            "split": (d_embd, d_embd, d_embd),
+                            "split": (
+                                d_embd // hp_degree,
+                                d_embd // hp_degree,
+                                d_embd // hp_degree,
+                            ),
                         }
                     )
             elif op.op_type == "Constant":
@@ -206,7 +210,7 @@ def _set_model_size(function, n_layer, n_head, d_embd):
                     and value.shape == (1,)
                     and value[0] == 12
                 ):
-                    value = np.array([n_head])
+                    value = np.array([n_head // hp_degree])
                     sanitized_value = value.tobytes()
                     attributes = frozendict(
                         {"value": sanitized_value, "device": attributes["device"]}
@@ -360,7 +364,7 @@ def get_stats(function):
 
 
 def _import_function_and_get_input_data(
-    model_path, batch_size, n_layer, n_head, d_embd, default_device
+    model_path, batch_size, n_layer, n_head, d_embd, hp_degree, default_device
 ):
     function, input_data_map = import_from_onnx(
         model_path,
@@ -370,7 +374,9 @@ def _import_function_and_get_input_data(
     )
 
     function = _filter_extra_outputs(function)
-    function, inputs_to_remove = _set_model_size(function, n_layer, n_head, d_embd)
+    function, inputs_to_remove = _set_model_size(
+        function, n_layer, n_head, d_embd, hp_degree
+    )
 
     tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
     tokens = tokenizer.encode(
@@ -506,6 +512,7 @@ def get_transformed_function_and_input_data(
         n_layer=n_layer,
         n_head=n_head,
         d_embd=d_embd,
+        hp_degree=hp_degree,
         default_device=d0,
     )
     ex = SequentialExecutor("numpy")

@@ -15,6 +15,8 @@ from .sanitize_attributes_transform import (
     restore_unhashable_attributes,
 )
 
+# TODO: Add these helper functions to a transform-writing API
+
 
 def _add_values(v1, v2, function, output_name):
     return function.add_op("Add", inputs=[v1, v2], output_names=[output_name])

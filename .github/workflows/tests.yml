@@ -15,6 +15,8 @@ jobs:
 
     env:
       PY_VERSION: 3.8
+      GPT_ONNX_COMMIT: bb0d4cf3d4e2a5f7376c13a08d337e86296edbe8
+      GPT_ONNX_FNAME: gpt2-10.onnx
 
     steps:
     - uses: actions/checkout@v2
@@ -43,6 +45,15 @@ jobs:
       run: |
         pip install pylint pytest black
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+    - name: Cache GPT ONNX file (needed for tests)
+      uses: actions/cache@v2
+      with:
+        path: ${{ env.GPT_ONNX_FNAME }}
+        key: ${{ env.GPT_ONNX_COMMIT }}
+
+    - name: Download GPT ONNX file (if not already present)
+      run: if [ ! -f "$GPT_ONNX_FNAME" ]; then wget https://github.com/onnx/models/blob/${GPT_ONNX_COMMIT}/text/machine_comprehension/gpt-2/model/${GPT_ONNX_FNAME}?raw=true; fi
 
     - name: Check formatting (black)
       run: black --diff --check .

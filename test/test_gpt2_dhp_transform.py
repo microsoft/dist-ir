@@ -1,15 +1,14 @@
-from collections import defaultdict, OrderedDict
 import itertools
 import numpy as np
+from pathlib import Path
 import pytest
-import re
 
 from dist_ir.executor import SequentialExecutor
 from dist_ir.ir import cpprint
 from examples.gpt2 import get_transformed_function_and_input_data
 
-# TODO: Make this configurable?
-MODEL_PATH = "/lfs/1/keshav2/gpt2/gpt2-10.onnx"
+# Assume the onnx file is stored in the repository root
+MODEL_PATH = (Path(__file__).parent.parent / "gpt2-10.onnx").absolute()
 
 np.random.seed(42)
 
@@ -54,9 +53,6 @@ def _run_gpt(
 
 
 def _test(dp_degree=1, hp_degree=1, pp_degree=1, num_microbatches=1):
-    # TODO: Figure out how to cache the downloaded model from 
-    # https://github.com/onnx/models/blob/master/text/machine_comprehension/gpt-2/model/gpt2-10.onnx?raw=true
-    return
     original_outputs = _run_gpt()
     transformed_outputs = _run_gpt(
         dp_degree=dp_degree,
@@ -85,7 +81,7 @@ def test_hp_only(hp_degree):
     ("pp_degree", "num_microbatches"), list(itertools.product([2, 4, 8], [2, 4, 8]))
 )
 def test_pp_only(pp_degree, num_microbatches):
-    _test(pp_degree=pp_degree, num_microbathces=num_microbatches)
+    _test(pp_degree=pp_degree, num_microbatches=num_microbatches)
 
 
 @pytest.mark.parametrize(

@@ -4,7 +4,6 @@ from operator import add, mul
 from typing import Optional, Set, Tuple
 
 from .device import Device
-from .utils import singleton
 
 
 @dataclass(frozen=True)
@@ -24,52 +23,62 @@ class Type:
         return set()
 
 
-# TODO might want to have f32, i32 etc instead?
-
-
 class Int32(Type):
-    """The 32-bit integer type. A singleton class."""
+    """The 32-bit integer type."""
 
     def __repr__(self):
-        return "Int32"
+        return f"Int32[device={self.device}]"
 
-    @property
     def size(self):
         return 4
 
 
-@singleton
 class Int64(Type):
-    """The 64-bit integer type. A singleton class."""
+    """The 64-bit integer type."""
 
     def __repr__(self):
-        return "Int64"
+        return f"Int64[device={self.device}]"
 
-    @property
     def size(self):
         return 8
 
 
-@singleton
-class Float(Type):
-    """The float type. A singleton class."""
+class Float16(Type):
+    """The 16-bit float type."""
 
     def __repr__(self):
-        return "Float"
+        return f"Float16[device={self.device}]"
 
-    @property
+    def size(self):
+        return 2
+
+
+class Float32(Type):
+    """The 32-bit float type."""
+
+    def __repr__(self):
+        return f"Float32[device={self.device}]"
+
     def size(self):
         return 4
 
 
-@singleton
-class Bool(Type):
-    """The boolean type. A singleton class."""
+class Float64(Type):
+    """The 64-bit float type."""
 
     def __repr__(self):
-        return "Bool"
+        return f"Float64[device={self.device}]"
 
-    @property
+    def size(self):
+        return 8
+
+
+class Bool(Type):
+    """The boolean type."""
+
+    def __repr__(self):
+        return f"Bool[device={self.device}]"
+
     def size(self):
         return 1
 
@@ -97,7 +106,9 @@ class Tensor(Type):
         return f"Tensor[shape={self.shape}, dtype={self.dtype}, device={self.device}]"
 
     def size(self):
-        return reduce(mul, self.shape) * self.dtype.size
+        if not isinstance(self.shape, tuple):
+            return 0
+        return reduce(mul, self.shape) * self.dtype.size()
 
 
 @dataclass(frozen=True)
@@ -130,4 +141,7 @@ class TupleType(Type):
         return devices
 
     def size(self):
-        return reduce(add, [typ.size() for typ in self.types])
+        size_ = 0.0
+        for typ in self.types:
+            size_ += typ.size()
+        return size_

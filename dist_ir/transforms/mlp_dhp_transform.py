@@ -12,7 +12,7 @@ def _add_values(v1, v2, function, output_name):
 
 def _concat_values(v1, v2, function, dim, output_name):
     return function.add_op(
-        "Concat", inputs=[v1, v2], attributes={"dim": dim}, output_names=[output_name]
+        "Concat", inputs=[v1, v2], attributes={"axis": dim}, output_names=[output_name]
     )
 
 
@@ -24,9 +24,9 @@ def _split_value(v, function, num_splits, parallelism_level):
     assert parallelism_level == "pp"
     output_names = [f"{v.name}_{parallelism_level}_{i}" for i in range(num_splits)]
     return function.add_op(
-        "Split",
+        "SplitDistIR",
         inputs=[v],
-        attributes={"dim": 0, "num_splits": num_splits},
+        attributes={"axis": 0, "num_splits": num_splits},
         output_names=output_names,
     )
 
@@ -35,7 +35,7 @@ def _mpi_allgather_values(vs, function, dim, output_names):
     return function.add_op(
         "MPIAllgather",
         inputs=vs,
-        attributes={"dim": dim},
+        attributes={"axis": dim},
         output_names=output_names,
     )
 
@@ -63,7 +63,7 @@ def _mpi_scatter_value(v, function, dim, devices, parallelism_level):
     return function.add_op(
         "MPIScatter",
         inputs=[v],
-        attributes={"dim": dim, "devices": devices},
+        attributes={"axis": dim, "devices": devices},
         output_names=output_names,
     )
 
@@ -325,7 +325,7 @@ def mlp_dhp_transform(
         )
     )
 
-    # An init function that moves weights/inputs to correct devices
+    # An init function that moves weights/inputs to correct devices.
     init_function = FunctionMaker(name=fn_name + "_init")
     transformed_inputs = {}
     for inp in function.inputs:
@@ -344,7 +344,7 @@ def mlp_dhp_transform(
     )
     init_function = init_function.finalize()
 
-    # Inputs of transformed_function are outputs of init_function
+    # Inputs of transformed_function are outputs of init_function.
     for v in init_function.outputs:
         transformed_function.inputs.append(v)
 

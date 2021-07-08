@@ -1,4 +1,5 @@
 from functools import partial
+import numpy as np
 from operator import getitem
 import os
 import sys
@@ -11,9 +12,13 @@ import torch.distributed as dist
 from torch import fx
 
 from ..executor.rank_projector import project
-from ..ir import Function, cpprint, pformat
+from ..ir import Function, cpprint
 from ..ir.device import Device
+from ..ir.type import Int64, Float32
 
+# NOTE: The code currently suffers from this issue, more investigation needed:
+# https://github.com/pytorch/pytorch/issues/11201
+# torch.multiprocessing.set_sharing_strategy("file_system")
 
 DistributedContext = NamedTuple(
     "DistributedContext",
@@ -38,13 +43,13 @@ def _add(x, y, ctx=None):
 
 
 # TODO kwargs of these functions are required, enforce this somewhere
-def _allgather(x_i, dim=0, group=None, ctx=None):
+def _allgather(x_i, axis=0, group=None, ctx=None):
     xs = [torch.zeros_like(x_i) for _ in range(len(group))]
     if ctx.use_gpu:
         xs = [x.cuda(dist.get_rank()) for x in xs]
 
     dist.all_gather(xs, x_i, group=ctx.groups[group])
-    x = torch.cat(xs, dim=dim)
+    x = torch.cat(xs, dim=axis)
     return x
 
 
@@ -53,8 +58,63 @@ def _allreduce(x, group=None, ctx=None):
     return x
 
 
-def _concat2(x, y, dim=None, ctx=None):
-    return torch.cat((x, y), dim=dim)
+def _cast(x, to, ctx=None):
+    if to == 1:
+        return x.float32()
+    elif to == 6:
+        return x.int32()
+    elif to == 7:
+        return x.long()
+    elif to == 9:
+        return x.bool()
+    else:
+        raise NotImplementedError()
+
+
+def _concat2(*args, axis=None, ctx=None):
+    return torch.cat(args, dim=axis)
+
+
+def _constant(value, device=None, ctx=None):
+    output = torch.tensor(value)
+    if output.shape == (1,):
+        return output[0]
+    if ctx.use_gpu:
+        return output.cuda(dist.get_rank())
+    return output
+
+
+def _constant_of_shape(x, value=0, ctx=None):
+    # TODO: Check if value is a single value or array?
+    output = torch.full(tuple(x.int().cpu().numpy()), value[0])
+    if ctx.use_gpu:
+        return output.cuda(dist.get_rank())
+    else:
+        return output
+
+
+def _div(x, y, ctx=None):
+    return torch.div(x, y)
+
+
+def _gather(x, y, axis=0, ctx=None):
+    # TODO: Find the best Torch equivalent for this
+    # torch.gather and torch.index_select do not work
+    output = torch.tensor(np.take(x.cpu().numpy(), y.cpu().numpy(), axis=axis))
+    # output = torch.gather(x, index=torch.LongTensor(y), dim=axis)
+    if output.shape == (1,):
+        return output[0]
+    if ctx.use_gpu:
+        return output.cuda(dist.get_rank())
+    return output
+
+
+def _gemm(x, y, z, alpha, beta, transA=0, transB=0, ctx=None):
+    if transA:
+        x = x.transpose()
+    if transB:
+        y = y.transpose()
+    return torch.matmul(alpha * x, beta * y) + z
 
 
 def _identity(x, ctx=None):
@@ -77,8 +137,34 @@ def _matmul_grad(x, y, dz, ctx=None):
     return (torch.matmul(dz, y.T), torch.matmul(x.T, dz))
 
 
-def _recv(shape=None, from_d=None, group=None, ctx=None):
-    x = torch.zeros(shape)
+def _mul(x, y, ctx=None):
+    return torch.mul(x, y)
+
+
+def _nonzero(x, ctx=None):
+    # Torch nonzero returns a shape of (n, 1) instead of (1, n)
+    return torch.nonzero(x).transpose(1, 0)
+
+
+def _pow(x, y, ctx=None):
+    return torch.pow(x, y)
+
+
+def _reduce_mean(x, axes, keepdims=1, ctx=None):
+    return torch.mean(x, dim=axes, keepdim=bool(keepdims))
+
+
+def _reshape(x, y, ctx=None):
+    new_shape = tuple(int(v.item()) for v in list(y))
+    return torch.reshape(x, new_shape)
+
+
+def _recv(shape=None, from_d=None, group=None, dtype=None, ctx=None):
+    if isinstance(dtype, Int64):
+        x = torch.zeros(shape).long()
+    elif isinstance(dtype, Float32):
+        x = torch.zeros(shape).float()
+
     src_rank = ctx.device_to_rank[from_d]
     if ctx.use_gpu:
         x = x.cuda(dist.get_rank())
@@ -109,20 +195,105 @@ def _send(x, to_d=None, group=None, ctx=None):
     # a single buffer and call a single send op
 
 
+def _shape(x, ctx=None):
+    output = torch.tensor(x.shape)
+    if ctx.use_gpu:
+        return output.cuda(dist.get_rank())
+    return output
+
+
+def _slice(x, starts, ends, axes, steps=None, ctx=None):
+    # TODO: Find the best PyTorch equivalent for this
+    starts = [v.item() for v in list(starts)]
+    ends = [v.item() for v in list(ends)]
+    axes = [v.item() for v in list(axes)]
+    if steps is None:
+        steps = [1] * len(starts)
+    elif steps.shape == ():
+        steps = [steps.item()] * len(starts)
+    else:
+        assert len(steps) == len(starts)
+    slices = {
+        axis: slice(s, e, step) for (s, e, axis, step) in zip(starts, ends, axes, steps)
+    }
+    slices = tuple(slices.get(d, slice(None)) for d in range(x.ndim))
+    return x[slices]
+
+
+def _softmax(x, axis, ctx=None):
+    exp = torch.exp(x)
+    return exp / torch.sum(exp, dim=axis, keepdim=True)
+
+
+def _split(x, axis, split, ctx=None):
+    return torch.split(x, split, axis)
+
+
+def _sqrt(x, ctx=None):
+    return torch.sqrt(x)
+
+
+def _sub(x, y, ctx=None):
+    return torch.sub(x, y)
+
+
+def _squeeze(x, axes=None, ctx=None):
+    if axes:
+        return torch.squeeze(x, dim=axes[0])
+    else:
+        return torch.squeeze(x)
+
+
+def _tanh(x, ctx=None):
+    return torch.tanh(x)
+
+
+def _transpose(x, perm, ctx=None):
+    return x.permute(perm)
+
+
+def _unsqueeze(x, axes, ctx=None):
+    for dim in axes[::-1]:
+        x = torch.unsqueeze(x, dim=dim)
+    return x
+
+
 _op_to_torch = {
+    "Add": torch.add,
+    "Cast": _cast,
     "Add": _add,
     "Concat": _concat2,
+    "Constant": _constant,
+    "ConstantOfShape": _constant_of_shape,
+    "Div": _div,
+    "Gather": _gather,
+    "Gemm": _gemm,
     "Identity": _identity,
     "Loss": _loss,
     "LossGrad": _loss_grad,
     "MatMul": _matmul,
     "MatMulGrad": _matmul_grad,
-    "RecvP2P": _recv,
-    "Relu": _relu,
-    "ReluGrad": _relu_grad,
-    "SendP2P": _send,
     "MPIAllgather": _allgather,
     "MPIAllreduce": _allreduce,
+    "Mul": _mul,
+    "NonZero": _nonzero,
+    "Pow": _pow,
+    "RecvP2P": _recv,
+    "ReduceMean": _reduce_mean,
+    "Relu": _relu,
+    "ReluGrad": _relu_grad,
+    "Reshape": _reshape,
+    "SendP2P": _send,
+    "Shape": _shape,
+    "Slice": _slice,
+    "Softmax": _softmax,
+    "Split": _split,
+    "Sqrt": _sqrt,
+    "Squeeze": _squeeze,
+    "Sub": _sub,
+    "Tanh": _tanh,
+    "Transpose": _transpose,
+    "Unsqueeze": _unsqueeze,
     # TODO rename MPI<opname> to Comm<opname> or Dist<opname>
 }
 
@@ -142,8 +313,11 @@ def _mock_allreduce(x, ctx=None):
     return x
 
 
-def _mock_recv(shape=None, device=None, ctx=None):
-    x = torch.zeros(shape)
+def _mock_recv(shape=None, device=None, dtype=None, ctx=None):
+    if isinstance(dtype, Int64):
+        x = torch.zeros(shape).long()
+    elif isinstance(dtype, Float32):
+        x = torch.zeros(shape).float()
     return x
 
 
@@ -208,9 +382,6 @@ def run_function(
 
     # Run ops
     for op in fn.ops:
-        # op_str = pformat(op).replace("\n", " ")
-        # print(f"{rank}: {op_str}")
-        # sys.stdout.flush()
         inputs = tuple(value_map[v] for v in op.inputs)
         kwargs = {} if op.attributes is None else {**op.attributes}
         kwargs["ctx"] = ctx
@@ -349,6 +520,7 @@ def run_pytorch(
     num_warmup=0,
     debug_mock=False,
     debug_stacktrace=False,
+    run_type_inference=True,  # TODO: Remove once we have mixed implementations
 ):
     """Project `fn` and run on `inputs` over `num_devices` devices using the
     PyTorch backend.
@@ -366,7 +538,9 @@ def run_pytorch(
     # print(*(x.shape for x in inputs))
     # cpprint(fn)
 
-    device_to_fns, groups = project(fn, tuple(v.type for v in fn.inputs))
+    device_to_fns, groups = project(
+        fn, tuple(v.type for v in fn.inputs), run_type_inference
+    )
 
     # Map between DistIR devices and pytorch ranks:
     device_to_rank = {}

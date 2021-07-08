@@ -2,12 +2,11 @@ from collections import defaultdict
 import numpy as np
 import re
 
-import dist_ir
 from dist_ir.importer import import_from_onnx, parse_tensor_from_file
 from dist_ir.ir import FunctionMaker, cpprint, pformat, Device, Topology, Value
 from dist_ir.executor import infer_types, SequentialExecutor
 from dist_ir.executor.cost_model import CostModel
-from dist_ir.ir.type import Bool, Float, Int64, Tensor
+from dist_ir.ir.type import Bool, Float32, Int64, Tensor
 from dist_ir.transforms import (
     mlp_dhp_transform,
     PipeDreamScheduler,
@@ -24,11 +23,11 @@ def mlp(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, device
     function = FunctionMaker(name="mlp")
     x = function.add_input_value(
         "x",
-        Tensor(dtype=Float(), shape=(batch_size, input_dim), device=device),
+        Tensor(dtype=Float32(), shape=(batch_size, input_dim), device=device),
     )
     z = function.add_input_value(
         "z",
-        Tensor(dtype=Float(), shape=(batch_size, output_dim), device=device),
+        Tensor(dtype=Float32(), shape=(batch_size, output_dim), device=device),
     )
     weights = []
     input_dim = input_dim
@@ -36,13 +35,13 @@ def mlp(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, device
     for i in range(num_hidden_layers - 1):
         w = function.add_input_value(
             f"w{chr(ord('A')+i)}",
-            Tensor(dtype=Float(), shape=(input_dim, hidden_dim), device=device),
+            Tensor(dtype=Float32(), shape=(input_dim, hidden_dim), device=device),
         )
         input_dim = hidden_dim
         weights.append(w)
     w = function.add_input_value(
         f"w{chr(ord('A')+i+1)}",
-        Tensor(dtype=Float(), shape=(hidden_dim, output_dim), device=device),
+        Tensor(dtype=Float32(), shape=(hidden_dim, output_dim), device=device),
     )
     weights.append(w)
 

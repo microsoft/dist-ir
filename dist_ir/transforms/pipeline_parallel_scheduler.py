@@ -50,6 +50,13 @@ class PipelineParallelScheduler(ABC):
         total_stages_to_schedule = len(partition_map) * self._num_microbatches
         schedule = []
         while num_scheduled_stages < total_stages_to_schedule:
+            # This list keeps track of the stages that become ready while scheduling
+            # the current timestamp. We only add these stages to the ready queue
+            # after the current timestamp has been scheduled completely. This
+            # prevents situations where a stage on an adjacent device becomes
+            # ready during the current timestep but the activations have not yet
+            # been sent to the adjacent device.
+            next_ready_stages = []
             per_timestep_schedule = {}
             devices = list(self._ready_stages.keys())
             for device in devices:
@@ -69,12 +76,21 @@ class PipelineParallelScheduler(ABC):
                             self._remaining_inputs[consumer_stage_key] -= 1
                             if self._remaining_inputs[consumer_stage_key] == 0:
                                 consumer_stage_device = partition_map[consumer_stage]
-                                self._ready_stages[consumer_stage_device].append(
-                                    (consumer_stage, microbatch)
+                                next_ready_stages.append(
+                                    (consumer_stage_device, consumer_stage, microbatch)
                                 )
             if len(per_timestep_schedule) == 0:
                 raise RuntimeError(
                     f"No ops to schedule in iteration {len(schedule) + 1}"
                 )
             schedule.append(per_timestep_schedule)
+            for (
+                consumer_stage_device,
+                consumer_stage,
+                microbatch,
+            ) in next_ready_stages:
+                self._ready_stages[consumer_stage_device].append(
+                    (consumer_stage, microbatch)
+                )
+
         return schedule

@@ -617,7 +617,12 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GPT-2 Inference")
     parser.add_argument(
-        "--model_path", type=str, required=True, help="Path to GPT-2 ONNX model"
+        "--model_path",
+        type=str,
+        required=True,
+        help="Path to GPT-2 ONNX model "
+        "(downloaded from https://github.com/onnx/models/blob/master/"
+        "text/machine_comprehension/gpt-2/model/gpt2-10.onnx?raw=true)",
     )
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
     parser.add_argument(

@@ -249,9 +249,9 @@ if __name__ == "__main__":
         type=str,
         required=True,
         help=(
-            "Path to GPT-2 ONNX model downloaded from "
-            "https://github.com/onnx/models/blob/master/text/machine_comprehension/"
-            "gpt-2/model/gpt2-10.onnx"
+            "Path to GPT-2 ONNX model "
+            "(downloaded from https://github.com/onnx/models/blob/master/"
+            "text/machine_comprehension/gpt-2/model/gpt2-10.onnx?raw=True)"
         ),
     )
     parser.add_argument(

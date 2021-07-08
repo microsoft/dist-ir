@@ -12,7 +12,8 @@ MODEL_PATH = (Path(__file__).parent.parent / "gpt2-10.onnx").absolute()
 
 np.random.seed(42)
 
-
+# TODO: Increase model size and make varying model size separate tests after
+# merging in #28
 def _run_gpt(
     device_throughput=1.4e13,
     dram_bandwidth=9e11,
@@ -22,7 +23,7 @@ def _run_gpt(
     hp_degree=1,
     pp_degree=1,
     num_microbatches=1,
-    n_layer=12,
+    n_layer=4,
     n_head=12,
     n_embd=768,
     verbose=False,
@@ -52,8 +53,7 @@ def _run_gpt(
     return outputs
 
 
-def _test(dp_degree=1, hp_degree=1, pp_degree=1, num_microbatches=1):
-    original_outputs = _run_gpt()
+def _test(original_outputs, dp_degree=1, hp_degree=1, pp_degree=1, num_microbatches=1):
     transformed_outputs = _run_gpt(
         dp_degree=dp_degree,
         hp_degree=hp_degree,
@@ -67,53 +67,63 @@ def _test(dp_degree=1, hp_degree=1, pp_degree=1, num_microbatches=1):
         )
 
 
-@pytest.mark.parametrize("dp_degree", [2, 4, 8])
-def test_dp_only(dp_degree):
-    _test(dp_degree=dp_degree)
+@pytest.fixture(scope="session")
+def original_outputs():
+    return _run_gpt()
 
 
-@pytest.mark.parametrize("hp_degree", [2, 4, 8])
-def test_hp_only(hp_degree):
-    _test(hp_degree=hp_degree)
+@pytest.mark.parametrize("dp_degree", [2, 4])
+def test_dp_only(original_outputs, dp_degree):
+    _test(original_outputs, dp_degree=dp_degree)
+
+
+@pytest.mark.parametrize("hp_degree", [2, 4])
+def test_hp_only(original_outputs, hp_degree):
+    _test(original_outputs, hp_degree=hp_degree)
 
 
 @pytest.mark.parametrize(
-    ("pp_degree", "num_microbatches"), list(itertools.product([2, 4, 8], [2, 4, 8]))
+    ("pp_degree", "num_microbatches"), list(itertools.product([2, 4], [2, 4]))
 )
-def test_pp_only(pp_degree, num_microbatches):
-    _test(pp_degree=pp_degree, num_microbatches=num_microbatches)
+def test_pp_only(original_outputs, pp_degree, num_microbatches):
+    _test(original_outputs, pp_degree=pp_degree, num_microbatches=num_microbatches)
 
 
 @pytest.mark.parametrize(
     ("dp_degree", "hp_degree"),
-    list(itertools.product([2, 4, 8], [2, 4, 8])),
+    list(itertools.product([2, 4], [2, 4])),
 )
-def test_dp_hp(dp_degree, hp_degree):
-    _test(dp_degree=dp_degree, hp_degree=hp_degree)
+def test_dp_hp(original_outputs, dp_degree, hp_degree):
+    _test(original_outputs, dp_degree=dp_degree, hp_degree=hp_degree)
 
 
 @pytest.mark.parametrize(
     ("dp_degree", "pp_degree"),
-    list(itertools.product([2, 4, 8], [2, 4, 8])),
+    list(itertools.product([2, 4], [2, 4])),
 )
-def test_dp_pp(dp_degree, pp_degree):
-    _test(dp_degree=dp_degree, pp_degree=pp_degree, num_microbatches=2)
+def test_dp_pp(original_outputs, dp_degree, pp_degree):
+    _test(
+        original_outputs, dp_degree=dp_degree, pp_degree=pp_degree, num_microbatches=2
+    )
 
 
 @pytest.mark.parametrize(
     ("hp_degree", "pp_degree"),
-    list(itertools.product([2, 4, 8], [2, 4, 8])),
+    list(itertools.product([2, 4], [2, 4])),
 )
-def test_hp_pp(hp_degree, pp_degree):
-    _test(hp_degree=hp_degree, pp_degree=pp_degree, num_microbatches=2)
+def test_hp_pp(original_outputs, hp_degree, pp_degree):
+    _test(
+        original_outputs, hp_degree=hp_degree, pp_degree=pp_degree, num_microbatches=2
+    )
 
 
 @pytest.mark.parametrize(
     ("dp_degree", "hp_degree", "pp_degree"),
-    list(itertools.product([2, 4], [2, 4], [2, 4])),
+    list(itertools.product([2], [2], [2])),
 )
-def test_dp_hp_pp(dp_degree, hp_degree, pp_degree):
+def test_dp_hp_pp(original_outputs, dp_degree, hp_degree, pp_degree):
     _test(
+        original_outputs,
         dp_degree=dp_degree,
         hp_degree=hp_degree,
         pp_degree=pp_degree,

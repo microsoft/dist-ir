@@ -16,8 +16,9 @@ from ..ir import Function, cpprint
 from ..ir.device import Device
 from ..ir.type import Int64, Float32
 
-# NOTE: This is to address this issue: https://github.com/pytorch/pytorch/issues/11201
-torch.multiprocessing.set_sharing_strategy("file_system")
+# NOTE: The code currently suffers from this issue, more investigation needed:
+# https://github.com/pytorch/pytorch/issues/11201
+# torch.multiprocessing.set_sharing_strategy("file_system")
 
 DistributedContext = NamedTuple(
     "DistributedContext",
@@ -74,7 +75,7 @@ def _concat2(*args, axis=None, ctx=None):
     return torch.cat(args, dim=axis)
 
 
-def _constant(value, ctx=None):
+def _constant(value, device=None, ctx=None):
     output = torch.tensor(value)
     if output.shape == (1,):
         return output[0]

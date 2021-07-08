@@ -59,17 +59,9 @@ def _collective_projector(op: Op, state: ProjectorState):
 
 
 def _constant_projector(op: Op, state: ProjectorState):
-    # Only add the Constant ops to devices which use the constants.
     assert len(op.outputs) == 1
-    output = op.outputs[0]
-    input_devices = set()
-    consumers = state.function.consumers[output]
-    for consumer in consumers:
-        consumer_input_devices = set(_get_input_devices(consumer))
-        assert None not in consumer_input_devices
-        input_devices.update(consumer_input_devices)
-    for input_device in input_devices:
-        state.per_rank_fns[input_device].ops.append(op)
+    device = op.attributes["device"]
+    state.per_rank_fns[device].ops.append(op)
 
 
 def _gather_projector(op: Op, state: ProjectorState):

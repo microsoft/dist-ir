@@ -609,7 +609,6 @@ def split_uniform(op, x):
         num_splits = len(op.attributes["devices"])
     else:
         raise NotImplementedError(op.op_type)
-
     return tuple(y for y in np.split(x, num_splits, axis=dim))
 
 
@@ -659,10 +658,28 @@ NumPyRegister = {
     ("Cast", (np.int64,)): cast,
     ("Cast", (np.float64,)): cast,
     ("Concat", (tuple,)): concat,
-    ("Concat", (np.ndarray, np.ndarray)): concat,
-    ("Concat", (np.ndarray, np.ndarray, np.ndarray)): concat,
-    ("Concat", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): concat,
-    ("Concat", (np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray)): concat,
+    ("Concat", (np.int64, np.int64)): lambda op, *xs: np.array(xs),
+    ("Concat", (np.int64, np.int64, np.int64)): lambda op, *xs: np.array(xs),
+    ("Concat", tuple(np.ndarray for _ in range(2))): concat,
+    ("Concat", tuple(np.ndarray for _ in range(3))): concat,
+    ("Concat", tuple(np.ndarray for _ in range(4))): concat,
+    ("Concat", tuple(np.ndarray for _ in range(5))): concat,
+    ("Concat", tuple(np.ndarray for _ in range(3 * 2))): concat,
+    ("Concat", tuple(np.ndarray for _ in range(3 * 4))): concat,
+    ("Concat", tuple(np.ndarray for _ in range(3 * 8))): concat,
+    ("Concat", tuple(np.ndarray for _ in range(3 * 16))): concat,
+    ("Concat", tuple(np.ndarray for _ in range(3 * 32))): concat,
+    ("Concat", tuple(np.ndarray for _ in range(3 * 64))): concat,
+    ("Concat", tuple(np.ndarray for _ in range(3 * 128))): concat,
+    ("Concat", tuple(np.ndarray for _ in range(3 * 256))): concat,
+    ("concat", tuple(np.ndarray for _ in range(3 * 2))): concat,
+    ("concat", tuple(np.ndarray for _ in range(3 * 4))): concat,
+    ("concat", tuple(np.ndarray for _ in range(3 * 8))): concat,
+    ("Concat", tuple(np.ndarray for _ in range(3 * 16))): concat,
+    ("Concat", tuple(np.ndarray for _ in range(3 * 32))): concat,
+    ("Concat", tuple(np.ndarray for _ in range(3 * 64))): concat,
+    ("Concat", tuple(np.ndarray for _ in range(3 * 128))): concat,
+    ("Concat", tuple(np.ndarray for _ in range(3 * 256))): concat,
     ("Constant", ()): constant,
     ("ConstantOfShape", (np.ndarray,)): constant_of_shape,
     ("Div", (np.ndarray, np.ndarray)): div,
@@ -772,6 +789,7 @@ NumPyRegister = {
     ("ReluGrad", (np.ndarray, np.ndarray)): relu_grad,
     ("Reshape", (np.ndarray, np.ndarray)): reshape,
     ("Select", (tuple,)): select,
+    ("Select", (np.ndarray,)): select,
     ("Send", (np.int64,)): identity,
     ("Send", (np.ndarray,)): identity,
     ("Shape", (np.ndarray,)): shape,

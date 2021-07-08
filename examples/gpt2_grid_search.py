@@ -62,7 +62,7 @@ def get_all_degrees(n):
     return all_degrees
 
 
-def get_transformed_function_and_input_data(config):
+def run(config):
     (
         model_path,
         device_throughput,
@@ -74,83 +74,59 @@ def get_transformed_function_and_input_data(config):
         hp_degree,
         pp_degree,
         num_microbatches,
+        backend,
     ) = config
     n_layer, n_head, n_embd = MODEL_PARAMS[model_size]
-    topology = Topology()
-    d0 = topology.add_device(
-        "gpu", throughput=device_throughput, dram_bandwidth=dram_bandwidth
-    )
-    function, input_data = gpt2.import_function_and_get_input_data(
-        model_path,
-        batch_size=batch_size,
-        n_layer=n_layer,
-        n_head=n_head,
-        n_embd=n_embd,
-        default_device=d0,
-    )
-    ex = SequentialExecutor("numpy")
-    function = ex.infer_types(
-        function,
-        input_data,
-        input_devices=[topology.devices[0] for _ in range(len(input_data))],
-    )
-    condensed_config = (batch_size, dp_degree, hp_degree, pp_degree, num_microbatches)
-    init_function, transformed_function, initialized_input_data = gpt2.transform(
-        function,
-        input_data,
-        topology,
+    try:
+        (
+            transformed_function,
+            initialized_input_data,
+            topology,
+        ) = gpt2.get_transformed_function_and_input_data(
+            model_path,
+            device_throughput,
+            dram_bandwidth,
+            network_bandwidth,
+            batch_size,
+            dp_degree,
+            hp_degree,
+            pp_degree,
+            num_microbatches,
+            n_layer,
+            n_head,
+            n_embd,
+        )
+        if backend == "simulate":
+            simulation = gpt2.simulate(
+                transformed_function, initialized_input_data, topology
+            )
+            latency = max([simulation.timestamps[d] for d in simulation.timestamps])
+            peak_memory = max(
+                [simulation.peak_memory[d] for d in simulation.peak_memory]
+            ) / (2.0 ** 20)
+        elif backend == "pytorch":
+            world_size = len(topology.devices) - 1
+            per_rank_outputs, runtimes = gpt2.run_pytorch(
+                transformed_function, initialized_input_data, world_size
+            )
+            latency = np.median(runtimes[-1])
+            # TODO: Measure peak memory?
+            peak_memory = 0
+    except Exception as e:
+        latency = -1
+        peak_memory = -1
+
+    condensed_config = (
+        model_size,
+        batch_size,
         dp_degree,
         hp_degree,
         pp_degree,
         num_microbatches,
-        n_embd,
-        device_throughput=device_throughput,
-        dram_bandwidth=dram_bandwidth,
-        network_bandwidth=network_bandwidth,
+        latency,
+        peak_memory,
     )
-    return condensed_config, transformed_function, initialized_input_data, topology
 
-
-def simulate(config):
-    condensed_config = None
-    try:
-        (
-            condensed_config,
-            transformed_function,
-            initialized_input_data,
-            topology,
-        ) = get_transformed_function_and_input_data(config)
-        simulation = gpt2.simulate(
-            transformed_function, initialized_input_data, topology
-        )
-        latency = max([simulation.timestamps[d] for d in simulation.timestamps])
-        peak_memory = max(
-            [simulation.peak_memory[d] for d in simulation.peak_memory]
-        ) / (2.0 ** 20)
-    except Exception as e:
-        latency = -1
-        peak_memory = -1
-    return condensed_config, latency, peak_memory
-
-
-def run_pytorch(config):
-    condensed_config = None
-    try:
-        (
-            condensed_config,
-            transformed_function,
-            initialized_input_data,
-            topology,
-        ) = get_transformed_function_and_input_data(config)
-        world_size = len(topology.devices) - 1
-        per_rank_outputs, runtimes = gpt2.run_pytorch(
-            transformed_function, initialized_input_data, world_size
-        )
-    except Exception as e:
-        return condensed_config, -1, -1
-    latency = np.median(runtimes[-1])
-    # TODO: Measure peak memory?
-    peak_memory = 0
     return condensed_config, latency, peak_memory
 
 
@@ -176,6 +152,11 @@ def grid_search(args):
         "gpt3-6.7B",
         "gpt3-13B",
     ]
+    if args.pytorch:
+        backend = "pytorch"
+    else:
+        backend = "simulate"
+
     configs = []
     for model_size, cluster_size, batch_size in itertools.product(
         all_model_sizes, all_cluster_sizes, all_batch_sizes
@@ -211,12 +192,10 @@ def grid_search(args):
                         hp_degree,
                         pp_degree,
                         num_microbatches,
+                        backend,
                     )
                 )
-    if args.pytorch:
-        func = run_pytorch
-    else:
-        func = simulate
+    # TODO: Use Pandas to manage output
     with open(args.output_file, "w", newline="") as f:
         fieldnames = [
             "model_size",
@@ -270,9 +249,9 @@ if __name__ == "__main__":
         type=str,
         required=True,
         help=(
-            "Path to GPT-2 ONNX model downloaded from "
-            "https://github.com/onnx/models/blob/master/text/machine_comprehension/"
-            "gpt-2/model/gpt2-10.onnx"
+            "Path to GPT-2 ONNX model "
+            "(downloaded from https://github.com/onnx/models/blob/master/"
+            "text/machine_comprehension/gpt-2/model/gpt2-10.onnx?raw=True)"
         ),
     )
     parser.add_argument(

@@ -1,8 +1,12 @@
 from collections import defaultdict, Hashable
+from frozendict import frozendict
+from itertools import chain
 import math
+import numpy as np
 import logging
 import re
 import roundrobin
+
 
 from ..ir import cpprint, Op
 from ..ir.function import Function, FunctionMaker
@@ -12,14 +16,16 @@ from .sanitize_attributes_transform import (
     restore_unhashable_attributes,
 )
 
+# TODO: Add these helper functions to a transform-writing API
+
 
 def _add_values(v1, v2, function, output_name):
     return function.add_op("Add", inputs=[v1, v2], output_names=[output_name])
 
 
-def _concat_values(v1, v2, function, dim, output_name):
+def _concat_values(vs, function, dim, output_name):
     return function.add_op(
-        "Concat", inputs=[v1, v2], attributes={"axis": dim}, output_names=[output_name]
+        "Concat", inputs=vs, attributes={"axis": dim}, output_names=[output_name]
     )
 
 
@@ -27,13 +33,12 @@ def _identity(v, function, output_name):
     return function.add_op("Identity", inputs=[v], output_names=[output_name])
 
 
-def _split_value(v, function, num_splits, parallelism_level):
-    assert parallelism_level == "pp"
+def _split_value(v, function, num_splits, parallelism_level, dim=0):
     output_names = [f"{v.name}_{parallelism_level}_{i}" for i in range(num_splits)]
     return function.add_op(
         "SplitUniform",
         inputs=[v],
-        attributes={"axis": 0, "num_splits": num_splits},
+        attributes={"axis": dim, "num_splits": num_splits},
         output_names=output_names,
     )
 
@@ -137,6 +142,40 @@ def _partition_inputs_dp(function, device_tree):
     return dp_inputs
 
 
+def _partition_input_hp(inp, function, devices, dim, n_head=None):
+    """Partitions the given input using horizontal parallelism.
+
+    Megatron-style parallelism requires splitting the weight matrices
+    into 3 parts (Q, K, V) and then dividing each sub-matrix by the
+    horizontal parallel degree H. However, this transform must first
+    partition the weight matrices by H before doing the split into
+    Q, K, V. Therefore to account for the Split op in the graph,
+    we must do the following in this initial step:
+      1) Split the matrix into Q, K, V
+      2) Further split each sub-matrix into H matrices
+      3) Re-assemble the full matrix in the form
+         Q_1, K_1, V_1, Q_2, K_2, V_2, ..., Q_H, K_H, V_H
+      4) Scatter the reassembled matrix to the horizontal parallel devices
+    """
+    Q, K, V = _split_value(inp, function, 3, parallelism_level="hp", dim=dim)
+
+    hp_degree = len(devices)
+    Qs_hp = _split_value(Q, function, hp_degree, parallelism_level="hp", dim=dim)
+    Ks_hp = _split_value(K, function, hp_degree, parallelism_level="hp", dim=dim)
+    Vs_hp = _split_value(V, function, hp_degree, parallelism_level="hp", dim=dim)
+
+    rearranged_inp = _concat_values(
+        tuple(chain.from_iterable(zip(Qs_hp, Ks_hp, Vs_hp))), function, dim, inp.name
+    )
+    return _mpi_scatter_value(
+        rearranged_inp,
+        function,
+        devices=devices,
+        dim=dim,
+        parallelism_level="hp",
+    )
+
+
 def _partition_inputs_hp(function, device_tree, dp_inputs):
     """Partitions inputs using horizontal parallelism."""
     device_tree_root = tuple(device_tree.keys())[0]
@@ -148,9 +187,22 @@ def _partition_inputs_hp(function, device_tree, dp_inputs):
         # and partition the weights. We do this once for each
         # data parallel partition.
         if len(hp_devices) > 1:
-            # TODO: Partition weights for GPT-2
             for inp in function.inputs:
-                if "c_attn.weight" in inp.name or "c_fc.weight" in inp.name:
+                if "c_attn.weight" in inp.name:
+                    hp_inputs[dp_inputs[inp][i]] = _partition_input_hp(
+                        dp_inputs[inp][i],
+                        function,
+                        devices=hp_devices,
+                        dim=1,
+                    )
+                elif "c_attn.bias" in inp.name:
+                    hp_inputs[dp_inputs[inp][i]] = _partition_input_hp(
+                        dp_inputs[inp][i],
+                        function,
+                        devices=hp_devices,
+                        dim=0,
+                    )
+                elif "c_fc.weight" in inp.name:
                     hp_inputs[dp_inputs[inp][i]] = _mpi_scatter_value(
                         dp_inputs[inp][i],
                         function,
@@ -159,8 +211,7 @@ def _partition_inputs_hp(function, device_tree, dp_inputs):
                         parallelism_level="hp",
                     )
                 elif (
-                    "c_attn.bias" in inp.name
-                    or "attn.c_proj.weight" in inp.name
+                    "attn.c_proj.weight" in inp.name
                     or "c_fc.bias" in inp.name
                     or "mlp.c_proj.weight" in inp.name
                 ):
@@ -332,6 +383,42 @@ def _get_device_tree(dp_degree, hp_degree, pp_degree, devices):
     return device_tree
 
 
+def update_attributes(
+    op_type, attributes, attribute_map, old_d_embd, new_d_embd, old_n_head, new_n_head
+):
+    if op_type == "Split":
+        if "split" in attributes and attributes["split"] == (
+            old_d_embd,
+            old_d_embd,
+            old_d_embd,
+        ):
+            assert len(attributes) == 2
+            attributes = frozendict(
+                {
+                    "axis": attributes["axis"],
+                    "split": (
+                        new_d_embd,
+                        new_d_embd,
+                        new_d_embd,
+                    ),
+                }
+            )
+    elif op_type == "Constant":
+        value = attribute_map[("value", attributes["value"])]
+        if (
+            isinstance(value, np.ndarray)
+            and value.shape == (1,)
+            and value[0] == old_n_head
+        ):
+            value = np.array([new_n_head])
+            sanitized_value = value.tobytes()
+            attributes = frozendict(
+                {"value": sanitized_value, "device": attributes["device"]}
+            )
+            attribute_map[("value", sanitized_value)] = value
+    return attributes
+
+
 def gpt2_dhp_transform(
     function,
     dp_degree,
@@ -339,7 +426,8 @@ def gpt2_dhp_transform(
     pp_degree,
     devices,
     num_microbatches,
-    embedding_dim,
+    d_embd,
+    n_head,
     debug=False,
 ):
     """Automatically distributes a GPT-2 function using D/H/P hybrid parallelism."""
@@ -461,9 +549,9 @@ def gpt2_dhp_transform(
                 for op in stage.ops:
                     # Collect inputs for this op.
                     for j, device in enumerate(devices):
-                        # logging.debug(
-                        #    f"Scheduling op {op} on device {device.device_id}"
-                        # )
+                        logging.debug(
+                            f"Scheduling op {op} on device {device.device_id}"
+                        )
                         pp_devices = device_tree[device_tree_root][dp_device][
                             hp_devices[j]
                         ]
@@ -485,20 +573,20 @@ def gpt2_dhp_transform(
                                 ][inp]
                                 input_values.append(output_value)
                         # Add the op once for each device to the transformed function.
-                        attributes = op.attributes
-                        if op.op_type == "Split":
-                            if "split" in attributes and attributes["split"] == (
-                                embedding_dim,
-                                embedding_dim,
-                                embedding_dim,
-                            ):
-                                assert len(attributes) == 2
-                                new_dim = embedding_dim // hp_degree
-                                attributes = {
-                                    "axis": attributes["axis"],
-                                    "split": (new_dim, new_dim, new_dim),
-                                }
-
+                        if hp_degree > 1 and (
+                            op.op_type == "Split" or op.op_type == "Constant"
+                        ):
+                            attributes = update_attributes(
+                                op.op_type,
+                                op.attributes,
+                                attribute_map,
+                                old_d_embd=d_embd,
+                                new_d_embd=d_embd // hp_degree,
+                                old_n_head=n_head,
+                                new_n_head=n_head // hp_degree,
+                            )
+                        else:
+                            attributes = op.attributes
                         transformed_outputs = transformed_function.add_op(
                             op.op_type,
                             name=op.name,
@@ -636,8 +724,7 @@ def gpt2_dhp_transform(
                                     intermediate_value_map[j][k]["all"][
                                         output
                                     ] = _concat_values(
-                                        mb_all_output,
-                                        mb_k_output,
+                                        (mb_all_output, mb_k_output),
                                         transformed_function,
                                         dim=0,
                                         output_name=(
@@ -734,15 +821,6 @@ def gpt2_dhp_transform(
             else:
                 # Do nothing for other outputs
                 pass
-                """
-                for i, hp_group in enumerate(hp_groups):
-                    _mpi_allgather_values(
-                        hp_group,
-                        transformed_function,
-                        dim=0,
-                        output_names=[f"{output.name}_dp_all_hp_all_pp_all" for _ in range(len(hp_group))],
-                    )
-                """
 
     # Hack to get around unhashable numpy array attributes
     # TODO: Fix this more gracefully?

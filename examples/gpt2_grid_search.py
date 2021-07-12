@@ -40,32 +40,11 @@ FIELDNAMES = [
 ]
 
 
-def _get_condensed_config(config):
-    (
-        function,
-        input_data,
-        topology,
-        model_size,
-        world_size,
-        batch_size,
-        dp_degree,
-        hp_degree,
-        pp_degree,
-        num_microbatches,
-    ) = config
-    condensed_config = (
-        model_size,
-        world_size,
-        batch_size,
-        dp_degree,
-        hp_degree,
-        pp_degree,
-        num_microbatches,
-    )
-    return condensed_config
-
-
 def _get_all_degrees(n):
+    """Given power-of-two world size n, returns all power-of-two factorizations of n."""
+    if int(np.log2(n)) != np.log2(n):
+        raise ValueError("World size must be a power of two")
+
     all_degrees = []
     d = 1
     h = 1
@@ -89,41 +68,6 @@ def _get_all_degrees(n):
             h *= 2
         d *= 2
     return all_degrees
-
-
-def _get_transformed_function_and_input_data(config):
-    (
-        function,
-        input_data,
-        topology,
-        output_file,
-        model_size,
-        world_size,
-        batch_size,
-        dp_degree,
-        hp_degree,
-        pp_degree,
-        num_microbatches,
-    ) = config
-    n_layer, n_head, n_embd = MODEL_PARAMS[model_size]
-    ex = SequentialExecutor("numpy")
-    function = ex.infer_types(
-        function,
-        input_data,
-        input_devices=[topology.devices[0] for _ in range(len(input_data))],
-    )
-    input_data = copy.deepcopy(input_data)
-    init_function, transformed_function, initialized_input_data = gpt2.transform(
-        function,
-        input_data,
-        topology,
-        dp_degree,
-        hp_degree,
-        pp_degree,
-        num_microbatches,
-        n_embd,
-    )
-    return topology, transformed_function, initialized_input_data
 
 
 def _write_row(config, latency, peak_memory):
@@ -160,42 +104,64 @@ def _write_row(config, latency, peak_memory):
             f.flush()
 
 
-def simulate(config):
+def run(config):
+    (
+        function,
+        input_data,
+        topology,
+        output_file,
+        model_size,
+        world_size,
+        batch_size,
+        dp_degree,
+        hp_degree,
+        pp_degree,
+        num_microbatches,
+        backend,
+    ) = config
+    n_layer, n_head, n_embd = MODEL_PARAMS[model_size]
+    """
+    ex = SequentialExecutor("numpy")
+    function = ex.infer_types(
+        function,
+        input_data,
+        input_devices=[topology.devices[0] for _ in range(len(input_data))],
+    )
+    """
     try:
-        (
+        input_data = copy.deepcopy(input_data)
+        init_function, transformed_function, initialized_input_data = gpt2.transform(
+            function,
+            input_data,
             topology,
-            transformed_function,
-            initialized_input_data,
-        ) = _get_transformed_function_and_input_data(config)
-        simulation = gpt2.simulate(transformed_function, initialized_input_data, topology)
-        latency = max([simulation.timestamps[d] for d in simulation.timestamps])
-        peak_memory = max([simulation.peak_memory[d] for d in simulation.peak_memory]) / (
-            2.0 ** 20
+            dp_degree,
+            hp_degree,
+            pp_degree,
+            num_microbatches,
+            d_embd,
+            n_head,
+            use_real_weights=(backend == "pytorch"),
         )
+        if backend == "simulate":
+            simulation = gpt2.simulate(
+                transformed_function, initialized_input_data, topology
+            )
+            latency = max([simulation.timestamps[d] for d in simulation.timestamps])
+            peak_memory = max(
+                [simulation.peak_memory[d] for d in simulation.peak_memory]
+            ) / (2.0 ** 20)
+        elif backend == "pytorch":
+            world_size = len(topology.devices) - 1
+            per_rank_outputs, runtimes = gpt2.run_pytorch(
+                transformed_function, initialized_input_data, world_size
+            )
+            latency = np.median(runtimes[-1])
+            # TODO: Measure peak memory?
+            peak_memory = 0
     except Exception as e:
         latency = -1
         peak_memory = -1
     _write_row(config, latency, peak_memory)
-
-
-def run_pytorch(config):
-    condensed_config = _get_condensed_config(config)
-    try:
-        (
-            topology,
-            transformed_function,
-            initialized_input_data,
-        ) = get_transformed_function_and_input_data(config)
-        world_size = len(topology.devices) - 1
-        per_rank_outputs, runtimes = gpt2.run_pytorch(
-            transformed_function, initialized_input_data, world_size
-        )
-    except Exception as e:
-        return condensed_config, -1, -1
-    latency = np.median(runtimes[-1])
-    # TODO: Measure peak memory?
-    peak_memory = 0
-    return condensed_config, latency, peak_memory
 
 
 def grid_search(args):
@@ -244,6 +210,11 @@ def grid_search(args):
         )
     all_input_ids = gpt2.create_input_ids(max(all_batch_sizes))
 
+    if args.pytorch:
+        backend = "pytorch"
+    else:
+        backend = "simulate"
+
     configs = []
     for model_size, world_size, batch_size in itertools.product(
         all_model_sizes, all_world_sizes, all_batch_sizes
@@ -283,12 +254,10 @@ def grid_search(args):
                         hp_degree,
                         pp_degree,
                         num_microbatches,
+                        backend,
                     )
                 )
-    if args.pytorch:
-        func = run_pytorch
-    else:
-        func = simulate
+    # TODO: Use Pandas to manage output
     with open(args.output_file, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
         writer.writeheader()
@@ -301,7 +270,14 @@ if __name__ == "__main__":
         "--pytorch", action="store_true", default=False, help="Use PyTorch backend"
     )
     parser.add_argument(
-        "--model_path", type=str, required=True, help="Path to GPT-2 ONNX model"
+        "--model_path",
+        type=str,
+        required=True,
+        help=(
+            "Path to GPT-2 ONNX model "
+            "(downloaded from https://github.com/onnx/models/blob/master/"
+            "text/machine_comprehension/gpt-2/model/gpt2-10.onnx?raw=True)"
+        ),
     )
     parser.add_argument(
         "--network_bandwidth", type=float, default=64, help="Network bandwidth in Gbps"

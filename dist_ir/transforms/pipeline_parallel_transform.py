@@ -59,7 +59,7 @@ class PipelineParallelTransform:
                     v_i = transformed_function.add_op(
                         "Select",
                         name=f"Select/{v.name}_{i}",
-                        attributes={"dim": i},
+                        attributes={"index": i},
                         inputs=[vs],
                         output_names=[f"{v.name}_{i}"],
                     )

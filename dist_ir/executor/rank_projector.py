@@ -25,7 +25,7 @@ class ProjectorState(AbstractState):
         self.groups: Set[Tuple[Device]] = set()
 
 
-def _get_input_devices(op: Op, state: ProjectorState):
+def _get_input_devices(op: Op):
     return list(set(x.type.device for x in op.inputs if x.type.device is not None))
 
 
@@ -59,22 +59,9 @@ def _collective_projector(op: Op, state: ProjectorState):
 
 
 def _constant_projector(op: Op, state: ProjectorState):
-    # Only add the Constant ops to devices which use the constants.
     assert len(op.outputs) == 1
-    output = op.outputs[0]
-    input_devices = set()
-    consumers = state.function.consumers[output]
-    for consumer in state.function.consumers[output]:
-        consumer_input_devices = set(_get_input_devices(consumer, state))
-        if None in consumer_input_devices:
-            raise ValueError(
-                f"Unable to determine Constant op {op} device "
-                f"with consumers {consumers}"
-            )
-        else:
-            input_devices.update(consumer_input_devices)
-    for input_device in input_devices:
-        state.per_rank_fns[input_device].ops.append(op)
+    device = op.attributes["device"]
+    state.per_rank_fns[device].ops.append(op)
 
 
 def _gather_projector(op: Op, state: ProjectorState):
@@ -100,7 +87,7 @@ def _identity_projector(op: Op, state: ProjectorState):
     """Projects op unchanged to its device's per-rank program.
     The inputs of op must all be on a single device.
     """
-    devices = _get_input_devices(op, state)
+    devices = _get_input_devices(op)
     if (
         len(devices) > 1
         or len(devices) == 0
@@ -110,7 +97,6 @@ def _identity_projector(op: Op, state: ProjectorState):
         raise ValueError(f"Op {op} has input devices {devices}")
     else:
         state.per_rank_fns[devices[0]].ops.append(op)
-        # state.per_rank_fns[d].add_op(op.op_type, name=op.name, inputs=op.inputs, )
 
 
 def _send_projector(op: Op, state: ProjectorState):
@@ -279,6 +265,7 @@ PostTypeInferenceProjector = AbstractInterpreter(
 )
 
 
+# TODO: Remove run_type_inference once we have mixed implementations
 def project(
     fn: Function, input_types: Sequence[Type], run_type_inference: bool = True
 ) -> Tuple[Dict[Device, Function], Set[Tuple[Device]]]:
@@ -297,7 +284,6 @@ def project(
     else:
         state = PostTypeInferenceProjector.interpret(fn, input_types, state=state)
 
-    # Erase all types in per_rank_fns:
     result_fns = {}
     for d, per_rank_fn in state.per_rank_fns.items():
         result_fns[d] = per_rank_fn.finalize()

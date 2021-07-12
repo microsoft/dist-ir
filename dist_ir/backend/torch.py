@@ -12,11 +12,13 @@ import torch.distributed as dist
 from torch import fx
 
 from ..executor.rank_projector import project
-from ..ir import Function, cpprint, pformat
+from ..ir import Function, cpprint
 from ..ir.device import Device
 from ..ir.type import Int64, Float32
 
-torch.multiprocessing.set_sharing_strategy("file_system")
+# NOTE: The code currently suffers from this issue, more investigation needed:
+# https://github.com/pytorch/pytorch/issues/11201
+# torch.multiprocessing.set_sharing_strategy("file_system")
 
 DistributedContext = NamedTuple(
     "DistributedContext",
@@ -73,7 +75,7 @@ def _concat2(*args, axis=None, ctx=None):
     return torch.cat(args, dim=axis)
 
 
-def _constant(value, ctx=None):
+def _constant(value, device=None, ctx=None):
     output = torch.tensor(value)
     if output.shape == (1,):
         return output[0]
@@ -380,9 +382,6 @@ def run_function(
 
     # Run ops
     for op in fn.ops:
-        # op_str = pformat(op).replace("\n", " ")
-        # print(f"{rank}: {op_str}")
-        # sys.stdout.flush()
         inputs = tuple(value_map[v] for v in op.inputs)
         kwargs = {} if op.attributes is None else {**op.attributes}
         kwargs["ctx"] = ctx
@@ -448,23 +447,11 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
             sys.exit(1)
     else:
         # Time a bunch of executions, use last run's output values
-        # TODO: Add a flag to disable PyTorch profiling
-        with torch.profiler.profile(
-            activities=[
-                torch.profiler.ProfilerActivity.CPU,
-                torch.profiler.ProfilerActivity.CUDA,
-            ],
-            schedule=torch.profiler.schedule(
-                wait=0, warmup=num_warmup_steps, active=num_repetitions
-            ),
-            on_trace_ready=lambda p: p.export_chrome_trace(f"{rank}_profile.json"),
-        ) as p:
-            for _ in range(num_warmup_steps + num_repetitions):
-                outputs = run_function(ctx, fn, inputs)
-                if ctx.world_size > 1:
-                    torch.distributed.barrier()
-                add_event()
-                p.step()
+        for _ in range(num_warmup_steps + num_repetitions):
+            outputs = run_function(ctx, fn, inputs)
+            if ctx.world_size > 1:
+                torch.distributed.barrier()
+            add_event()
 
     if ctx.use_gpu:
         # Move outputs back to cpu
@@ -509,7 +496,7 @@ def run_multiprocesses(
     per_rank_functions: Tuple[Function],
     per_rank_inputs: Tuple[Any],
     num_repetitions=1,
-    num_warmup=5,
+    num_warmup=0,
 ):
     assert len(per_rank_functions) == len(per_rank_inputs)
     args = [
@@ -530,10 +517,10 @@ def run_pytorch(
     inputs: Sequence[Any],
     use_gpu=False,
     num_repetitions=1,
-    num_warmup=5,
+    num_warmup=0,
     debug_mock=False,
     debug_stacktrace=False,
-    run_type_inference=True,
+    run_type_inference=True,  # TODO: Remove once we have mixed implementations
 ):
     """Project `fn` and run on `inputs` over `num_devices` devices using the
     PyTorch backend.

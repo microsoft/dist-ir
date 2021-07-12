@@ -19,11 +19,10 @@ from dist_ir.ir import cpprint, Device, FunctionMaker, Op, Topology, Value
 from dist_ir.ir.type import Float32, Tensor
 from dist_ir.transforms import (
     gpt2_dhp_transform,
+    update_attributes,
     sanitize_unhashable_attributes,
     restore_unhashable_attributes,
 )
-
-NETWORK_BANDWIDTH_Gbps = 200
 
 
 def _to_numpy(x):
@@ -83,9 +82,7 @@ def _filter_extra_outputs(function):
     return filtered_function.finalize()
 
 
-def _set_model_size(
-    function, num_transformer_blocks, num_attention_heads, embedding_dim
-):
+def _set_model_size(function, n_layer, n_head, d_embd):
     function, attribute_map = sanitize_unhashable_attributes(function)
 
     # Prepare a list of the existing Transformer blocks in the function.
@@ -124,25 +121,23 @@ def _set_model_size(
     producer_map = {}
 
     # Add inputs from the original function to the transformed function.
-    for inp in function.inputs:
+    inputs_to_remove = []
+    for i, inp in enumerate(function.inputs):
         # Only add inputs if they are used by blocks that will appear
         # in the transformed function.
         max_consumer_block_id = max(
             [orig_block_id_map[consumer] for consumer in function.consumers[inp]]
         )
-        if (
-            max_consumer_block_id < num_transformer_blocks
-            or max_consumer_block_id == len(blocks)
-        ):
+        if max_consumer_block_id < n_layer or max_consumer_block_id == len(blocks):
             # Resize the weights and biases according to the specified parameters.
             shape = inp.type.shape
             if inp.name == "wte.weight":
                 vocab_size = inp.type.shape[0]
-                shape = (vocab_size, embedding_dim)
+                shape = (vocab_size, d_embd)
                 typ = Tensor(shape=shape, device=inp.type.device, dtype=inp.type.dtype)
             elif inp.name == "wpe.weight":
                 max_position_embeddings = inp.type.shape[0]
-                shape = (max_position_embeddings, embedding_dim)
+                shape = (max_position_embeddings, d_embd)
                 typ = Tensor(shape=shape, device=inp.type.device, dtype=inp.type.dtype)
             elif (
                 "ln_1.weight" in inp.name
@@ -152,28 +147,30 @@ def _set_model_size(
                 or "ln_f.weight" in inp.name
                 or "ln_f.bias" in inp.name
             ):
-                shape = (embedding_dim,)
+                shape = (d_embd,)
             elif "c_attn.weight" in inp.name:
-                shape = (embedding_dim, 3 * embedding_dim)
+                shape = (d_embd, 3 * d_embd)
             elif "c_attn.bias" in inp.name:
-                shape = (3 * embedding_dim,)
+                shape = (3 * d_embd,)
             elif "attn.c_proj.weight" in inp.name:
-                shape = (embedding_dim, embedding_dim)
+                shape = (d_embd, d_embd)
             elif "attn.c_proj.bias" in inp.name:
-                shape = (embedding_dim,)
+                shape = (d_embd,)
             elif "c_fc.weight" in inp.name:
-                shape = (embedding_dim, 4 * embedding_dim)
+                shape = (d_embd, 4 * d_embd)
             elif "c_fc.bias" in inp.name:
-                shape = (4 * embedding_dim,)
+                shape = (4 * d_embd,)
             elif "mlp.c_proj.weight" in inp.name:
-                shape = (4 * embedding_dim, embedding_dim)
+                shape = (4 * d_embd, d_embd)
             elif "mlp.c_proj.bias" in inp.name:
-                shape = (embedding_dim,)
+                shape = (d_embd,)
             if shape != inp.type.shape:
                 typ = Tensor(shape=shape, device=inp.type.device, dtype=inp.type.dtype)
             else:
                 typ = inp.type
             value_map[inp] = transformed_function.add_input_value(inp.name, typ)
+        else:
+            inputs_to_remove.append(i)
 
     # A map from ops in the transformed function to block id.
     block_id_map = {}
@@ -184,37 +181,23 @@ def _set_model_size(
 
     # Add ops from the original Transformer blocks to the new function.
     transformed_blocks = []
-    for i in range(min(num_transformer_blocks, len(blocks))):
+    for i in range(min(n_layer, len(blocks))):
         cur_block = []
         for k, op in enumerate(blocks[i]):
             max_op_id = max(max_op_id, int(re.match(".*_(\d+)", op.name).group(1)))
             inputs = tuple(value_map[inp] for inp in op.inputs)
-            attributes = op.attributes
-            if op.op_type == "Split":
-                if "split" in attributes and attributes["split"] == (
-                    768,
-                    768,
-                    768,
-                ):
-                    assert len(attributes) == 2
-                    attributes = frozendict(
-                        {
-                            "axis": attributes["axis"],
-                            "split": (embedding_dim, embedding_dim, embedding_dim),
-                        }
-                    )
-            elif op.op_type == "Constant":
-                value = attribute_map[("value", attributes["value"])]
-                if (
-                    isinstance(value, np.ndarray)
-                    and value.shape == (1,)
-                    and value[0] == 12
-                ):
-                    sanitized_value = np.array([num_attention_heads]).tobytes()
-                    attributes = frozendict({"value": sanitized_value})
-                    attribute_map[("value", sanitized_value)] = np.array(
-                        [num_attention_heads]
-                    )
+            if op.op_type == "Split" or op.op_type == "Constant":
+                attributes = update_attributes(
+                    op.op_type,
+                    op.attributes,
+                    attribute_map,
+                    old_d_embd=768,
+                    new_d_embd=d_embd,
+                    old_n_head=12,
+                    new_n_head=n_head,
+                )
+            else:
+                attributes = op.attributes
             new_op = Op(
                 name=op.name,
                 op_type=op.op_type,
@@ -241,7 +224,7 @@ def _set_model_size(
         transformed_blocks.append(cur_block)
 
     # Add any additional Transformer blocks if necessary.
-    for j in range(len(blocks), num_transformer_blocks):
+    for j in range(len(blocks), n_layer):
         cur_block = []
         for k, op in enumerate(transformed_blocks[-1]):
             # Collect the inputs for the new op.
@@ -330,26 +313,28 @@ def _set_model_size(
         transformed_function, attribute_map
     )
 
-    return transformed_function.finalize()
+    return transformed_function.finalize(), inputs_to_remove
 
 
-def get_topology(world_size, device_throughput, dram_bandwidth, network_bandwidth):
-    topology = Topology()
-    d0 = topology.add_device("gpu")
-    for i in range(1, world_size + 1):
-        topology.add_device(
-            "gpu", throughput=device_throughput, dram_bandwidth=dram_bandwidth
-        )
-        for j in range(0, i):
-            if j == 0:
-                topology.set_bandwidth(
-                    topology.devices[i], topology.devices[j], network_bandwidth
+def _update_input_data_for_hp(
+    input_data, function, d_embd, n_head, hp_degree, use_real_weights
+):
+    for i, inp in enumerate(function.inputs):
+        if input_data[i].shape == (1,):
+            if input_data[i][0] == d_embd * 3:
+                input_data[i] = np.array(
+                    [d_embd * 3 // hp_degree], dtype=input_data[i].dtype
                 )
-            else:
-                topology.set_bandwidth(
-                    topology.devices[i], topology.devices[j], network_bandwidth
+            elif input_data[i][0] == d_embd * 4:
+                input_data[i] = np.array(
+                    [d_embd * 4 // hp_degree], dtype=input_data[i].dtype
                 )
-    return topology
+            elif input_data[i][0] == n_head:
+                input_data[i] = np.array(
+                    [n_head // hp_degree], dtype=input_data[i].dtype
+                )
+        elif use_real_weights and "c_proj.bias" in inp.name:
+            input_data[i] = np.copy(input_data[i]) / hp_degree
 
 
 def get_stats(function):
@@ -370,7 +355,7 @@ def get_stats(function):
         parameter_count_str = str(parameter_count)
 
     if model_size >= 1e3 and model_size < 1e6:
-        model_count_str = f"{model_size / 1e3:.2f} KB"
+        model_size_str = f"{model_size / 1e3:.2f} KB"
     elif model_size >= 1e6 and model_size < 1e9:
         model_size_str = f"{model_size / 1e6:.2f} MB"
     elif model_size >= 1e9:
@@ -379,6 +364,25 @@ def get_stats(function):
         model_size_str = str(model_size)
 
     return parameter_count, model_size, parameter_count_str, model_size_str
+
+
+def get_topology(world_size, device_throughput, dram_bandwidth, network_bandwidth):
+    topology = Topology()
+    d0 = topology.add_device("gpu")
+    for i in range(1, world_size + 1):
+        topology.add_device(
+            "gpu", throughput=device_throughput, dram_bandwidth=dram_bandwidth
+        )
+        for j in range(0, i):
+            if j == 0:
+                topology.set_bandwidth(
+                    topology.devices[i], topology.devices[j], network_bandwidth
+                )
+            else:
+                topology.set_bandwidth(
+                    topology.devices[i], topology.devices[j], network_bandwidth
+                )
+    return topology
 
 
 def import_function_and_get_input_data(
@@ -402,8 +406,14 @@ def import_function_and_get_input_data(
     return function, input_data
 
 
-def resize_function_and_input_data(function, input_data, n_layer, n_head, n_embd):
-    function = _set_model_size(function, n_layer, n_head, n_embd)
+def resize_function_and_input_data(function, input_data, n_layer, n_head, d_embd):
+    function, inputs_to_remove = _set_model_size(function, n_layer, n_head, d_embd)
+
+    input_data = input_data
+
+    # If we shrunk the model, remove any unnecessary inputs.
+    for i in inputs_to_remove[::-1]:
+        input_data.pop(i)
 
     # Update the input data if any weight shapes were changed.
     for i in range(len(input_data)):
@@ -425,13 +435,14 @@ def resize_function_and_input_data(function, input_data, n_layer, n_head, n_embd
         elif old_shape == (1,):
             assert "weight" not in inp.name and "bias" not in inp.name
             if input_data[i][0] == 768:
-                input_data[i] = np.array([n_embd], dtype=input_data[i].dtype)
+                input_data[i] = np.array([d_embd], dtype=input_data[i].dtype)
             elif input_data[i][0] == 768 * 3:
-                input_data[i] = np.array([n_embd * 3], dtype=input_data[i].dtype)
+                input_data[i] = np.array([d_embd * 3], dtype=input_data[i].dtype)
             elif input_data[i][0] == 768 * 4:
-                input_data[i] = np.array([n_embd * 4], dtype=input_data[i].dtype)
+                input_data[i] = np.array([d_embd * 4], dtype=input_data[i].dtype)
             elif input_data[i][0] == 12:
                 input_data[i] = np.array([n_head], dtype=input_data[i].dtype)
+
     # If any extra input weights were added, use the last occurence of the
     # corresponding weights in the original function as the initial weights.
     # This minimizes risk of numerical stability issues.
@@ -464,8 +475,14 @@ def transform(
     hp_degree,
     pp_degree,
     num_microbatches,
-    embedding_dim,
+    d_embd,
+    n_head,
+    use_real_weights=False,
 ):
+    if hp_degree > 1:
+        _update_input_data_for_hp(
+            input_data, function, d_embd, n_head, hp_degree, use_real_weights
+        )
     world_size = dp_degree * hp_degree * pp_degree
     init_function, transformed_function = gpt2_dhp_transform(
         function,
@@ -474,21 +491,10 @@ def transform(
         pp_degree,
         topology.devices[: world_size + 1],
         num_microbatches,
-        embedding_dim,
+        d_embd,
+        n_head,
     )
-    # Manual adjustments for horizontal parallelism
-    for i in range(len(input_data)):
-        if (
-            isinstance(input_data[i], np.ndarray)
-            and input_data[i].shape == (1,)
-            and (
-                input_data[i][0] == embedding_dim * 3
-                or input_data[i][0] == embedding_dim * 4
-            )
-        ):
-            input_data[i] = np.array([input_data[i][0] // hp_degree])
     ex = SequentialExecutor("numpy")
-
     init_function = ex.infer_types(
         init_function,
         input_data,
@@ -501,6 +507,73 @@ def transform(
         [output.type.device for output in init_function.outputs],
     )
     return init_function, transformed_function, initialized_input_data
+
+
+def get_transformed_function_and_input_data(
+    model_path,
+    device_throughput,
+    dram_bandwidth,
+    network_bandwidth,
+    batch_size,
+    dp_degree,
+    hp_degree,
+    pp_degree,
+    num_microbatches,
+    n_layer,
+    n_head,
+    d_embd,
+    use_real_weights=False,
+    print_stats=False,
+):
+    world_size = args.dp_degree * args.hp_degree * args.pp_degree
+    topology = get_topology(
+        world_size, args.device_throughput, args.dram_bandwidth, args.network_bandwidth
+    )
+
+    function, input_data = import_function_and_get_input_data(
+        model_path,
+        batch_size=batch_size,
+        n_layer=n_layer,
+        n_head=n_head,
+        d_embd=d_embd,
+        default_device=topology.devices[0],
+        use_real_weights=use_real_weights,
+    )
+
+    function, input_data = resize_function_and_input_data(
+        function, input_data, args.n_layer, args.n_head, args.n_embd
+    )
+
+    input_ids = create_input_ids(batch_size)
+    input_data = [input_ids] + input_data
+
+    if print_stats:
+        ex = SequentialExecutor("numpy")
+        function = ex.infer_types(
+            function,
+            input_data,
+            input_devices=[topology.devices[0] for _ in range(len(input_data))],
+        )
+        parameter_count, model_size, parameter_count_str, model_size_str = _get_stats(
+            function
+        )
+        print("Parameter count:", parameter_count_str)
+        print("Model size:", model_size_str)
+
+    init_function, transformed_function, initialized_input_data = transform(
+        function,
+        input_data,
+        topology,
+        dp_degree,
+        hp_degree,
+        pp_degree,
+        num_microbatches,
+        d_embd,
+        n_head,
+        use_real_weights=use_real_weights,
+    )
+
+    return transformed_function, initialized_input_data, topology
 
 
 def simulate(function, input_data, topology):
@@ -527,45 +600,31 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
 
 
 def main(args):
-    if args.n_embd % args.n_head != 0:
+    if args.d_embd % args.n_head != 0:
         raise ValueError(
             "Embedding dimension must be divisible by number of attention heads"
         )
-    world_size = args.dp_degree * args.hp_degree * args.pp_degree
-    topology = get_topology(
-        world_size, args.device_throughput, args.dram_bandwidth, args.network_bandwidth
-    )
-    function, input_data = import_function_and_get_input_data(
-        args.model_path,
-        default_device=topology.devices[0],
-        use_real_weights=args.use_real_weights,
-    )
-    function, input_data = resize_function_and_input_data(
-        function, input_data, args.n_layer, args.n_head, args.n_embd
-    )
-    input_ids = create_input_ids(args.batch_size)
-    input_data = [input_ids] + input_data
-    ex = SequentialExecutor("numpy")
-    function = ex.infer_types(
-        function,
-        input_data,
-        input_devices=[topology.devices[0] for _ in range(len(input_data))],
-    )
-    parameter_count, model_size, parameter_count_str, model_size_str = get_stats(
-        function
-    )
-    print("Parameter count:", parameter_count_str)
-    print("Model size:", model_size_str)
-    init_function, transformed_function, initialized_input_data = transform(
-        function,
-        input_data,
+    (
+        transformed_function,
+        initialized_input_data,
         topology,
+    ) = get_transformed_function_and_input_data(
+        args.model_path,
+        args.device_throughput,
+        args.dram_bandwidth,
+        args.network_bandwidth,
+        args.batch_size,
         args.dp_degree,
         args.hp_degree,
         args.pp_degree,
         args.num_microbatches,
-        args.n_embd,
+        args.n_layer,
+        args.n_head,
+        args.d_embd,
+        args.use_real_weights,
+        print_stats=True,
     )
+
     if args.backend == "simulate":
         simulation = simulate(transformed_function, initialized_input_data, topology)
         if args.trace_file is not None:
@@ -593,7 +652,12 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GPT-2 Inference")
     parser.add_argument(
-        "--model_path", type=str, required=True, help="Path to GPT-2 ONNX model"
+        "--model_path",
+        type=str,
+        required=True,
+        help="Path to GPT-2 ONNX model "
+        "(downloaded from https://github.com/onnx/models/blob/master/"
+        "text/machine_comprehension/gpt-2/model/gpt2-10.onnx?raw=true)",
     )
     parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
     parser.add_argument(
@@ -615,7 +679,7 @@ if __name__ == "__main__":
         default=12,
         help="Number of attention heads for each attention layer",
     )
-    parser.add_argument("--n_embd", type=int, default=768, help="Embedding dimension")
+    parser.add_argument("--d_embd", type=int, default=768, help="Embedding dimension")
     parser.add_argument(
         "--backend",
         choices=["simulate", "pytorch"],

@@ -2,6 +2,7 @@ import numpy as np
 
 from ..ir.type import Tensor
 
+
 def _elementwise_numpy_op_prop_fn(op, x, y):
     if isinstance(x, Tensor) and isinstance(y, np.float32):
         return x

@@ -186,12 +186,16 @@ def test_mlp_grid_search():
     batch_sizes = [64]
     hidden_dims = [64]
     world_sizes = [1, 2, 4, 8]
-    all_num_layers = [32]
+    all_num_layers = [2]
 
     results = []
     for (batch_size, hidden_dim, num_layers, d, h, p, m) in gen_configurations(
         hidden_dims, world_sizes, all_num_layers, batch_sizes
     ):
+        # TODO why are there Identity ops in D = H = P = 2? Grad ops?
+        d = h = 2
+        p = 2
+        m = 2
         world_size = d * h * p
         # TODO reuse seq_mlp
         topology = Topology()
@@ -208,6 +212,9 @@ def test_mlp_grid_search():
         )
 
         init_fn, fn = mlp_dist(seq_mlp, d, h, p, m, topology)
+        cpprint(init_fn)
+        cpprint(fn)
+        return
         print(fn.name)
 
         # Simulate
@@ -315,5 +322,6 @@ if __name__ == "__main__":
     # test_dp_mlp()
     # test_send_recv()
     # test_single_device()
-    test_dp_mp_matmuls()
+    # test_dp_mp_matmuls()
+
     test_mlp_grid_search()

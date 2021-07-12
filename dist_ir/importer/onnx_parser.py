@@ -103,7 +103,7 @@ def import_from_onnx(
     function_output_names=None,
     parse_input_data=True,
 ):
-    onnx_model = onnx.load(onnx_model)
+    onnx_model = onnx.load(onnx_model, load_external_data=False)
     dist_ir_function = FunctionMaker(name)
 
     inputs = {}

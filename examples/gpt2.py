@@ -19,6 +19,7 @@ from dist_ir.ir import cpprint, Device, FunctionMaker, Op, Topology, Value
 from dist_ir.ir.type import Float32, Tensor
 from dist_ir.transforms import (
     gpt2_dhp_transform,
+    check_params,
     update_attributes,
     sanitize_unhashable_attributes,
     restore_unhashable_attributes,
@@ -532,16 +533,12 @@ def get_transformed_function_and_input_data(
 
     function, input_data = import_function_and_get_input_data(
         model_path,
-        batch_size=batch_size,
-        n_layer=n_layer,
-        n_head=n_head,
-        d_embd=d_embd,
         default_device=topology.devices[0],
         use_real_weights=use_real_weights,
     )
 
     function, input_data = resize_function_and_input_data(
-        function, input_data, args.n_layer, args.n_head, args.n_embd
+        function, input_data, args.n_layer, args.n_head, args.d_embd
     )
 
     input_ids = create_input_ids(batch_size)
@@ -554,7 +551,7 @@ def get_transformed_function_and_input_data(
             input_data,
             input_devices=[topology.devices[0] for _ in range(len(input_data))],
         )
-        parameter_count, model_size, parameter_count_str, model_size_str = _get_stats(
+        parameter_count, model_size, parameter_count_str, model_size_str = get_stats(
             function
         )
         print("Parameter count:", parameter_count_str)
@@ -600,10 +597,16 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
 
 
 def main(args):
-    if args.d_embd % args.n_head != 0:
-        raise ValueError(
-            "Embedding dimension must be divisible by number of attention heads"
-        )
+    check_params(
+        args.batch_size,
+        args.dp_degree,
+        args.hp_degree,
+        args.pp_degree,
+        args.num_microbatches,
+        args.n_head,
+        args.d_embd,
+    )
+
     (
         transformed_function,
         initialized_input_data,

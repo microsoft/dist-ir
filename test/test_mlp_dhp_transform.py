@@ -140,8 +140,8 @@ def _test_helper(
         dp_degree,
         hp_degree,
         pp_degree,
-        topology.devices,
         num_microbatches,
+        topology.devices,
     )
     init_function = infer_types(init_function, init_function.inputs)
     # init_function.outputs = transformed_function.inputs, so get types from there:

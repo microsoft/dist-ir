@@ -26,8 +26,8 @@ class SimulatorState(AbstractState):
         self.trace = []
         self._function_inputs_set = set(function.inputs)
 
-        for inp in function.inputs:
-            self.peak_memory[inp.type.device] += inp.type.size()
+        for inp in inputs:
+            self.peak_memory[inp.device] += inp.size()
         for device in self.peak_memory:
             self.live_memory[device][0] = (0, self.peak_memory[device])
 
@@ -88,7 +88,7 @@ def _simulate_op(
         for device in devices:
             state.timestamps[device] = max_timestamp
 
-    # Update the trace and timestamps
+    # Update the trace and timestamps.
     for device in costs:
         state.add_trace_event(
             op.op_type,
@@ -100,11 +100,13 @@ def _simulate_op(
 
     # Update the live memory with any new activations.
     live_memory_deltas = defaultdict(lambda: 0)
-    for out_edge in op.outputs:
-        state.consumers[out_edge] = len(state.function.consumers[out_edge])
-        output_devices = out_edge.type.get_all_devices()
+    for function_output, output_type in zip(op.outputs, outputs):
+        state.consumers[function_output] = len(
+            state.function.consumers[function_output]
+        )
+        output_devices = output_type.get_all_devices()
         for output_device in output_devices:
-            live_memory_deltas[output_device] += out_edge.type.size()
+            live_memory_deltas[output_device] += output_type.size()
     _update_live_memory(state, live_memory_deltas)
 
     # Update the peak memory.
@@ -115,21 +117,21 @@ def _simulate_op(
 
     # Update the live memory to reflect any freed activations.
     live_memory_deltas = defaultdict(lambda: 0)
-    for in_edge in op.inputs:
+    for inp, input_type in zip(op.inputs, inputs):
         # We don't free live memory for function inputs as these could be for weights
         # or input data buffers that are active for the entire duration of execution.
-        if in_edge in state._function_inputs_set:
+        if inp in state._function_inputs_set:
             continue
-        if state.consumers[in_edge] <= 0:
+        if state.consumers[inp] <= 0:
             raise RuntimeError(
                 f"Input {in_edge} for op {op} has "
                 f"{state.consumers[in_edge]} consumers"
             )
-        state.consumers[in_edge] -= 1
-        if state.consumers[in_edge] == 0:
-            input_devices = in_edge.type.get_all_devices()
+        state.consumers[inp] -= 1
+        if state.consumers[inp] == 0:
+            input_devices = input_type.get_all_devices()
             for input_device in input_devices:
-                live_memory_deltas[input_device] -= in_edge.type.size()
+                live_memory_deltas[input_device] -= input_type.size()
     _update_live_memory(state, live_memory_deltas)
 
 

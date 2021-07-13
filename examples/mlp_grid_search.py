@@ -1,7 +1,7 @@
 import csv
 from itertools import product
 import numpy as np
-from multiprocessing import Pool
+from tqdm.contrib.concurrent import process_map
 
 from dist_ir.ir import Topology
 from dist_ir.executor import infer_types, Simulator
@@ -48,45 +48,48 @@ def get_all_degrees(n):
 
 
 def run_experiment(config):
-    (
-        batch_size,
-        input_dim,
-        num_hidden_layers,
-        dp_degree,
-        hp_degree,
-        pp_degree,
-        num_microbatches,
-    ) = config
-    hidden_dim = input_dim
-    output_dim = hidden_dim
-    topology = Topology()
-    d0 = topology.add_device("gpu")
-    function = mlp(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, d0)
-    function = infer_types(function, function.inputs)
-    world_size = dp_degree * hp_degree * pp_degree
-    add_devices_to_topology(topology, world_size)
+    try:
+        (
+            batch_size,
+            input_dim,
+            num_hidden_layers,
+            dp_degree,
+            hp_degree,
+            pp_degree,
+            num_microbatches,
+        ) = config
+        hidden_dim = input_dim
+        output_dim = hidden_dim
+        topology = Topology()
+        d0 = topology.add_device("gpu")
+        function = mlp(
+            batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, d0
+        )
+        function = infer_types(function, function.inputs)
+        world_size = dp_degree * hp_degree * pp_degree
+        add_devices_to_topology(topology, world_size)
+        init_function, transformed_function = mlp_dist(
+            function,
+            dp_degree,
+            hp_degree,
+            pp_degree,
+            num_microbatches,
+            topology,
+        )
+        simulator = Simulator(CostModel(topology))
+        simulation = simulator.interpret(
+            transformed_function,
+            (v.type for v in transformed_function.inputs),
+        )
+        latency = max([simulation.timestamps[d] for d in simulation.timestamps])
+        throughput = batch_size / latency
+        peak_memory = max([simulation.peak_memory[d] for d in simulation.timestamps])
+        return latency, throughput, peak_memory
+    except Exception as e:
+        import sys, traceback
 
-    transformed_function = mlp_dhp_transform(
-        function,
-        dp_degree,
-        hp_degree,
-        pp_degree,
-        topology.devices,
-        num_microbatches,
-    )
-    transformed_function = infer_types(
-        transformed_function, transformed_function.inputs
-    )
-    simulator = Simulator(CostModel(topology))
-    simulation = simulator.interpret(
-        transformed_function,
-        (v.type for v in transformed_function.inputs),
-    )
-    distributed_running_time = max(
-        [simulation.timestamps[d] for d in simulation.timestamps]
-    )
-    throughput = batch_size / distributed_running_time
-    return throughput
+        traceback.print_exc()
+        sys.exit(1)
 
 
 def mlp_dist(
@@ -102,8 +105,8 @@ def mlp_dist(
         dp_degree,
         hp_degree,
         pp_degree,
-        topology.devices,
         num_microbatches,
+        topology.devices,
     )
     init_function = infer_types(init_function, init_function.inputs)
     # init_function.outputs = transformed_function.inputs, so get types from there:
@@ -146,20 +149,21 @@ def grid_search(hidden_dims, cluster_sizes, all_num_layers, all_batch_sizes):
         gen_configurations(hidden_dims, cluster_sizes, all_num_layers, all_batch_sizes)
     )
 
-    with Pool() as p:
-        results = p.map(run_experiment, configs)
+    results = process_map(run_experiment, configs)
 
-    with open("grid_search_results.csv", "w", newline="") as f:
+    with open("mlp_grid_search_results.csv", "w", newline="") as f:
         fieldnames = [
             "dp_degree",
             "hp_degree",
             "pp_degree",
             "num_microbatches",
+            "latency",
             "throughput",
+            "peak_memory",
         ]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
-        for config, throughput in zip(configs, results):
+        for config, latency, throughput, peak_memory in zip(configs, results):
             (
                 batch_size,
                 input_dim,
@@ -175,16 +179,17 @@ def grid_search(hidden_dims, cluster_sizes, all_num_layers, all_batch_sizes):
                     "hp_degree": hp_degree,
                     "pp_degree": pp_degree,
                     "num_microbatches": num_microbatches,
+                    "latency": latency,
                     "throughput": throughput,
+                    "peak_memory": peak_memory,
                 }
             )
 
 
 if __name__ == "__main__":
-    # grid_search(
-    #     hidden_dims=[8192],
-    #     cluster_sizes=[1, 2, 4, 8, 16, 32],
-    #     all_num_layers=[64],
-    #     all_batch_sizes=[8192],
-    # )
-    pass
+    grid_search(
+        hidden_dims=[8192, 32768],
+        cluster_sizes=[16, 64],
+        all_num_layers=[64],
+        all_batch_sizes=[2048, 8192],
+    )

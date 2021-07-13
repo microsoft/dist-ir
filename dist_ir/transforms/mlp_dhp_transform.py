@@ -306,7 +306,7 @@ def _get_device_tree(dp_degree, hp_degree, pp_degree, devices):
 
 
 def mlp_dhp_transform(
-    function, dp_degree, hp_degree, pp_degree, devices, num_microbatches
+    function, dp_degree, hp_degree, pp_degree, num_microbatches, devices
 ):
     """Automatically distributes an MLP function using D/H/P hybrid parallelism."""
     fn_name = f"{function.name}_{dp_degree}_{hp_degree}_{pp_degree}_{num_microbatches}"

@@ -1,5 +1,10 @@
-from dist_ir.ir import FunctionMaker
+import argparse
+import numpy as np
+
+from dist_ir.ir import FunctionMaker, Topology
 from dist_ir.ir.type import Float32, Tensor
+from dist_ir.executor import CostModel, Simulator, infer_types
+from dist_ir.transforms import mlp_dhp_transform
 
 
 def mlp(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, device):
@@ -123,3 +128,153 @@ def mlp_inference_dp(
             )
 
     return function.finalize()
+
+
+# TODO: De-duplicate this function with examples/gpt2.py
+def get_stats(function):
+    parameter_count = 0
+    model_size = 0
+    for inp in function.inputs:
+        if "w" in inp.name:
+            parameter_count += np.prod(inp.type.shape)
+            model_size += inp.type.size()
+
+    if parameter_count >= 1e3 and parameter_count < 1e6:
+        parameter_count_str = f"{parameter_count / 1e3:.2f}K"
+    elif parameter_count >= 1e6 and parameter_count < 1e9:
+        parameter_count_str = f"{parameter_count / 1e6:.2f}M"
+    elif parameter_count >= 1e9:
+        parameter_count_str = f"{parameter_count / 1e9:.2f}B"
+    else:
+        parameter_count_str = str(parameter_count)
+
+    if model_size >= 1e3 and model_size < 1e6:
+        model_size_str = f"{model_size / 1e3:.2f} KB"
+    elif model_size >= 1e6 and model_size < 1e9:
+        model_size_str = f"{model_size / 1e6:.2f} MB"
+    elif model_size >= 1e9:
+        model_size_str = f"{model_size / 1e9:.2f} GB"
+    else:
+        model_size_str = str(model_size)
+
+    return parameter_count, model_size, parameter_count_str, model_size_str
+
+
+# TODO: De-duplicate this function with examples/gpt2.py
+def get_topology(world_size, device_throughput, dram_bandwidth, network_bandwidth):
+    topology = Topology()
+    d0 = topology.add_device("gpu")
+    for i in range(1, world_size + 1):
+        topology.add_device(
+            "gpu", throughput=device_throughput, dram_bandwidth=dram_bandwidth
+        )
+        for j in range(0, i):
+            if j == 0:
+                topology.set_bandwidth(
+                    topology.devices[i], topology.devices[j], network_bandwidth
+                )
+            else:
+                topology.set_bandwidth(
+                    topology.devices[i], topology.devices[j], network_bandwidth
+                )
+    return topology
+
+
+def simulate(function, input_types, topology):
+    simulator = Simulator(CostModel(topology))
+    simulation = simulator.interpret(function, input_types)
+    latency = max([simulation.timestamps[d] for d in simulation.timestamps])
+    peak_memory = max([simulation.peak_memory[d] for d in simulation.peak_memory])
+    return latency, peak_memory
+
+
+def main(args):
+    world_size = args.dp_degree * args.hp_degree * args.pp_degree
+    topology = get_topology(
+        world_size, args.device_throughput, args.dram_bandwidth, args.network_bandwidth
+    )
+
+    if args.mode == "training":
+        function = mlp(
+            args.batch_size,
+            args.input_dim,
+            args.hidden_dim,
+            args.output_dim,
+            args.num_hidden_layers,
+            topology.devices[0],
+        )
+    elif args.mode == "inference":
+        function = mlp_inference(
+            args.batch_size,
+            args.input_dim,
+            args.hidden_dim,
+            args.output_dim,
+            args.num_hidden_layers,
+            topology.devices[0],
+        )
+
+    parameter_count, model_size, parameter_count_str, model_size_str = get_stats(
+        function
+    )
+    print("Parameter count:", parameter_count_str)
+    print("Model size:", model_size_str)
+
+    if world_size > 1:
+        init_function, transformed_function = mlp_dhp_transform(
+            function,
+            args.dp_degree,
+            args.hp_degree,
+            args.pp_degree,
+            args.num_microbatches,
+            topology.devices,
+        )
+        init_function = infer_types(init_function, init_function.inputs)
+        input_types = tuple(output.type for output in init_function.outputs)
+    else:
+        transformed_function = function
+        input_types = tuple(inp.type for inp in function.inputs)
+
+    latency, peak_memory = simulate(transformed_function, input_types, topology)
+    print(f"Latency: {latency} seconds")
+    print(f"Throughput: {args.batch_size / latency:.2f} samples / second")
+    print(f"Peak memory: {peak_memory / 1e9:.2f} GB")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="MLP training and inference")
+    parser.add_argument("--batch_size", type=int, default=256, help="Batch size")
+    parser.add_argument("--input_dim", type=int, default=256, help="Input dim")
+    parser.add_argument("--hidden_dim", type=int, default=256, help="Hidden dim")
+    parser.add_argument("--output_dim", type=int, default=256, help="Output dim")
+    parser.add_argument(
+        "--num_hidden_layers", type=int, default=12, help="# hidden layers"
+    )
+    parser.add_argument(
+        "-d", "--dp_degree", type=int, default=1, help="Data parallel degree"
+    )
+    parser.add_argument(
+        "-t", "--hp_degree", type=int, default=1, help="Horizontal parallel degree"
+    )
+    parser.add_argument(
+        "-p", "--pp_degree", type=int, default=1, help="Pipeline parallel degree"
+    )
+    parser.add_argument(
+        "-k", "--num_microbatches", type=int, default=1, help="# of microbatches"
+    )
+    parser.add_argument(
+        "--network_bandwidth", type=float, default=64, help="Network bandwidth in Gbps"
+    )
+    parser.add_argument(
+        "--device_throughput", type=float, default=1.4e13, help="Device throughput"
+    )
+    parser.add_argument(
+        "--dram_bandwidth", type=float, default=9e11, help="DRAM Bandwidth"
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["training", "inference"],
+        default="training",
+        help="Execution mode",
+    )
+    args = parser.parse_args()
+    main(args)

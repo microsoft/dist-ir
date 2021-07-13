@@ -480,11 +480,11 @@ def transform(
     n_head,
     use_real_weights=False,
 ):
+    world_size = dp_degree * hp_degree * pp_degree
     if hp_degree > 1:
         _update_input_data_for_hp(
             input_data, function, d_embd, n_head, hp_degree, use_real_weights
         )
-    world_size = dp_degree * hp_degree * pp_degree
     init_function, transformed_function = gpt2_dhp_transform(
         function,
         dp_degree,
@@ -526,9 +526,9 @@ def get_transformed_function_and_input_data(
     use_real_weights=False,
     print_stats=False,
 ):
-    world_size = args.dp_degree * args.hp_degree * args.pp_degree
+    world_size = dp_degree * hp_degree * pp_degree
     topology = get_topology(
-        world_size, args.device_throughput, args.dram_bandwidth, args.network_bandwidth
+        world_size, device_throughput, dram_bandwidth, network_bandwidth
     )
 
     function, input_data = import_function_and_get_input_data(
@@ -538,7 +538,7 @@ def get_transformed_function_and_input_data(
     )
 
     function, input_data = resize_function_and_input_data(
-        function, input_data, args.n_layer, args.n_head, args.d_embd
+        function, input_data, n_layer, n_head, d_embd
     )
 
     input_ids = create_input_ids(batch_size)

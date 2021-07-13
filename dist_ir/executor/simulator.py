@@ -113,11 +113,11 @@ def _simulate_op(
 
     # Update the live memory with any new activations.
     live_memory_deltas = defaultdict(lambda: 0)
-    for out_edge in op.outputs:
+    for output, out_edge in zip(outputs, op.outputs):
         state.consumers[out_edge] = len(state.function.consumers[out_edge])
-        output_devices = out_edge.type.get_all_devices()
+        output_devices = _get_all_devices([output])
         for output_device in output_devices:
-            live_memory_deltas[output_device] += out_edge.type.size()
+            live_memory_deltas[output_device] += output.size()
     _update_live_memory(state, live_memory_deltas)
 
     # Update the peak memory.

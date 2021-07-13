@@ -1,18 +1,34 @@
 from copy import deepcopy
 from collections import defaultdict
 import json
-from typing import Any, Dict, Sequence, Tuple
+from typing import Any, Dict, Sequence, Set, Tuple
 
 import numpy as np
 
 from ..ir import Function, Device, Op
 from ..ir.type import Type, Tensor
 from .absint import AbstractState, AbstractInterpreter
+from .concrete_value import ConcreteValue
+from .cost_model import KERNEL_LAUNCH_OVERHEAD
 from .numpy_register import NumPyRegister
 from .type_inference import TypePropRegister
 from .mixed_register import MixedImplementations
 
 SECONDS_TO_MICROSECONDS = 1e6
+
+
+def _get_all_devices(values: Sequence[Any]) -> Set[Device]:
+    """Returns the devices that `values` live on. `values` can be any valid
+    abstract interpreter values, e.g., any instance of Type or ConcreteValue."""
+    devices = set()
+    for v in values:
+        if isinstance(v, Type):
+            devices.update(v.get_all_devices())
+        elif isinstance(v, ConcreteValue):
+            devices.add(v.device)
+        else:
+            raise ValueError(f"_get_all_devices called on value {v} of type {type(v)}")
+    return devices
 
 
 class SimulatorState(AbstractState):
@@ -79,10 +95,7 @@ def _simulate_op(
     # values are np.ndarrays, which don't have device fields.
     # For e.g., we could wrap all abstract values in some AbstractValue class,
     # and attach the device tag to this class.
-    devices = set()
-    for v in inputs + outputs:
-        if isinstance(v, Type):
-            devices.update(v.get_all_devices())
+    devices = _get_all_devices(inputs + outputs)
     if len(devices) > 1:
         max_timestamp = max([state.timestamps[device] for device in devices])
         for device in devices:

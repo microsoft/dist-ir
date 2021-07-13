@@ -2,7 +2,7 @@ import argparse
 import copy
 import csv
 import itertools
-import filelock
+from multiprocessing import Manager
 import numpy as np
 import os
 from tqdm.contrib.concurrent import process_map
@@ -24,8 +24,6 @@ MODEL_PARAMS = {
     "gpt3-6.7B": (32, 32, 4096),
     "gpt3-13B": (40, 40, 5120),
 }
-
-FILELOCK_PATH = ".gpt2_grid_search.lock"
 
 FIELDNAMES = [
     "model_size",
@@ -81,8 +79,8 @@ def _write_row(config, latency, peak_memory):
         pp_degree,
         num_microbatches,
         backend,
+        lock,
     ) = config
-    lock = filelock.FileLock(FILELOCK_PATH)
     with lock:
         with open(output_file, "a+", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
@@ -116,6 +114,7 @@ def run(config):
         pp_degree,
         num_microbatches,
         backend,
+        lock,
     ) = config
     n_layer, n_head, d_embd = MODEL_PARAMS[model_size]
     input_data = copy.deepcopy(input_data)
@@ -205,6 +204,9 @@ def grid_search(args):
     else:
         backend = "simulate"
 
+    manager = Manager()
+    lock = manager.Lock()
+
     configs = []
     for model_size, world_size, batch_size in itertools.product(
         all_model_sizes, all_world_sizes, all_batch_sizes
@@ -256,6 +258,7 @@ def grid_search(args):
                             pp_degree,
                             num_microbatches,
                             backend,
+                            lock,
                         )
                     )
                 except Exception as e:

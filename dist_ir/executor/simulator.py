@@ -152,6 +152,10 @@ def _create_semantics(cost_functions, implementations):
     a dictionary of implementations (input values -> output values).
     """
 
+    def _default_cost_fn(op, inputs, outputs):
+        devices = _get_all_devices(inputs + outputs)
+        return {device: KERNEL_LAUNCH_OVERHEAD for device in devices}
+
     def convert_impl(impl_fn, cost_fn):
         def semantics(op: Op, state: SimulatorState):
             # Find the op's inputs in state's environment
@@ -172,9 +176,13 @@ def _create_semantics(cost_functions, implementations):
 
         return semantics
 
-    signatures = set(cost_functions.keys()).intersection(implementations.keys())
+    semantics = {}
+    for signature in implementations:
+        # Use default cost function if signature not in cost_functions:
+        cost_fn = cost_functions.get(signature, _default_cost_fn)
+        semantics[signature] = convert_impl(implementations[signature], cost_fn)
 
-    return {f: convert_impl(implementations[f], cost_functions[f]) for f in signatures}
+    return semantics
 
 
 # All these cost functions assume they are getting the type of each input value

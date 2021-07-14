@@ -48,48 +48,42 @@ def get_all_degrees(n):
 
 
 def run_experiment(config):
-    try:
-        (
-            batch_size,
-            input_dim,
-            num_hidden_layers,
-            dp_degree,
-            hp_degree,
-            pp_degree,
-            num_microbatches,
-        ) = config
-        hidden_dim = input_dim
-        output_dim = hidden_dim
-        topology = Topology()
-        d0 = topology.add_device("gpu")
-        function = mlp(
-            batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, d0
-        )
-        function = infer_types(function, function.inputs)
-        world_size = dp_degree * hp_degree * pp_degree
-        add_devices_to_topology(topology, world_size)
-        init_function, transformed_function = mlp_dist(
-            function,
-            dp_degree,
-            hp_degree,
-            pp_degree,
-            num_microbatches,
-            topology,
-        )
-        simulator = Simulator(CostModel(topology))
-        simulation = simulator.interpret(
-            transformed_function,
-            (v.type for v in transformed_function.inputs),
-        )
-        latency = max([simulation.timestamps[d] for d in simulation.timestamps])
-        throughput = batch_size / latency
-        peak_memory = max([simulation.peak_memory[d] for d in simulation.timestamps])
-        return latency, throughput, peak_memory
-    except Exception as e:
-        import sys, traceback
-
-        traceback.print_exc()
-        sys.exit(1)
+    (
+        batch_size,
+        input_dim,
+        num_hidden_layers,
+        dp_degree,
+        hp_degree,
+        pp_degree,
+        num_microbatches,
+    ) = config
+    hidden_dim = input_dim
+    output_dim = hidden_dim
+    topology = Topology()
+    d0 = topology.add_device("gpu")
+    function = mlp(
+        batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, d0
+    )
+    function = infer_types(function, function.inputs)
+    world_size = dp_degree * hp_degree * pp_degree
+    add_devices_to_topology(topology, world_size)
+    init_function, transformed_function = mlp_dist(
+        function,
+        dp_degree,
+        hp_degree,
+        pp_degree,
+        num_microbatches,
+        topology,
+    )
+    simulator = Simulator(CostModel(topology))
+    simulation = simulator.interpret(
+        transformed_function,
+        (v.type for v in transformed_function.inputs),
+    )
+    latency = max([simulation.timestamps[d] for d in simulation.timestamps])
+    throughput = batch_size / latency
+    peak_memory = max([simulation.peak_memory[d] for d in simulation.timestamps])
+    return latency, throughput, peak_memory
 
 
 def mlp_dist(
@@ -149,10 +143,16 @@ def grid_search(hidden_dims, cluster_sizes, all_num_layers, all_batch_sizes):
         gen_configurations(hidden_dims, cluster_sizes, all_num_layers, all_batch_sizes)
     )
 
+    for config in configs:
+        print(config)
+
     results = process_map(run_experiment, configs)
 
     with open("mlp_grid_search_results.csv", "w", newline="") as f:
         fieldnames = [
+            "model_size",
+            "world_size",
+            "batch_size",
             "dp_degree",
             "hp_degree",
             "pp_degree",
@@ -163,7 +163,7 @@ def grid_search(hidden_dims, cluster_sizes, all_num_layers, all_batch_sizes):
         ]
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
-        for config, latency, throughput, peak_memory in zip(configs, results):
+        for config, (latency, throughput, peak_memory) in zip(configs, results):
             (
                 batch_size,
                 input_dim,
@@ -175,6 +175,9 @@ def grid_search(hidden_dims, cluster_sizes, all_num_layers, all_batch_sizes):
             ) = config
             writer.writerow(
                 {
+                    "model_size": f"({input_dim}_{num_hidden_layers})",
+                    "world_size": dp_degree * hp_degree * pp_degree,
+                    "batch_size": batch_size,
                     "dp_degree": dp_degree,
                     "hp_degree": hp_degree,
                     "pp_degree": pp_degree,
@@ -191,5 +194,5 @@ if __name__ == "__main__":
         hidden_dims=[8192, 32768],
         cluster_sizes=[16, 64],
         all_num_layers=[64],
-        all_batch_sizes=[2048, 8192],
+        all_batch_sizes=[1024, 4096],
     )

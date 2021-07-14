@@ -160,7 +160,7 @@ class FunctionMaker:
         op_type,
         name=None,
         inputs: List[Value] = None,
-        attributes: Dict[str, Any] = None,
+        attributes: Dict[str, Any] = {},
         subfunctions: List["Function"] = None,
         output_names: List[str] = None,
     ) -> Union[None, Value, Tuple[Value, ...]]:

@@ -183,9 +183,7 @@ def get_topology(world_size, device_throughput, dram_bandwidth, network_bandwidt
 def simulate(function, input_types, topology):
     simulator = Simulator(CostModel(topology))
     simulation = simulator.interpret(function, input_types)
-    latency = max([simulation.timestamps[d] for d in simulation.timestamps])
-    peak_memory = max([simulation.peak_memory[d] for d in simulation.peak_memory])
-    return latency, peak_memory
+    return simulation
 
 
 def main(args):
@@ -234,10 +232,14 @@ def main(args):
         transformed_function = function
         input_types = tuple(inp.type for inp in function.inputs)
 
-    latency, peak_memory = simulate(transformed_function, input_types, topology)
+    simulation = simulate(transformed_function, input_types, topology)
+    latency = max([simulation.timestamps[d] for d in simulation.timestamps])
+    peak_memory = max([simulation.peak_memory[d] for d in simulation.peak_memory])
     print(f"Latency: {latency} seconds")
     print(f"Throughput: {args.batch_size / latency:.2f} samples / second")
     print(f"Peak memory: {peak_memory / 1e9:.2f} GB")
+    if args.trace_file is not None:
+        simulation.dump_chrome_trace(args.trace_file)
 
 
 if __name__ == "__main__":
@@ -276,5 +278,6 @@ if __name__ == "__main__":
         default="training",
         help="Execution mode",
     )
+    parser.add_argument("--trace_file", type=str, default=None, help="Trace file")
     args = parser.parse_args()
     main(args)

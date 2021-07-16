@@ -11,6 +11,12 @@ from .mlp import mlp
 
 DGX_BANDWIDTH_GBPS = 200
 
+MODEL_PARAMS = {
+    "mlp-small": (16, 8192),
+    "mlp-medium": (64, 16384),
+    "mlp-large": (128, 32768),
+}
+
 
 def add_devices_to_topology(topology, num_devices):
     for i in range(num_devices):
@@ -49,21 +55,19 @@ def get_all_degrees(n):
 
 def run_experiment(config):
     (
+        model_size,
         batch_size,
-        input_dim,
-        num_hidden_layers,
         dp_degree,
         hp_degree,
         pp_degree,
         num_microbatches,
     ) = config
+    num_hidden_layers, input_dim = MODEL_PARAMS[model_size]
     hidden_dim = input_dim
     output_dim = hidden_dim
     topology = Topology()
     d0 = topology.add_device("gpu")
-    function = mlp(
-        batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, d0
-    )
+    function = mlp(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, d0)
     function = infer_types(function, function.inputs)
     world_size = dp_degree * hp_degree * pp_degree
     add_devices_to_topology(topology, world_size)
@@ -108,11 +112,14 @@ def mlp_dist(
     return init_function, transformed_function
 
 
-def gen_configurations(hidden_dims, cluster_sizes, all_num_layers, all_batch_sizes):
-    for hidden_dim, num_hidden_layers, batch_size, cluster_size in product(
-        hidden_dims, all_num_layers, all_batch_sizes, cluster_sizes
-    ):
-        all_degrees = get_all_degrees(cluster_size)
+def gen_configurations(all_model_sizes, all_world_sizes, all_batch_sizes):
+    for (
+        model_size,
+        world_size,
+        batch_size,
+    ) in product(all_model_sizes, all_world_sizes, all_batch_sizes):
+        all_degrees = get_all_degrees(world_size)
+        num_hidden_layers, hidden_dim = MODEL_PARAMS[model_size]
         for (dp_degree, hp_degree, pp_degree) in all_degrees:
             if num_hidden_layers % pp_degree != 0:
                 continue
@@ -128,9 +135,8 @@ def gen_configurations(hidden_dims, cluster_sizes, all_num_layers, all_batch_siz
                 if pp_degree == 1:
                     num_microbatches == 1
                 yield (
+                    model_size,
                     batch_size,
-                    hidden_dim,
-                    num_hidden_layers,
                     dp_degree,
                     hp_degree,
                     pp_degree,
@@ -138,15 +144,12 @@ def gen_configurations(hidden_dims, cluster_sizes, all_num_layers, all_batch_siz
                 )
 
 
-def grid_search(hidden_dims, cluster_sizes, all_num_layers, all_batch_sizes):
+def grid_search(all_model_sizes, all_world_sizes, all_batch_sizes):
     configs = list(
-        gen_configurations(hidden_dims, cluster_sizes, all_num_layers, all_batch_sizes)
+        gen_configurations(all_model_sizes, all_world_sizes, all_batch_sizes)
     )
 
-    for config in configs:
-        print(config)
-
-    results = process_map(run_experiment, configs)
+    results = process_map(run_experiment, configs, chunksize=1)
 
     with open("mlp_grid_search_results.csv", "w", newline="") as f:
         fieldnames = [
@@ -165,9 +168,8 @@ def grid_search(hidden_dims, cluster_sizes, all_num_layers, all_batch_sizes):
         writer.writeheader()
         for config, (latency, throughput, peak_memory) in zip(configs, results):
             (
+                model_size,
                 batch_size,
-                input_dim,
-                num_hidden_layers,
                 dp_degree,
                 hp_degree,
                 pp_degree,
@@ -175,7 +177,7 @@ def grid_search(hidden_dims, cluster_sizes, all_num_layers, all_batch_sizes):
             ) = config
             writer.writerow(
                 {
-                    "model_size": f"({input_dim}_{num_hidden_layers})",
+                    "model_size": model_size,
                     "world_size": dp_degree * hp_degree * pp_degree,
                     "batch_size": batch_size,
                     "dp_degree": dp_degree,
@@ -191,8 +193,7 @@ def grid_search(hidden_dims, cluster_sizes, all_num_layers, all_batch_sizes):
 
 if __name__ == "__main__":
     grid_search(
-        hidden_dims=[8192, 32768],
-        cluster_sizes=[16, 64],
-        all_num_layers=[64],
-        all_batch_sizes=[1024, 4096],
+        all_model_sizes=["mlp-small", "mlp-medium", "mlp-large"],
+        all_world_sizes=[1],
+        all_batch_sizes=[512, 1024, 2048, 4096, 8192],
     )

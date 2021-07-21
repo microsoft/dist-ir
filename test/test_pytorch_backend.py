@@ -15,6 +15,7 @@ from dist_ir.ir.topology import Topology
 
 # TODO make examples submodule of dist_ir?
 from examples.mlp_grid_search import (
+    MODEL_PARAMS,
     add_devices_to_topology,
     gen_configurations,
     mlp_dist,
@@ -184,14 +185,14 @@ def test_mlp_grid_search():
     # batch_sizes = [2 ** i for i in range(10, 15)]
     # hidden_dims = [2 ** i for i in range(8, 13)]
     batch_sizes = [64]
-    hidden_dims = [64]
+    model_sizes = ["mlp-xs"]
     world_sizes = [1, 2, 4, 8]
-    all_num_layers = [32]
 
     results = []
-    for (batch_size, hidden_dim, num_layers, d, h, p, m) in gen_configurations(
-        hidden_dims, world_sizes, all_num_layers, batch_sizes
+    for (model_size, batch_size, d, h, p, m) in gen_configurations(
+        model_sizes, world_sizes, batch_sizes
     ):
+        num_layers, hidden_dim = MODEL_PARAMS[model_size]
         world_size = d * h * p
         # TODO reuse seq_mlp
         topology = Topology()

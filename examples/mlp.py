@@ -1,5 +1,7 @@
 import argparse
+from collections import defaultdict
 import numpy as np
+import re
 
 from dist_ir.ir import FunctionMaker, Topology
 from dist_ir.ir.type import Float32, Tensor
@@ -130,16 +132,66 @@ def mlp_inference_dp(
     return function.finalize()
 
 
-def add_optimizer(function):
+def add_optimizer_ops(function):
     function = function.to_function_maker()
-    weights = list(reversed(function.inputs[2:]))
-    gradients = [output for output in function.outputs if "dw" in output.name]
-    function.add_op(
-        op_type="SGDOptimizer",
-        inputs=(weights + gradients),
-        attributes={"lr": 1e-3},
-        output_names=[f"{w.name}'" for w in weights],
-    )
+    hp_group_pattern = "hp\_(.+?(?=\_))"
+
+    all_hp_groups = []
+    for output in function.outputs:
+        if "dw" in output.name:
+            match = re.search(hp_group_pattern, output.name)
+            if match is not None and match.group(1) != "all":
+                hp_group = tuple([int(x) for x in match.group(1).split(",")])
+                all_hp_groups.append(hp_group)
+    if len(all_hp_groups) > 1:
+        all_hp_groups = sorted(set(all_hp_groups), key=lambda x: x[0])
+
+    weight_map = defaultdict(lambda: {})
+    for inp in function.inputs:
+        if inp.name[0] != "w":
+            continue
+        w = inp
+        name = w.name.split("_")[0]
+        match = re.search("dp_(\d+)", w.name)
+        dp = int(match.group(1)) if match is not None else 0
+        match = re.search("hp_(\d+)", w.name)
+        hp = int(match.group(1)) if match is not None else 0
+        weight_map[(dp, hp)][name] = w
+
+    gradient_map = defaultdict(lambda: {})
+    for output in function.outputs:
+        if "dw" not in output.name:
+            continue
+        dw = output
+        name = dw.name.split("_")[0][1:]
+        dp = 0 if "dp_all" not in dw.name else int(dw.name.split("_")[-1])
+        match = re.search(hp_group_pattern, dw.name)
+        if match is not None and match.group(1) != "all":
+            hp_group = tuple([int(x) for x in match.group(1).split(",")])
+            hp = all_hp_groups.index(hp_group)
+        else:
+            hp = 0
+        gradient_map[(dp, hp)][name] = dw
+
+    if sorted(weight_map.keys()) != sorted(gradient_map.keys()):
+        import pdb
+        pdb.set_trace()
+        raise ValueError(f"Devices do not match for weights and gradients") 
+
+    for device in weight_map:
+        weight_keys = sorted(weight_map[device].keys())
+        gradient_keys = sorted(gradient_map[device].keys())
+        assert weight_keys == gradient_keys
+        weights = [weight_map[device][k] for k in weight_keys]
+        gradients = [gradient_map[device][k] for k in gradient_keys]
+
+        function.add_op(
+            op_type="SGDOptimizer",
+            inputs=(weights + gradients),
+            attributes={"lr": 1e-3},
+            output_names=[f"{w.name}'" for w in weights],
+        )
+
     return function.finalize()
 
 
@@ -174,7 +226,9 @@ def get_stats(function):
 
 
 # TODO: De-duplicate this function with examples/gpt2.py
-def get_topology(world_size, device_throughput, dram_bandwidth, network_bandwidth):
+def get_topology(
+    world_size, device_throughput=1.4e13, dram_bandwidth=9e11, network_bandwidth=64
+):
     topology = Topology()
     d0 = topology.add_device("gpu")
     for i in range(1, world_size + 1):
@@ -244,7 +298,7 @@ def main(args):
     else:
         transformed_function = function
         input_types = tuple(inp.type for inp in function.inputs)
-    transformed_function = add_optimizer(transformed_function)
+    transformed_function = add_optimizer_ops(transformed_function)
     simulation = simulate(transformed_function, input_types, topology)
     latency = max([simulation.timestamps[d] for d in simulation.timestamps])
     peak_memory = max([simulation.peak_memory[d] for d in simulation.peak_memory])

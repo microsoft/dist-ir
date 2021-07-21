@@ -12,7 +12,7 @@ from .mlp import mlp
 DGX_BANDWIDTH_GBPS = 200
 
 MODEL_PARAMS = {
-    "mlp-xs": (8, 512), 
+    "mlp-xs": (8, 512),
     "mlp-small": (16, 8192),
     "mlp-medium": (64, 16384),
     "mlp-large": (128, 32768),

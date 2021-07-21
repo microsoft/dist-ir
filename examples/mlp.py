@@ -175,8 +175,9 @@ def add_optimizer_ops(function):
 
     if sorted(weight_map.keys()) != sorted(gradient_map.keys()):
         import pdb
+
         pdb.set_trace()
-        raise ValueError(f"Devices do not match for weights and gradients") 
+        raise ValueError(f"Devices do not match for weights and gradients")
 
     for device in weight_map:
         weight_keys = sorted(weight_map[device].keys())

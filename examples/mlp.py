@@ -130,6 +130,19 @@ def mlp_inference_dp(
     return function.finalize()
 
 
+def add_optimizer(function):
+    function = function.to_function_maker()
+    weights = list(reversed(function.inputs[2:]))
+    gradients = [output for output in function.outputs if "dw" in output.name]
+    function.add_op(
+        op_type="SGDOptimizer",
+        inputs=(weights + gradients),
+        attributes={"lr": 1e-3},
+        output_names=[f"{w.name}'" for w in weights],
+    )
+    return function.finalize()
+
+
 # TODO: De-duplicate this function with examples/gpt2.py
 def get_stats(function):
     parameter_count = 0
@@ -231,7 +244,7 @@ def main(args):
     else:
         transformed_function = function
         input_types = tuple(inp.type for inp in function.inputs)
-
+    transformed_function = add_optimizer(transformed_function)
     simulation = simulate(transformed_function, input_types, topology)
     latency = max([simulation.timestamps[d] for d in simulation.timestamps])
     peak_memory = max([simulation.peak_memory[d] for d in simulation.peak_memory])
@@ -249,7 +262,7 @@ if __name__ == "__main__":
     parser.add_argument("--hidden_dim", type=int, default=256, help="Hidden dim")
     parser.add_argument("--output_dim", type=int, default=256, help="Output dim")
     parser.add_argument(
-        "--num_hidden_layers", type=int, default=12, help="# hidden layers"
+        "--num_hidden_layers", type=int, default=16, help="# hidden layers"
     )
     parser.add_argument(
         "-d", "--dp_degree", type=int, default=1, help="Data parallel degree"

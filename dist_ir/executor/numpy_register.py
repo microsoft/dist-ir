@@ -363,6 +363,16 @@ def select(op, xs):
     return xs[index]
 
 
+def sgd(op, *xs):
+    weights = xs[: (len(xs) // 2)]
+    gradients = xs[(len(xs) // 2) :]
+    lr = op.attributes["lr"]
+    updated_weights = []
+    for w, dw in zip(weights, gradients):
+        updated_weights.append(w - lr * dw)
+    return tuple(updated_weights)
+
+
 def shape(op, x):
     return np.array(x.shape, dtype=np.int64)
 
@@ -792,6 +802,9 @@ NumPyRegister = {
     ("Select", (np.ndarray,)): select,
     ("Send", (np.int64,)): identity,
     ("Send", (np.ndarray,)): identity,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(32))): sgd,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(128))): sgd,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(256))): sgd,
     ("Shape", (np.ndarray,)): shape,
     ("Slice", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): slice_conc,
     ("Slice", (np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.int64)): slice_conc,

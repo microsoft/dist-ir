@@ -465,6 +465,20 @@ def _send_prop_fn(op, x):
     return Tensor(dtype=x.dtype, shape=x.shape, device=device)
 
 
+def _sgd_prop_fn(op, *xs):
+    weights = xs[: (len(xs) // 2)]
+    gradients = xs[(len(xs) // 2) :]
+    for (w, dw) in zip(weights, gradients):
+        if not (
+            isinstance(w, Tensor)
+            and isinstance(dw, Tensor)
+            and w.shape == dw.shape
+            and w.device == dw.device
+        ):
+            _raise_type_error(op, weights, gradients)
+    return weights
+
+
 def _split_prop_fn(op, x):
     axis = op.attributes["axis"]
     split = op.attributes["split"]
@@ -680,6 +694,9 @@ TypePropRegister = {
     ("ReluGrad", (Tensor, Tensor)): _relu_grad_prop_fn,
     ("Select", (TupleType,)): _select_prop_fn,
     ("Send", (Tensor,)): _send_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(32)))): _sgd_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(128)))): _sgd_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(256)))): _sgd_prop_fn,
     ("SplitUniform", (Tensor,)): _split_uniform_prop_fn,
     ("SplitUniformToTupleType", (Tensor,)): _split_uniform_prop_fn,
     ("Split", (Tensor,)): _split_prop_fn,

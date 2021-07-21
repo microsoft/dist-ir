@@ -126,15 +126,18 @@ class CostModel:
             ("Select", (TupleType,)): self._select_cost_fn,
             ("Send", (Tensor,)): self._send_cost_fn,
             ("Send", (type(Int64()),)): lambda op, x: {},
-            ("Split", (Tensor,)): self._split_cost_fn,
-            ("SplitUniform", (Tensor,)): self._split_cost_fn,
-            ("SplitUniformToTupleType", (Tensor,)): self._split_cost_fn,
+            ("SGDOptimizer", tuple(Tensor for i in range(32))): self._sgd_cost_fn,
+            ("SGDOptimizer", tuple(Tensor for i in range(128))): self._sgd_cost_fn,
+            ("SGDOptimizer", tuple(Tensor for i in range(256))): self._sgd_cost_fn,
             ("Shape", (Tensor,)): self._shape_cost_fn,
             ("Slice", (Tensor, Tensor, Tensor, Tensor)): self._slice_cost_fn,
             (
                 "Slice",
                 (Tensor, Tensor, Tensor, Tensor, type(Int64())),
             ): self._slice_cost_fn,
+            ("Split", (Tensor,)): self._split_cost_fn,
+            ("SplitUniform", (Tensor,)): self._split_cost_fn,
+            ("SplitUniformToTupleType", (Tensor,)): self._split_cost_fn,
             ("Softmax", (Tensor,)): self._softmax_cost_fn,
             ("Sqrt", (Tensor,)): self._elementwise_cost_fn,
             ("Squeeze", (Tensor,)): self._squeeze_cost_fn,
@@ -303,6 +306,14 @@ class CostModel:
         costs[input_device] = transfer_time
         costs[output_device] = transfer_time
 
+        return costs
+
+    def _sgd_cost_fn(self, op, *xs):
+        weights = xs[: (len(xs) // 2)]
+        gradients = xs[(len(xs) // 2) :]
+        costs = {}
+        for w, dw in zip(weights, gradients):
+            costs.update(self._elementwise_cost_fn(op, w, dw))
         return costs
 
     def _shape_cost_fn(self, op, x):

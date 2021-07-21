@@ -73,7 +73,7 @@ OpRegister = {
     # TODO call the combined one SendRecv?
     "Send": OpRegisterEntry(num_inputs=1, num_outputs=1),
     "SendP2P": OpRegisterEntry(num_inputs=1, num_outputs=0),
-    "SGDOptimizer": OpRegisterEntry(num_inputs=3, num_outputs=2),
+    "SGDOptimizer": OpRegisterEntry(variadic_inputs=True, variadic_outputs=True),
     "Shape": OpRegisterEntry(num_inputs=1, num_outputs=1),
     # TODO allow optional inputs for things like slice
     # "Slice": OpRegisterEntry(num_inputs=4, num_outputs=1),

@@ -21,10 +21,16 @@ def mlp(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, device
     )
     weights = []
     for i in range(num_hidden_layers - 1):
-        w = function.add_input_value(
-            f"w{chr(ord('A')+i)}",
-            Tensor(dtype=Float32(), shape=(input_dim, hidden_dim), device=device),
-        )
+        if i == 0:
+            w = function.add_input_value(
+                f"w{chr(ord('A')+i)}",
+                Tensor(dtype=Float32(), shape=(input_dim, hidden_dim), device=device),
+            )
+        else:
+            w = function.add_input_value(
+                f"w{chr(ord('A')+i)}",
+                Tensor(dtype=Float32(), shape=(hidden_dim, hidden_dim), device=device),
+            )
         weights.append(w)
     w = function.add_input_value(
         f"w{chr(ord('A')+i+1)}",

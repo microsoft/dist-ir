@@ -448,6 +448,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
     else:
         # Time a bunch of executions, use last run's output values
         for _ in range(num_warmup_steps + num_repetitions):
+            torch.cuda.empty_cache()
             outputs = run_function(ctx, fn, inputs)
             if ctx.world_size > 1:
                 torch.distributed.barrier()

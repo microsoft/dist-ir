@@ -1,3 +1,4 @@
+import argparse
 import csv
 import itertools
 import numpy as np
@@ -24,7 +25,7 @@ def get_inputs(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers)
     return x, z, weights
 
 
-def mlp_dist_ir(
+def mlp_dist_ir_simulation(
     batch_size,
     input_dim,
     hidden_dim,
@@ -62,8 +63,41 @@ def mlp_dist_ir(
     simulation = simulator.interpret(fn, input_types)
     simulated_time = max([simulation.timestamps[d] for d in simulation.timestamps])
     peak_memory = max([simulation.peak_memory[d] for d in simulation.peak_memory])
-    if peak_memory / (1024 ** 3) > max_memory_gb:
-        return -1, -1
+    return simulated_time, peak_memory
+
+
+def mlp_dist_ir_pytorch_backend(
+    batch_size,
+    input_dim,
+    hidden_dim,
+    output_dim,
+    num_hidden_layers,
+    x,
+    z,
+    weights,
+    active_steps=100,
+    warmup_steps=5,
+):
+    topology = mlp.get_topology(1)
+    fn = mlp.mlp(
+        batch_size,
+        input_dim,
+        hidden_dim,
+        output_dim,
+        num_hidden_layers,
+        device=topology.devices[0],
+    )
+    init_fn, fn = mlp_dhp_transform(
+        fn,
+        1,
+        1,
+        1,
+        1,
+        topology.devices,
+    )
+    init_fn = infer_types(init_fn, init_fn.inputs)
+    fn = infer_types(fn, init_fn.outputs)
+    assert len(fn.inputs) == len(weights) + 2
     seq_executor = SequentialExecutor("numpy")
     input_data = [x, z] + weights
     dist_input_data = seq_executor.compute(init_fn, input_data)
@@ -85,10 +119,10 @@ def mlp_dist_ir(
         per_rank_outputs[0][i] for i, v in enumerate(fn.outputs) if "dw" in v.name
     ]
 
-    return gradients, simulated_time, actual_time
+    return gradients, actual_time
 
 
-def mlp_pytorch(x, z, weights, warmup_steps=5, active_steps=100):
+def mlp_pure_pytorch(x, z, weights, warmup_steps=5, active_steps=100):
     batch_size = x.shape[0]
     x = torch.from_numpy(x).cuda()
     z = torch.from_numpy(z).cuda()
@@ -125,18 +159,24 @@ def mlp_pytorch(x, z, weights, warmup_steps=5, active_steps=100):
 
 
 def benchmark(
-    batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, check_output=True
+    batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, max_memory=10
 ):
     x, z, weights = get_inputs(
         batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers
     )
-    dist_ir_gradients, simulated_time, pytorch_backend_time = mlp_dist_ir(
+    simulated_time, peak_memory = mlp_dist_ir_simulation(
         batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, x, z, weights
     )
-    if simulated_time == -1 or pytorch_backend_time == -1:
+    if peak_memory / (1024 ** 3) > max_memory:
         return -1, -1, -1
+
+    dist_ir_gradients, pytorch_backend_time = mlp_dist_ir_pytorch_backend(
+        batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, x, z, weights
+    )
+
     torch.cuda.empty_cache()
-    pytorch_gradients, pure_pytorch_time = mlp_pytorch(x, z, weights)
+
+    pytorch_gradients, pure_pytorch_time = mlp_pure_pytorch(x, z, weights)
 
     for x, y in zip(pytorch_gradients, dist_ir_gradients):
         np.testing.assert_array_almost_equal(
@@ -146,7 +186,7 @@ def benchmark(
     return simulated_time, pytorch_backend_time, pure_pytorch_time
 
 
-def main():
+def grid_search():
     all_batch_sizes = [16, 32, 64, 128, 256, 512, 1024, 2048]
     all_dims = [16, 32, 64, 128, 256, 512, 1024, 2048]
     all_num_hidden_layers = [4, 8, 16]
@@ -187,5 +227,50 @@ def main():
             torch.cuda.empty_cache()
 
 
+def main(args):
+    if args.mode == "grid_search":
+        grid_search()
+    elif args.mode == "simulation":
+        x, z, weights = get_inputs(
+            args.batch_size, args.dim, args.dim, args.dim, args.layers
+        )
+        simulated_time, peak_memory = mlp_dist_ir_simulation(
+            args.batch_size,
+            args.dim,
+            args.dim,
+            args.dim,
+            args.layers,
+            x,
+            z,
+            weights,
+        )
+        print(f"Simulated latency: {simulated_time * 1000:.2f} ms")
+        print(f"Simulated peak memory: {peak_memory / (1024 ** 3):.2f} GB")
+    elif args.mode == "backend":
+        x, z, weights = get_inputs(
+            args.batch_size, args.dim, args.dim, args.dim, args.layers
+        )
+        _, pytorch_backend_time = mlp_dist_ir_pytorch_backend(
+            args.batch_size, args.dim, args.dim, args.dim, args.layers, x, z, weights
+        )
+        print(f"PyTorch backend latency: {pytorch_backend_time * 1000:.2f} ms")
+    elif args.mode == "pytorch":
+        x, z, weights = get_inputs(
+            args.batch_size, args.dim, args.dim, args.dim, args.layers
+        )
+        _, pure_pytorch_time = mlp_pure_pytorch(x, z, weights)
+        print(f"Pure PyTorch latency: {pure_pytorch_time * 1000:.2f} ms")
+
+
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="MLP benchmark")
+    parser.add_argument(
+        "--mode",
+        choices=["grid_search", "pytorch", "simulation", "backend"],
+        default="simulation",
+    )
+    parser.add_argument("--batch_size", type=int, default=128, help="Batch size")
+    parser.add_argument("--dim", type=int, default=256, help="Weight dim")
+    parser.add_argument("--layers", type=int, default=16, help="# layers")
+    args = parser.parse_args()
+    main(args)

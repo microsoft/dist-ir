@@ -1,7 +1,7 @@
 from collections import OrderedDict
 
 from dist_ir.ir import Device, FunctionMaker
-from dist_ir.ir.type import Float, Tensor
+from dist_ir.ir.type import Float32, Tensor
 
 
 def construct_function_and_partition_map():
@@ -11,13 +11,17 @@ def construct_function_and_partition_map():
     d1 = Device(1, "gpu")
     batch_size = 16
     x = function.add_input_value(
-        "x", Tensor(dtype=Float(), shape=(batch_size, 4), device=d0)
+        "x", Tensor(dtype=Float32(), shape=(batch_size, 4), device=d0)
     )
     z = function.add_input_value(
-        "z", Tensor(dtype=Float(), shape=(batch_size, 1), device=d0)
+        "z", Tensor(dtype=Float32(), shape=(batch_size, 1), device=d0)
     )
-    wA = function.add_input_value("wA", Tensor(dtype=Float(), shape=(4, 2), device=d0))
-    wB = function.add_input_value("wB", Tensor(dtype=Float(), shape=(2, 1), device=d0))
+    wA = function.add_input_value(
+        "wA", Tensor(dtype=Float32(), shape=(4, 2), device=d0)
+    )
+    wB = function.add_input_value(
+        "wB", Tensor(dtype=Float32(), shape=(2, 1), device=d0)
+    )
     a = function.add_op("MatMul", "MatMul0", inputs=[x, wA], output_names=["a"])
     y = function.add_op("MatMul", "MatMul1", inputs=[a, wB], output_names=["y"])
     l = function.add_op(

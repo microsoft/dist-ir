@@ -1,5 +1,5 @@
 from dist_ir.transforms import FIFOScheduler, PipeDreamScheduler
-import pipeline_parallel_utils as utils
+from . import pipeline_parallel_utils as utils
 
 
 def test_fifo_scheduler():

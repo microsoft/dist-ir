@@ -2,14 +2,14 @@ import pytest
 
 from dist_ir.ir import cpprint, Device, Function, FunctionMaker, Op, Value
 from dist_ir.executor.type_inference import infer_types
-from dist_ir.ir.type import Float, Tensor, TupleType
+from dist_ir.ir.type import Float32, Tensor, TupleType
 
 
 def test_add_valid():
     function = FunctionMaker()
 
-    a = function.add_input_value("a", Tensor(Float(), (4, 4)))
-    b = function.add_input_value("b", Tensor(Float(), (4, 4)))
+    a = function.add_input_value("a", Tensor(Float32(), (4, 4)))
+    b = function.add_input_value("b", Tensor(Float32(), (4, 4)))
     x = function.add_op("Add", "Add0", inputs=[a, b], output_names=["x"])
     function = function.finalize()
     typed_function = infer_types(function, [a, b])
@@ -19,8 +19,8 @@ def test_add_valid():
 def test_add_invalid():
     function = FunctionMaker()
 
-    a = function.add_input_value("a", Tensor(Float(), (8, 4)))
-    b = function.add_input_value("b", Tensor(Float(), (4, 2)))
+    a = function.add_input_value("a", Tensor(Float32(), (8, 4)))
+    b = function.add_input_value("b", Tensor(Float32(), (4, 2)))
     x = function.add_op("Add", "Add0", inputs=[a, b], output_names=["x"])
     function = function.finalize()
     with pytest.raises(ValueError):
@@ -34,7 +34,7 @@ def test_allreduce():
     xis = Value(
         "xis",
         TupleType(
-            (Tensor(Float(), (4, 4), device=d0), Tensor(Float(), (4, 4), device=d1))
+            (Tensor(Float32(), (4, 4), device=d0), Tensor(Float32(), (4, 4), device=d1))
         ),
     )
     op1 = Op(
@@ -59,7 +59,7 @@ def test_broadcast():
     d0 = Device(0, "gpu")
     d1 = Device(1, "gpu")
 
-    x = function.add_input_value("x", Tensor(Float(), (4, 4)))
+    x = function.add_input_value("x", Tensor(Float32(), (4, 4)))
     xs = function.add_op(
         "MPIBroadcastToTupleType",
         "MPIBroadcast/x",
@@ -81,8 +81,8 @@ def test_broadcast():
 def test_matmul_valid():
     function = FunctionMaker()
 
-    a = function.add_input_value("a", Tensor(Float(), (8, 4)))
-    b = function.add_input_value("b", Tensor(Float(), (4, 2)))
+    a = function.add_input_value("a", Tensor(Float32(), (8, 4)))
+    b = function.add_input_value("b", Tensor(Float32(), (4, 2)))
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
     function = function.finalize()
     function = infer_types(function, [a, b])
@@ -92,8 +92,8 @@ def test_matmul_valid():
 def test_matmul_invalid():
     function = FunctionMaker()
 
-    a = function.add_input_value("a", Tensor(Float(), (8, 8)))
-    b = function.add_input_value("b", Tensor(Float(), (4, 2)))
+    a = function.add_input_value("a", Tensor(Float32(), (8, 8)))
+    b = function.add_input_value("b", Tensor(Float32(), (4, 2)))
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b], output_names=["x"])
     function = function.finalize()
     with pytest.raises(ValueError):
@@ -103,9 +103,9 @@ def test_matmul_invalid():
 def test_matmul_grad():
     function = FunctionMaker()
 
-    x = function.add_input_value("x", Tensor(Float(), (8, 4)))
-    w = function.add_input_value("w", Tensor(Float(), (4, 2)))
-    l = function.add_input_value("l", Tensor(Float(), (8,)))
+    x = function.add_input_value("x", Tensor(Float32(), (8, 4)))
+    w = function.add_input_value("w", Tensor(Float32(), (4, 2)))
+    l = function.add_input_value("l", Tensor(Float32(), (8,)))
     dx, dw = function.add_op(
         "MatMulGrad", "MatMulGrad0", inputs=[x, w, l], output_names=["dx", "dw"]
     )
@@ -125,19 +125,19 @@ def test_pmap():
     xs = function.add_input_value(
         "xs",
         TupleType(
-            (Tensor(Float(), (8, 4), device=d0), Tensor(Float(), (8, 4), device=d1))
+            (Tensor(Float32(), (8, 4), device=d0), Tensor(Float32(), (8, 4), device=d1))
         ),
     )
     wAs = function.add_input_value(
         "wAs",
         TupleType(
-            (Tensor(Float(), (4, 2), device=d0), Tensor(Float(), (4, 2), device=d1))
+            (Tensor(Float32(), (4, 2), device=d0), Tensor(Float32(), (4, 2), device=d1))
         ),
     )
     wBs = function.add_input_value(
         "wBs",
         TupleType(
-            (Tensor(Float(), (2, 1), device=d0), Tensor(Float(), (2, 1), device=d1))
+            (Tensor(Float32(), (2, 1), device=d0), Tensor(Float32(), (2, 1), device=d1))
         ),
     )
 
@@ -182,12 +182,12 @@ def test_scatter():
     d0 = Device(0, "gpu")
     d1 = Device(1, "gpu")
 
-    x = function.add_input_value("x", Tensor(Float(), (4, 4)))
+    x = function.add_input_value("x", Tensor(Float32(), (4, 4)))
     xs = function.add_op(
         "MPIScatterToTupleType",
         "MPIScatter/x",
         inputs=[x],
-        attributes={"dim": 0, "devices": [d0, d1]},
+        attributes={"axis": 0, "devices": [d0, d1]},
         output_names=["xs"],
     )
     function = function.finalize()

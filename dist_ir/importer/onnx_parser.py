@@ -1,23 +1,27 @@
+from collections import defaultdict, OrderedDict
 from functools import reduce
-from operator import add, mul
+import logging
 import numpy as np
 import onnx
+from onnx import numpy_helper
 
 from ..ir import FunctionMaker, Value
-from ..ir.type import Bool, Float, Int32, Int64, Tensor
+from ..ir.type import Bool, Float16, Float32, Int32, Int64, Tensor
 
 
 def _get_dist_ir_dtype_from_onnx_dtype(onnx_dtype):
     if onnx_dtype == 0:
         raise ValueError("Undefined onnx_dtype")
     elif onnx_dtype == 1:
-        return Float()
+        return Float32()
     elif onnx_dtype == 6:
         return Int32()
     elif onnx_dtype == 7:
         return Int64()
     elif onnx_dtype == 9:
         return Bool()
+    elif onnx_dtype == 10:
+        return Float16()
     else:
         raise NotImplementedError(f"onnx_dtype {onnx_dtype}")
 
@@ -52,7 +56,8 @@ def _parse_attribute(attr):
     elif attr_type == 3:
         value = str(attr.s)
     elif attr_type == 4:
-        raise NotImplementedError("Tensor attribute")
+        numpy_dtype = _get_numpy_dtype_from_onnx_dtype(attr.t.data_type)
+        value = np.frombuffer(attr.t.raw_data, dtype=numpy_dtype)
     elif attr_type == 5:
         raise NotImplementedError("Graph attribute")
     elif attr_type == 11:
@@ -80,24 +85,7 @@ def _parse_attribute(attr):
 
 
 def _parse_tensor_proto(tensor_proto):
-    numpy_dtype = _get_numpy_dtype_from_onnx_dtype(tensor_proto.data_type)
-    if len(tensor_proto.float_data) > 0:
-        assert numpy_dtype == np.float32
-        data = np.array(tensor_proto.float_data, dtype=numpy_dtype)
-    elif len(tensor_proto.int32_data) > 0:
-        assert numpy_dtype == np.int32
-        data = np.array(tensor_proto.int32_data, dtype=numpy_dtype)
-    elif len(tensor_proto.int64_data) > 0:
-        assert numpy_dtype == np.int64
-        data = np.array(tensor_proto.int64_data, dtype=numpy_dtype)
-    else:
-        assert len(tensor_proto.raw_data) > 0
-        data = np.frombuffer(tensor_proto.raw_data, dtype=numpy_dtype)
-    if len(tensor_proto.dims) > 0:
-        assert reduce(mul, tensor_proto.dims) == len(data)
-    else:
-        assert len(data) == 1
-    data = np.reshape(data, tensor_proto.dims)
+    data = numpy_helper.to_array(tensor_proto)
     return data
 
 
@@ -108,19 +96,23 @@ def parse_tensor_from_file(path):
     return _parse_tensor_proto(tensor_proto)
 
 
-def import_from_onnx(onnx_model, default_device=None, parse_input_data=True):
-    # TODO: Remove prints?
-    # TODO: Support types beyond Tensor
+def import_from_onnx(
+    onnx_model,
+    name="foo",
+    default_device=None,
+    function_output_names=None,
+    parse_input_data=True,
+):
     onnx_model = onnx.load(onnx_model)
-    dist_ir_function = FunctionMaker("foo")  # TODO get name?
+    dist_ir_function = FunctionMaker(name)
 
     inputs = {}
-    input_data = {}
+    input_data = OrderedDict()
     output_src = {}
 
     def add_input(value):
         if value.name in inputs:
-            print(f"Skipping adding {value.name}; already an input value")
+            logging.warning(f"Skipping adding {value.name}; already an input value")
             return
         assert "ValueInfoProto" in str(type(value))
         assert hasattr(value, "type")
@@ -132,7 +124,7 @@ def import_from_onnx(onnx_model, default_device=None, parse_input_data=True):
 
     def add_tensor(value):
         if value.name in inputs:
-            print(f"Skipping adding {value.name}; already an input value")
+            logging.warning(f"Skipping adding {value.name}; already an input value")
             return
         assert "TensorProto" in str(type(value))
         dist_ir_dtype = _get_dist_ir_dtype_from_onnx_dtype(value.data_type)
@@ -145,32 +137,38 @@ def import_from_onnx(onnx_model, default_device=None, parse_input_data=True):
             input_data[v] = _parse_tensor_proto(value)
 
     for value in onnx_model.graph.input:
-        print(f"Adding input {value.name} from graph.input")
+        logging.debug(f"Adding input {value.name} from graph.input")
         add_input(value)
-    print()
 
     for value in onnx_model.graph.initializer:
-        print(f"Adding input {value.name} from graph.initializer")
+        logging.debug(f"Adding input {value.name} from graph.initializer")
         add_tensor(value)
-    print()
 
-    for node in onnx_model.graph.node:
+    nodes = list(onnx_model.graph.node)
+    type_count = defaultdict(lambda: 0)
+    for node in nodes:
+        if node.name == "":
+            node.name = f"{node.op_type}_{type_count[node.op_type]}"
+        type_count[node.op_type] += 1
+    for node in nodes:
         per_node_inputs = []
-        print(f"Getting inputs for node {node.name} ({node.op_type})...")
+        logging.debug(f"Getting inputs for node {node.name} ({node.op_type})...")
         for value in node.input:
             if value == "":
                 assert "Optimizer" in node.name
                 continue
             if value in inputs:
-                print(f"Found input {value} in inputs")
+                logging.debug(f"Found input {value} in inputs")
                 per_node_inputs.append(inputs[value])
             elif value in output_src:
-                print(f"Found input {value} in output_src")
+                logging.debug(f"Found input {value} in output_src")
                 per_node_inputs.append(output_src[value])
             else:
                 raise ValueError(f"Could not find input {value}!")
         output_names = [v for v in node.output if v != ""]
         attributes = {k: v for k, v in [_parse_attribute(a) for a in node.attribute]}
+        if node.op_type == "Constant":
+            attributes["device"] = default_device
         outputs = dist_ir_function.add_op(
             op_type=node.op_type,
             name=node.name,
@@ -191,7 +189,14 @@ def import_from_onnx(onnx_model, default_device=None, parse_input_data=True):
             assert out_name == value.name
             assert out_name not in output_src
             output_src[out_name] = value
-            print(f"Found output {out_name}")
-        print()
+            logging.debug(f"Found output {out_name}")
+
+    if function_output_names is not None:
+        dist_ir_function.set_outputs_auto()
+        function_output_values = []
+        for output in dist_ir_function.outputs:
+            if output.name in function_output_names:
+                function_output_values.append(output)
+        dist_ir_function.set_outputs(function_output_values)
 
     return dist_ir_function.finalize(), input_data

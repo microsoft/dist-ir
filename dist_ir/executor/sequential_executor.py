@@ -1,8 +1,11 @@
-from typing import Any, Dict, List, Sequence
+import numpy as np
+from typing import Any, Dict, List, Sequence, Tuple
 
 from .absint import AbstractInterpreter, convert_impls_to_semantics
+from .type_inference import _type_function
 from .backend_register import BackendRegister
-from ..ir import Function, Op, Value
+from ..ir import Device, Function, Op, Value
+from ..ir.type import Int32, Int64, Float32, Float64, Tensor
 
 
 class SequentialExecutor:
@@ -39,7 +42,7 @@ class SequentialExecutor:
             output_data = (output_data,)
         return output_data
 
-    def compute(self, function: Function, inputs: Sequence[Any]) -> Dict[Value, Any]:
+    def compute(self, function: Function, inputs: Sequence[Any]) -> Tuple[Any]:
         """Executes the function given the specified inputs and returns the final result.
 
         Args:
@@ -51,3 +54,85 @@ class SequentialExecutor:
         """
         state = self.interpreter.interpret(function, inputs)
         return tuple(state.env[v] for v in function.outputs)
+
+    # TODO: Remove once we have sequential execution with mixed types
+    def infer_types(
+        self, function: Function, inputs: Sequence[Any], input_devices: Sequence[Device]
+    ) -> Function:
+        """Given a function and a list of input values, returns a new function where
+        all values are typed.
+
+        inputs: a list/tuple of concrete values of the same length as function.inputs.
+        input_devices: a list/tuple of Devices for input values.
+        """
+
+        def _numpy_dtype_to_dist_ir_dtype(dtype):
+            if dtype == np.int32:
+                return Int32()
+            elif dtype == np.int64:
+                return Int64()
+            elif dtype == np.float32:
+                return Float32()
+            elif dtype == np.float64:
+                return Float64()
+            else:
+                raise NotImplementedError(f"Unrecognized NumPy dtype {dtype}")
+
+        # Run reference execution to get the output shapes.
+        state = self.interpreter.interpret(function, inputs)
+
+        # Propagate devices seperately from shapes.
+        device_map = {}
+        for inp, device in zip(function.inputs, input_devices):
+            device_map[inp] = device
+        for op in function.ops:
+            input_devices = [device_map[inp] for inp in op.inputs]
+            if op.op_type == "MPIBroadcast" or op.op_type == "MPIScatter":
+                output_devices = op.attributes["devices"]
+            elif (
+                op.op_type == "MPIGather"
+                or op.op_type == "MPIReduce"
+                or op.op_type == "Send"
+            ):
+                output_devices = [op.attributes["device"]]
+            elif op.op_type == "MPIAllreduce" or op.op_type == "MPIAllgather":
+                output_devices = input_devices
+            else:
+                input_device_set = set(d for d in input_devices if d is not None)
+                if len(input_device_set) > 1:
+                    raise ValueError(
+                        f"Op {op} has inputs from devices {set(input_devices)}!"
+                    )
+                elif len(input_device_set) == 1:
+                    input_device = list(input_device_set)[0]
+                    output_devices = [input_device for _ in range(len(op.outputs))]
+                else:
+                    output_devices = [None]
+            for output, device in zip(op.outputs, output_devices):
+                device_map[output] = device
+
+        # Construct a map from value to type using the reference execution state.
+        type_map = {}
+        for key, value in state.env.items():
+            if isinstance(value, np.int64):
+                type_map[key] = Int64(device=device_map[key])
+            elif isinstance(value, np.float32):
+                type_map[key] = Float32(device=device_map[key])
+            elif isinstance(value, np.float64):
+                type_map[key] = Float64(device=device_map[key])
+            elif isinstance(value, np.ndarray):
+                dtype = _numpy_dtype_to_dist_ir_dtype(value.dtype)
+                type_map[key] = Tensor(
+                    shape=value.shape, dtype=dtype, device=device_map[key]
+                )
+            elif isinstance(value, tuple):
+                dtype = _numpy_dtype_to_dist_ir_dtype(value[0].dtype)
+                type_map[key] = tuple(
+                    Tensor(shape=value[0].shape, dtype=dtype, device=device_map[key][i])
+                    for i in range(len(value))
+                )
+            else:
+                raise ValueError(f"Found value {value} of type {type(value)}!")
+
+        # Return a new function with the correct types.
+        return _type_function(function, type_map)

@@ -78,7 +78,7 @@ def shard_transform(
                         inputs=[v],
                         attributes={
                             "devices": devices,
-                            "dim": input_dims[input_value],
+                            "axis": input_dims[input_value],
                         },
                         output_names=[f"{v.name}s"],
                     )
@@ -134,13 +134,13 @@ def shard_transform(
                         output_names=[f"{output_value.name}s"],
                     )
                 elif reduction_op_type == "MPIGather":
-                    dim = reduction_params[output_value]["dim"]
+                    dim = reduction_params[output_value]["axis"]
                     device = reduction_params[output_value]["device"]
                     pmap_output = transformed_function.add_op(
                         "MPIGatherFromTupleType",
                         name=f"MPIGather/{output_value.name}",
                         inputs=[pmap_output_values[i]],
-                        attributes={"dim": dim, "device": device},
+                        attributes={"axis": dim, "device": device},
                         output_names=[f"{output_value.name}"],
                     )
                 else:

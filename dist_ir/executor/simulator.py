@@ -18,13 +18,21 @@ class SimulatorState(AbstractState):
     def __init__(self, function: Function, inputs: Sequence[Any]):
         AbstractState.__init__(self, function, inputs)
         self.timestamps = defaultdict(float)
-        self.peak_memory = defaultdict(float)
-        self.live_memory = defaultdict(float)
+        self.peak_memory = defaultdict(lambda: 0)
+        # Values are tuples of (device, memory_used)
+        self.live_memory = defaultdict(lambda: [(0, 0)])
         self.consumers = defaultdict(int)
         self.trace = []
         self._function_inputs_set = set(function.inputs)
 
+        for inp in function.inputs:
+            self.peak_memory[inp.type.device] += inp.type.size()
+        for device in self.peak_memory:
+            self.live_memory[device][0] = (0, self.peak_memory[device])
+
     def add_trace_event(self, op_type, device, start_time, duration):
+        if device is None:
+            raise ValueError(f"No device specified for {op_type} op trace event")
         self.trace.append(
             {
                 "name": op_type,
@@ -45,6 +53,16 @@ class SimulatorState(AbstractState):
 
         with open(fname, "w") as fout:
             json.dump(_trace, fout, indent=0)
+
+
+def _update_live_memory(state, deltas):
+    for device in deltas:
+        state.live_memory[device].append(
+            (
+                state.timestamps[device],
+                state.live_memory[device][-1][1] + deltas[device],
+            )
+        )
 
 
 def _simulate_op(
@@ -79,30 +97,38 @@ def _simulate_op(
         state.timestamps[device] += costs[device]
 
     # Update the live memory with any new activations.
+    live_memory_deltas = defaultdict(lambda: 0)
     for out_edge in op.outputs:
         state.consumers[out_edge] = len(state.function.consumers[out_edge])
         output_devices = out_edge.type.get_all_devices()
         for output_device in output_devices:
-            state.live_memory[output_device] += out_edge.type.size()
+            live_memory_deltas[output_device] += out_edge.type.size()
+    _update_live_memory(state, live_memory_deltas)
 
     # Update the peak memory.
     for device in state.live_memory:
         state.peak_memory[device] = max(
-            state.peak_memory[device], state.live_memory[device]
+            state.peak_memory[device], state.live_memory[device][-1][1]
         )
 
     # Update the live memory to reflect any freed activations.
-    function_inputs = set(state.function.inputs)
+    live_memory_deltas = defaultdict(lambda: 0)
     for in_edge in op.inputs:
         # We don't free live memory for function inputs as these could be for weights
         # or input data buffers that are active for the entire duration of execution.
-        if in_edge in function_inputs:
+        if in_edge in state._function_inputs_set:
             continue
+        if state.consumers[in_edge] <= 0:
+            raise RuntimeError(
+                f"Input {in_edge} for op {op} has "
+                f"{state.consumers[in_edge]} consumers"
+            )
         state.consumers[in_edge] -= 1
         if state.consumers[in_edge] == 0:
             input_devices = in_edge.type.get_all_devices()
             for input_device in input_devices:
-                state.live_memory[input_device] -= in_edge.type.size()
+                live_memory_deltas[input_device] -= in_edge.type.size()
+    _update_live_memory(state, live_memory_deltas)
 
 
 def _create_semantics(cost_functions, implementations):
@@ -180,4 +206,39 @@ def Simulator(cost_model):
             cost_model.cost_functions,
             {**NumPyRegister, **MixedImplementations, **TypePropRegister},
         ),
+    )
+
+
+# TODO: Remove once we have simulation with mixed types
+def _create_post_type_inference_semantics(cost_functions):
+    """Creates a semantics (dictionary mapping op signatures to abstract state
+    modifiers) given a dictionary of cost functions (input values -> costs) and
+    a dictionary of implementations (input values -> output values).
+    """
+
+    def convert_impl(cost_fn):
+        def semantics(op: Op, state: SimulatorState):
+            # Find the op's inputs in state's environment
+            inputs = tuple(state.env[v] for v in op.inputs)
+            outputs = tuple(x.type for x in op.outputs)
+
+            # Run the cost function
+            costs = cost_fn(op, *inputs)
+
+            for x in op.outputs:
+                state.env[x] = x.type
+
+            _simulate_op(state, op, costs, inputs, outputs)
+
+        return semantics
+
+    signatures = cost_functions.keys()
+
+    return {f: convert_impl(cost_functions[f]) for f in signatures}
+
+
+def PostTypeInferenceSimulator(cost_model):
+    return AbstractInterpreter(
+        SimulatorState,
+        _create_post_type_inference_semantics(cost_model.cost_functions),
     )

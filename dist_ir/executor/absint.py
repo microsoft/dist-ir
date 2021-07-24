@@ -79,7 +79,10 @@ class AbstractInterpreter:
         return state
 
     def interpret(
-        self, function: Function, inputs: Sequence[Any], state: AbstractState = None
+        self,
+        function: Function,
+        inputs: Sequence[Any],
+        state: AbstractState = None,
     ):
         """
         The result of the interpretation will be the final abstract state.

@@ -33,4 +33,5 @@ class PipeDreamScheduler(PipelineParallelScheduler):
             else:
                 next_stage_type = "bw"
         self._prev_stage_types[device] = next_stage_type
+        ready_stages_by_type[next_stage_type].sort(key=lambda x: x[1])
         return ready_stages_by_type[next_stage_type][0]

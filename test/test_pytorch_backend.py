@@ -10,11 +10,15 @@ from dist_ir.executor.cost_model import CostModel
 from dist_ir.executor.simulator import Simulator
 from dist_ir.executor.type_inference import infer_types
 from dist_ir.ir import Device, FunctionMaker, cpprint, Value
-from dist_ir.ir.type import Float, Tensor
+from dist_ir.ir.type import Float32, Tensor
 from dist_ir.ir.topology import Topology
 
 # TODO make examples submodule of dist_ir?
-from examples.grid_search import add_devices_to_topology, gen_configurations, mlp_dist
+from examples.mlp_grid_search import (
+    add_devices_to_topology,
+    gen_configurations,
+    mlp_dist,
+)
 from examples.mlp import mlp, mlp_inference_dp
 
 
@@ -48,7 +52,7 @@ def create_owt_model(num_devices, num_layers):
         "MPIAllgather",
         inputs=hs,
         output_names=as_names,
-        attributes={"dim": 0},
+        attributes={"axis": 0},
     )
 
     # Model parallel fully-connected layers: (again, MatMuls for now)
@@ -71,7 +75,7 @@ def create_owt_model(num_devices, num_layers):
                 "MPIAllgather",
                 inputs=h_is,
                 output_names=out_names,
-                attributes={"dim": 1},
+                attributes={"axis": 1},
             )
 
     fn.set_outputs(hs)
@@ -110,11 +114,11 @@ def test_owt(num_devices, num_layers, use_gpu):
             else:
                 shape = (hidden_dim, hidden_dim // num_devices)
             # w{l}_{d}:
-            input_vals.append(Value("", Tensor(Float(), shape, devices[d])))
+            input_vals.append(Value("", Tensor(Float32(), shape, devices[d])))
     for d in range(1, num_devices + 1):
         # x_{d}:
         shape = (batch_size // num_devices, hidden_dim)
-        input_vals.append(Value("", Tensor(Float(), shape, devices[d])))
+        input_vals.append(Value("", Tensor(Float32(), shape, devices[d])))
 
     # Test type inference:
     fn = infer_types(fn, input_vals)
@@ -161,19 +165,19 @@ def test_dp_mp_matmuls():
     B = 64
     d0 = Device(0, "gpu")
     d1 = Device(1, "gpu")
-    x_0 = fn.add_input_value("x_0", Tensor(Float(), (B // 2, B), d0))
-    x_1 = fn.add_input_value("x_1", Tensor(Float(), (B // 2, B), d1))
-    wA_0 = fn.add_input_value("wA_0", Tensor(Float(), (B, B), d0))
-    wA_1 = fn.add_input_value("wA_1", Tensor(Float(), (B, B), d1))
-    wB_0 = fn.add_input_value("wB_0", Tensor(Float(), (B, B), d0))
-    wC_1 = fn.add_input_value("wC_1", Tensor(Float(), (B, B), d1))
+    x_0 = fn.add_input_value("x_0", Tensor(Float32(), (B // 2, B), d0))
+    x_1 = fn.add_input_value("x_1", Tensor(Float32(), (B // 2, B), d1))
+    wA_0 = fn.add_input_value("wA_0", Tensor(Float32(), (B, B), d0))
+    wA_1 = fn.add_input_value("wA_1", Tensor(Float32(), (B, B), d1))
+    wB_0 = fn.add_input_value("wB_0", Tensor(Float32(), (B, B), d0))
+    wC_1 = fn.add_input_value("wC_1", Tensor(Float32(), (B, B), d1))
     a0_0 = fn.add_op("MatMul", inputs=[x_0, wA_0], output_names=["a0"])
     a1_1 = fn.add_op("MatMul", inputs=[x_1, wA_1], output_names=["a1"])
     a_0 = fn.add_op(
         "MPIGather",
         inputs=[a0_0, a1_1],
         output_names=["a_0"],
-        attributes={"device": d0, "dim": 0},
+        attributes={"device": d0, "axis": 0},
     )
     b_0 = fn.add_op("MatMul", inputs=[a_0, wB_0], output_names=["b_0"])
     b_1 = fn.add_op(
@@ -276,7 +280,7 @@ def test_mlp_grid_search(use_gpu):
 def test_single_device(use_gpu):
     d1 = Device(1, "gpu")
     fn = FunctionMaker()
-    x = fn.add_input_value("x", Tensor(Float(), (4, 4), d1))
+    x = fn.add_input_value("x", Tensor(Float32(), (4, 4), d1))
     y = fn.add_op("MatMul", inputs=(x, x))
     fn.set_outputs((y,))
     fn = fn.finalize()
@@ -305,7 +309,7 @@ def test_send_recv(use_gpu):
     d1 = Device(1, "gpu")
     d2 = Device(2, "gpu")
     fn = FunctionMaker()
-    x = fn.add_input_value("x", Tensor(Float(), (4, 4), d1))
+    x = fn.add_input_value("x", Tensor(Float32(), (4, 4), d1))
     y = fn.add_op("Send", inputs=(x,), attributes={"device": d2})
     fn.set_outputs((x, y))
     fn = fn.finalize()

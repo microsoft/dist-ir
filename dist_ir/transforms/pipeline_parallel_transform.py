@@ -46,12 +46,12 @@ class PipelineParallelTransform:
             pipelined_input_map = pipelined_value_map[input_value]
             if input_value in self._batch_dims:
                 vs = transformed_function.add_op(
-                    "Split",
+                    "SplitDistIR",
                     name=f"Split/{v.name}",
                     inputs=[v],
                     attributes={
                         "num_splits": self._num_microbatches,
-                        "dim": self._batch_dims[input_value],
+                        "axis": self._batch_dims[input_value],
                     },
                     output_names=[f"{v.name}s"],
                 )
@@ -59,7 +59,7 @@ class PipelineParallelTransform:
                     v_i = transformed_function.add_op(
                         "Select",
                         name=f"Select/{v.name}_{i}",
-                        attributes={"dim": i},
+                        attributes={"index": i},
                         inputs=[vs],
                         output_names=[f"{v.name}_{i}"],
                     )
@@ -148,7 +148,7 @@ class PipelineParallelTransform:
                 dim = self._reduction_params[orig_output]["dim"]
                 merged_output_map[orig_output] = transformed_function.add_op(
                     "Concat",
-                    attributes={"dim": dim},
+                    attributes={"axis": dim},
                     name=op_name,
                     inputs=[merged_output, pipelined_output],
                     output_names=[output_name],

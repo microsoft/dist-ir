@@ -77,6 +77,7 @@ def mlp_dist_ir_pytorch_backend(
     weights,
     active_steps=100,
     warmup_steps=5,
+    profile=False,
 ):
     topology = mlp.get_topology(1)
     fn = mlp.mlp(
@@ -111,6 +112,7 @@ def mlp_dist_ir_pytorch_backend(
         use_gpu=True,
         num_repetitions=active_steps,
         num_warmup=warmup_steps,
+        profile=profile,
     )
     # TODO or median of max?
     actual_time = max(np.median(times) for times in runtimes)
@@ -122,40 +124,63 @@ def mlp_dist_ir_pytorch_backend(
     return gradients, actual_time
 
 
-def mlp_pure_pytorch(x, z, weights, warmup_steps=5, active_steps=100):
+def mlp_pure_pytorch(x, z, weights, warmup_steps=5, active_steps=100, profile=False):
     batch_size = x.shape[0]
     x = torch.from_numpy(x).cuda()
     z = torch.from_numpy(z).cuda()
     weights = [torch.from_numpy(w).cuda() for w in weights]
-    times = []
+    events = []
 
-    for i in range(warmup_steps + active_steps):
-        x_ = x.clone()
-        z_ = z.clone()
-        activations = [x_]
-        matmul_outputs = []
-        torch.cuda.empty_cache()
-        start = time.time()
-        for w_ in weights:
-            x_ = torch.matmul(x_, w_)
-            matmul_outputs.append(x_)
-            x_[x_ < 0] = 0
-            activations.append(x_)
+    def add_event():
+        events.append(torch.cuda.Event(enable_timing=True))
+        events[-1].record()
 
-        loss = torch.square(x_ - z_) / batch_size
-        dy_ = 2 * (x_ - z_) / batch_size
+    if profile:
+        wait_steps = 0
+    else:
+        wait_steps = warmup_steps + active_steps
 
-        gradients = []
-        for j, w_ in enumerate(reversed(weights)):
-            x_ = matmul_outputs[len(matmul_outputs) - 1 - j]
-            dy_[x_ <= 0] = 0
-            a_ = activations[len(activations) - 2 - j]
-            da_, dw_ = torch.matmul(dy_, w_.T), torch.matmul(a_.T, dy_)
-            dy_ = da_
-            gradients.append(dw_)
-        torch.cuda.synchronize()
-        times.append(time.time() - start)
-    return gradients, np.median(times[warmup_steps:])
+    with torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.CUDA,
+        ],
+        schedule=torch.profiler.schedule(
+            wait=wait_steps, warmup=warmup_steps, active=active_steps
+        ),
+        on_trace_ready=torch.profiler.tensorboard_trace_handler("mlp_pytorch_profile"),
+    ) as p:
+        for i in range(warmup_steps + active_steps):
+            x_ = x.clone()
+            z_ = z.clone()
+            activations = [x_]
+            matmul_outputs = []
+            torch.cuda.empty_cache()
+            add_event()
+            for w_ in weights:
+                x_ = torch.matmul(x_, w_)
+                matmul_outputs.append(x_)
+                x_[x_ < 0] = 0
+                activations.append(x_)
+
+            loss = torch.square(x_ - z_) / batch_size
+            dy_ = 2 * (x_ - z_) / batch_size
+
+            gradients = []
+            for j, w_ in enumerate(reversed(weights)):
+                x_ = matmul_outputs[len(matmul_outputs) - 1 - j]
+                dy_[x_ <= 0] = 0
+                a_ = activations[len(activations) - 2 - j]
+                da_, dw_ = torch.matmul(dy_, w_.T), torch.matmul(a_.T, dy_)
+                dy_ = da_
+                gradients.append(dw_)
+            add_event()
+            p.step()
+        runtimes = [
+            events[i].elapsed_time(events[i + 1]) / 1e3 for i in range(len(events) - 1)
+        ]
+
+    return gradients, np.median(runtimes[warmup_steps:])
 
 
 def benchmark(
@@ -251,14 +276,32 @@ def main(args):
             args.batch_size, args.dim, args.dim, args.dim, args.layers
         )
         _, pytorch_backend_time = mlp_dist_ir_pytorch_backend(
-            args.batch_size, args.dim, args.dim, args.dim, args.layers, x, z, weights
+            args.batch_size,
+            args.dim,
+            args.dim,
+            args.dim,
+            args.layers,
+            x,
+            z,
+            weights,
+            warmup_steps=args.warmup_steps,
+            active_steps=args.active_steps,
+            profile=args.profile,
         )
         print(f"PyTorch backend latency: {pytorch_backend_time * 1000:.2f} ms")
     elif args.mode == "pytorch":
         x, z, weights = get_inputs(
             args.batch_size, args.dim, args.dim, args.dim, args.layers
         )
-        _, pure_pytorch_time = mlp_pure_pytorch(x, z, weights)
+        _, pure_pytorch_time = mlp_pure_pytorch(
+            x,
+            z,
+            weights,
+            warmup_steps=args.warmup_steps,
+            active_steps=args.active_steps,
+            profile=args.profile,
+        )
+
         print(f"Pure PyTorch latency: {pure_pytorch_time * 1000:.2f} ms")
 
 
@@ -272,5 +315,8 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=128, help="Batch size")
     parser.add_argument("--dim", type=int, default=256, help="Weight dim")
     parser.add_argument("--layers", type=int, default=16, help="# layers")
+    parser.add_argument("--warmup_steps", type=int, default=5, help="# warmup steps")
+    parser.add_argument("--active_steps", type=int, default=100, help="# active steps")
+    parser.add_argument("--profile", action="store_true", default=False, help="Profile")
     args = parser.parse_args()
     main(args)

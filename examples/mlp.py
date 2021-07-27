@@ -9,8 +9,10 @@ from dist_ir.executor import CostModel, Simulator, infer_types
 from dist_ir.transforms import mlp_dhp_transform
 
 
-def mlp(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, device):
-    function = FunctionMaker(name="mlp")
+def mlp(
+    batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, device, name="mlp"
+):
+    function = FunctionMaker(name=name)
     x = function.add_input_value(
         "x",
         Tensor(dtype=Float32(), shape=(batch_size, input_dim), device=device),

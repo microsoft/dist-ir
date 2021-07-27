@@ -446,9 +446,9 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
             events.append(perf_counter())
 
     if ctx.profile:
-        num_wait_steps = num_warmup_steps + num_repetitions
-    else:
         num_wait_steps = 0
+    else:
+        num_wait_steps = num_warmup_steps + num_repetitions
     # Time a bunch of executions, then execute once for output values
     with torch.profiler.profile(
         activities=[

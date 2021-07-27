@@ -160,7 +160,7 @@ def mlp_pure_pytorch(x, z, weights, warmup_steps=5, active_steps=100, profile=Fa
             for w_ in weights:
                 x_ = torch.matmul(x_, w_)
                 matmul_outputs.append(x_)
-                x_[x_ < 0] = 0
+                x_ = torch.relu(x)
                 activations.append(x_)
 
             loss = torch.square(x_ - z_) / batch_size

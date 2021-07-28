@@ -131,6 +131,12 @@ def mlp_pure_pytorch(x, z, weights, warmup_steps=5, active_steps=100, profile=Fa
     weights = [torch.from_numpy(w).cuda() for w in weights]
     events = []
 
+    if active_steps < 10:
+        print(
+            "WARNING: The first active step includes large overhead, "
+            "record more steps for a more accurate measurement"
+        )
+
     def add_event():
         events.append(torch.cuda.Event(enable_timing=True))
         events[-1].record()
@@ -151,6 +157,7 @@ def mlp_pure_pytorch(x, z, weights, warmup_steps=5, active_steps=100, profile=Fa
         on_trace_ready=torch.profiler.tensorboard_trace_handler("mlp_pytorch_profile"),
     ) as p:
         for i in range(warmup_steps + active_steps):
+            add_event()
             x_ = x.clone()
             z_ = z.clone()
             activations = [x_]
@@ -160,7 +167,7 @@ def mlp_pure_pytorch(x, z, weights, warmup_steps=5, active_steps=100, profile=Fa
             for w_ in weights:
                 x_ = torch.matmul(x_, w_)
                 matmul_outputs.append(x_)
-                x_ = torch.relu(x)
+                x_ = torch.relu(x_)
                 activations.append(x_)
 
             loss = torch.square(x_ - z_) / batch_size
@@ -174,10 +181,11 @@ def mlp_pure_pytorch(x, z, weights, warmup_steps=5, active_steps=100, profile=Fa
                 da_, dw_ = torch.matmul(dy_, w_.T), torch.matmul(a_.T, dy_)
                 dy_ = da_
                 gradients.append(dw_)
-            add_event()
             p.step()
+        add_event()
         runtimes = [
-            events[i].elapsed_time(events[i + 1]) / 1e3 for i in range(len(events) - 1)
+            events[i].elapsed_time(events[i + 1]) / 1e3
+            for i in range(1, len(events) - 1, 2)
         ]
 
     return gradients, np.median(runtimes[warmup_steps:])

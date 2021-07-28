@@ -449,6 +449,18 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
         num_wait_steps = 0
     else:
         num_wait_steps = num_warmup_steps + num_repetitions
+
+    if ctx.debug_stacktrace:
+        try:
+            outputs = run_function(ctx, fn, inputs)
+            if ctx.world_size > 1:
+                torch.distributed.barrier()
+        except Exception as e:
+            print_exc()
+        print("PyTorch backend exiting after 1 run in debug mode.")
+        dist.destroy_process_group()
+        sys.exit(1)
+
     # Time a bunch of executions, then execute once for output values
     with torch.profiler.profile(
         activities=[
@@ -465,19 +477,9 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
     ) as p:
         for i in range(num_warmup_steps + num_repetitions):
             add_event()
-            if ctx.debug_stacktrace:
-                try:
-                    outputs = run_function(ctx, fn, inputs)
-                    if ctx.world_size > 1:
-                        torch.distributed.barrier()
-                except Exception as e:
-                    print_exc()
-                    sys.exit(1)
-            else:
-                outputs = run_function(ctx, fn, inputs)
-                if ctx.world_size > 1:
-                    torch.distributed.barrier()
-
+            outputs = run_function(ctx, fn, inputs)
+            if ctx.world_size > 1:
+                torch.distributed.barrier()
             add_event()
             p.step()
 

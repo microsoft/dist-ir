@@ -470,7 +470,6 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
         schedule=torch.profiler.schedule(
             wait=num_wait_steps, warmup=num_warmup_steps, active=num_repetitions
         ),
-        # on_trace_ready=lambda p: p.export_chrome_trace(f"{rank}_profile.json"),
         on_trace_ready=torch.profiler.tensorboard_trace_handler(
             f"{fn.name}_{rank}_profile"
         ),
@@ -567,8 +566,6 @@ def run_pytorch(
     any thread raises an exception. `profile` runs the code with the PyTorch
     profiler and outputs logs to TensorBoard.
     """
-    # print(*(x.shape for x in inputs))
-    # cpprint(fn)
 
     device_to_fns, groups = project(
         fn, tuple(v.type for v in fn.inputs), run_type_inference

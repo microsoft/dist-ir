@@ -35,10 +35,12 @@ def mlp_dist_ir_simulation(
     z,
     weights,
     max_memory_gb=10,
-    active_steps=100,
     warmup_steps=5,
+    active_steps=50,
 ):
-    topology = mlp.get_topology(1)
+    topology = mlp.get_topology(
+        1, device_throughput=device_throughput, dram_bandwidth=dram_bandwidth
+    )
     fn = mlp.mlp(
         batch_size,
         input_dim,
@@ -75,11 +77,13 @@ def mlp_dist_ir_pytorch_backend(
     x,
     z,
     weights,
-    active_steps=100,
     warmup_steps=5,
+    active_steps=50,
     profile=False,
 ):
-    topology = mlp.get_topology(1)
+    topology = mlp.get_topology(
+        1, device_throughput=device_throughput, dram_bandwidth=dram_bandwidth
+    )
     fn = mlp.mlp(
         batch_size,
         input_dim,
@@ -124,7 +128,7 @@ def mlp_dist_ir_pytorch_backend(
     return gradients, actual_time
 
 
-def mlp_pure_pytorch(x, z, weights, warmup_steps=5, active_steps=100, profile=False):
+def mlp_pure_pytorch(x, z, weights, warmup_steps=5, active_steps=50, profile=False):
     batch_size = x.shape[0]
     x = torch.from_numpy(x).cuda()
     z = torch.from_numpy(z).cuda()
@@ -220,9 +224,9 @@ def benchmark(
 
 
 def grid_search():
-    all_batch_sizes = [16, 32, 64, 128, 256, 512, 1024, 2048]
-    all_dims = [16, 32, 64, 128, 256, 512, 1024, 2048]
-    all_num_hidden_layers = [4, 8, 16]
+    all_batch_sizes = [256, 512, 1024, 2048]
+    all_dims = [512, 1024, 2048, 4096]
+    all_num_hidden_layers = [8, 16, 32]
     fieldnames = [
         "Batch size",
         "Dim",
@@ -326,5 +330,11 @@ if __name__ == "__main__":
     parser.add_argument("--warmup_steps", type=int, default=5, help="# warmup steps")
     parser.add_argument("--active_steps", type=int, default=100, help="# active steps")
     parser.add_argument("--profile", action="store_true", default=False, help="Profile")
+    parser.add_argument(
+        "--device_throughput", type=float, default=1.4e13, help="Device throughput"
+    )
+    parser.add_argument(
+        "--dram_bandwidth", type=float, default=9e11, help="DRAM Bandwidth"
+    )
     args = parser.parse_args()
     main(args)

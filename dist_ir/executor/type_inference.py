@@ -409,6 +409,8 @@ def _mul_prop_fn(op, x, y):
 
 
 def _reduce_mean_prop_fn(op, x):
+    if not isinstance(x, Tensor):
+        _raise_type_error(op, x)
     if "keepdims" in op.attributes:
         keepdims = op.attributes["keepdims"]
     else:

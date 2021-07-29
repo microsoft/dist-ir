@@ -1,3 +1,10 @@
+"""
+This file defines a MixedRegister which contains op implementations that accept
+combinations of concrete and abstract input types. This is necessary for certain
+ops that require concrete arguments to perform type inference over abstract inputs.
+For example, Reshape requires a concrete shape input to determine the output shape.
+"""
+
 import numpy as np
 
 from ..ir.type import Tensor

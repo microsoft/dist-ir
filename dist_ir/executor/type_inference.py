@@ -74,7 +74,7 @@ def infer_types(function: Function, inputs: List[Value]) -> Function:
         assert_is_typed(inp)
 
     # Use the type inference AbstractInterpreter to propagate types
-    state = TypeInferrer.interpret(function, (v.type for v in inputs))
+    state = interpreter.interpret(function, (v.type for v in inputs))
     type_map = state.env
 
     return _type_function(function, type_map)

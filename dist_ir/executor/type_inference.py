@@ -24,7 +24,7 @@ from typing import Dict, List, Tuple
 
 from ..ir import Device, Function, FunctionMaker, Op, Value
 from ..ir.type import Bool, Float32, Int32, Int64, Type, Tensor, TupleType
-from .absint import AbstractInterpreter, AbstractState
+from .absint import AbstractInterpreter, AbstractState, update_semantics_with_register
 
 
 def _raise_type_error(op, *args):
@@ -713,15 +713,16 @@ def _create_semantics(type_prop_register):
 
         return semantics
 
-    return {
+    wrapped_register = {
         signature: convert_impl(type_prop_fn)
         for signature, type_prop_fn in type_prop_register.items()
     }
+    semantics = {}
+    update_semantics_with_register(semantics, wrapped_register)
+    return semantics
 
 
-TypeInferrer = AbstractInterpreter(
-    semantics=_create_semantics(TypePropRegister), Tuple=lambda t: TupleType(tuple(t))
-)
+TypeInferrer = AbstractInterpreter(semantics=_create_semantics(TypePropRegister))
 
 
 def _type_function(function: Function, type_map: Dict[Value, Type]) -> Function:

@@ -22,12 +22,14 @@ TODO also assume there are no entries with duplicate signatures?
 
 import networkx as nx
 import numpy as np
+import torch
 from dist_ir.executor.concrete_value import ConcreteValue
 from typing import Any, Callable, Dict, List, Sequence, Tuple
 
 from ..ir import Function, Op, Value
 from ..ir.type import *
 from .numpy_register import NumPyRegister
+from .torch_register import TorchRegister
 from .type_register import TypePropRegister
 
 
@@ -43,6 +45,7 @@ _type_abstraction_graph: nx.DiGraph = nx.transitive_closure(
             (np.int32, Int32),
             (np.int64, Int64),
             (np.ndarray, Tensor),
+            (torch.Tensor, Tensor),
             (tuple, TupleType),
         ]
     )
@@ -235,12 +238,12 @@ def _dispatch(
     raise ValueError(f"Could not dispatch {op_type} with input types {input_types}")
 
 
-interpreter = AbstractInterpreter(
-    AbstractState,
-    update_semantics_with_register(
-        update_semantics_with_register({}, TypePropRegister), NumPyRegister
-    ),
-)
+_semantics = {}
+update_semantics_with_register(_semantics, TypePropRegister)
+update_semantics_with_register(_semantics, NumPyRegister)
+update_semantics_with_register(_semantics, TorchRegister)
+interpreter = AbstractInterpreter(AbstractState, _semantics)
+
 
 # TODO remove
 def convert_impls_to_semantics(impls):

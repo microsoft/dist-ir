@@ -1,7 +1,7 @@
 import numpy as np
 from typing import Any, Dict, List, Sequence, Tuple
 
-from .absint import AbstractInterpreter, convert_impls_to_semantics
+from .absint import interpreter
 from .type_inference import TypePropRegister, _type_function
 from .backend_register import BackendRegister
 from .mixed_register import MixedImplementations
@@ -11,6 +11,26 @@ from ..ir.type import Int32, Int64, Float32, Float64, Tensor
 
 class SequentialExecutor:
     def __init__(self, backend):
+        # TODO remove need for backend
+        pass
+
+    def compute(self, function: Function, inputs: Sequence[Any]) -> Tuple[Any]:
+        """Executes the function given the specified inputs and returns the final result.
+
+        Args:
+          function: The function to execute.
+          inputs: A sequence of input data represented in the specified backend.
+
+        Returns:
+          A tuple of outputs.
+        """
+        state = interpreter.interpret(function, inputs)
+        return tuple(state.env[v] for v in function.outputs)
+
+
+# TODO remove
+class _SequentialExecutor:
+    def __init__(self, backend):
         if backend not in BackendRegister:
             raise ValueError(f"Unknown backend {backend}")
         semantics = convert_impls_to_semantics(BackendRegister[backend])
@@ -18,7 +38,7 @@ class SequentialExecutor:
         semantics.update(convert_impls_to_semantics(MixedImplementations))
         self.interpreter = AbstractInterpreter(semantics=semantics)
 
-    def _compute_op(self, op: Op, inputs: List[Any]):
+    def _compute_op(self, op: Op, inputs: List[Any]):  # TODO remove. Unused
         """Executes the given op and returns its outputs."""
         op_type = op.op_type
         if op_type == "Pmap":

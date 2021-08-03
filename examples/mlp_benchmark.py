@@ -34,6 +34,8 @@ def mlp_dist_ir_simulation(
     x,
     z,
     weights,
+    device_throughput,
+    dram_bandwidth,
     max_memory_gb=10,
     warmup_steps=5,
     active_steps=50,
@@ -77,6 +79,8 @@ def mlp_dist_ir_pytorch_backend(
     x,
     z,
     weights,
+    device_throughput,
+    dram_bandwidth,
     warmup_steps=5,
     active_steps=50,
     profile=False,
@@ -185,8 +189,10 @@ def mlp_pure_pytorch(x, z, weights, warmup_steps=5, active_steps=50, profile=Fal
                 da_, dw_ = torch.matmul(dy_, w_.T), torch.matmul(a_.T, dy_)
                 dy_ = da_
                 gradients.append(dw_)
+            if i == (warmup_steps + active_steps - 1):
+                add_event()
             p.step()
-        add_event()
+        torch.cuda.synchronize()
         runtimes = [
             events[i].elapsed_time(events[i + 1]) / 1e3
             for i in range(1, len(events) - 1, 2)
@@ -196,19 +202,44 @@ def mlp_pure_pytorch(x, z, weights, warmup_steps=5, active_steps=50, profile=Fal
 
 
 def benchmark(
-    batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, max_memory=10
+    batch_size,
+    input_dim,
+    hidden_dim,
+    output_dim,
+    num_hidden_layers,
+    device_throughput,
+    dram_bandwidth,
+    max_memory=10,
 ):
     x, z, weights = get_inputs(
         batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers
     )
     simulated_time, peak_memory = mlp_dist_ir_simulation(
-        batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, x, z, weights
+        batch_size,
+        input_dim,
+        hidden_dim,
+        output_dim,
+        num_hidden_layers,
+        x,
+        z,
+        weights,
+        device_throughput,
+        dram_bandwidth,
     )
     if peak_memory / (1024 ** 3) > max_memory:
         return -1, -1, -1
 
     dist_ir_gradients, pytorch_backend_time = mlp_dist_ir_pytorch_backend(
-        batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, x, z, weights
+        batch_size,
+        input_dim,
+        hidden_dim,
+        output_dim,
+        num_hidden_layers,
+        x,
+        z,
+        weights,
+        device_throughput,
+        dram_bandwidth,
     )
 
     torch.cuda.empty_cache()
@@ -223,10 +254,10 @@ def benchmark(
     return simulated_time, pytorch_backend_time, pure_pytorch_time
 
 
-def grid_search():
-    all_batch_sizes = [256, 512, 1024, 2048]
-    all_dims = [512, 1024, 2048, 4096]
-    all_num_hidden_layers = [8, 16, 32]
+def grid_search(device_throughput, dram_bandwidth):
+    all_batch_sizes = [1024, 2048, 4096]
+    all_dims = [1024, 2048, 4096]
+    all_num_hidden_layers = [8, 12, 16]
     fieldnames = [
         "Batch size",
         "Dim",
@@ -244,7 +275,13 @@ def grid_search():
         ):
             try:
                 simulated_time, pytorch_backend_time, pure_pytorch_time = benchmark(
-                    batch_size, dim, dim, dim, num_hidden_layers
+                    batch_size,
+                    dim,
+                    dim,
+                    dim,
+                    num_hidden_layers,
+                    device_throughput,
+                    dram_bandwidth,
                 )
             except Exception as e:
                 simulated_time = -1
@@ -266,7 +303,7 @@ def grid_search():
 
 def main(args):
     if args.mode == "grid_search":
-        grid_search()
+        grid_search(args.device_throughput, args.dram_bandwidth)
     elif args.mode == "simulation":
         x, z, weights = get_inputs(
             args.batch_size, args.dim, args.dim, args.dim, args.layers
@@ -280,6 +317,8 @@ def main(args):
             x,
             z,
             weights,
+            args.device_throughput,
+            args.dram_bandwidth,
         )
         print(f"Simulated latency: {simulated_time * 1000:.2f} ms")
         print(f"Simulated peak memory: {peak_memory / (1024 ** 3):.2f} GB")
@@ -296,6 +335,8 @@ def main(args):
             x,
             z,
             weights,
+            args.device_throughput,
+            args.dram_bandwidth,
             warmup_steps=args.warmup_steps,
             active_steps=args.active_steps,
             profile=args.profile,

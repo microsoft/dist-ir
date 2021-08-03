@@ -478,7 +478,8 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
                 if ctx.world_size > 1:
                     torch.distributed.barrier()
 
-            add_event()
+            if i == (num_warmup_steps + num_repetitions - 1):
+                add_event()
             p.step()
 
     if ctx.use_gpu:

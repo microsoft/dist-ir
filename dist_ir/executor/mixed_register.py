@@ -30,12 +30,17 @@ def _gather_prop_fn(op, x, y):
     if x.device is None:
         _raise_type_error(op, x, y)
     device = x.device
-    temp = np.zeros(x.shape)
     if "axis" in op.attributes:
         axis = op.attributes["axis"]
     else:
         axis = 0
-    new_shape = np.take(temp, y.astype(np.int64), axis=axis).shape
+    if isinstance(y, np.ndarray) and axis == 0:
+        # Manually compute the new shape for the common case
+        new_shape = y.shape + x.shape[1:]
+    else:
+        # Use the NumPy implementation in the general case
+        temp = np.zeros(x.shape)
+        new_shape = np.take(temp, y.astype(np.int64), axis=axis).shape
     return Tensor(dtype=x.dtype, shape=new_shape, device=device)
 
 

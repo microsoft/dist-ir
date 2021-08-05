@@ -393,6 +393,7 @@ def update_attributes(
     new_n_head,
     new_device=None,
 ):
+    """Updates attributes for Split and Constant ops to reflect new model paramters."""
     if op_type == "Split":
         if "split" in attributes and attributes["split"] == (
             old_d_embd,

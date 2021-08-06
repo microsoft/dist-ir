@@ -8,7 +8,13 @@ import tqdm
 
 from dist_ir.ir import cpprint
 from dist_ir.backend.torch import run_pytorch
-from dist_ir.executor import CostModel, Simulator, SequentialExecutor, infer_types
+from dist_ir.executor import (
+    CostModel,
+    Simulator,
+    SequentialExecutor,
+    calibrate_simulator,
+    infer_types,
+)
 from dist_ir.transforms import mlp_dhp_transform
 from examples import mlp
 
@@ -36,12 +42,16 @@ def mlp_dist_ir_simulation(
     weights,
     device_throughput,
     dram_bandwidth,
+    kernel_launch_overhead,
     max_memory_gb=10,
     warmup_steps=5,
     active_steps=50,
 ):
     topology = mlp.get_topology(
-        1, device_throughput=device_throughput, dram_bandwidth=dram_bandwidth
+        1,
+        device_throughput=device_throughput,
+        dram_bandwidth=dram_bandwidth,
+        kernel_launch_overhead=kernel_launch_overhead,
     )
     fn = mlp.mlp(
         batch_size,
@@ -79,15 +89,11 @@ def mlp_dist_ir_pytorch_backend(
     x,
     z,
     weights,
-    device_throughput,
-    dram_bandwidth,
     warmup_steps=5,
     active_steps=50,
     profile=False,
 ):
-    topology = mlp.get_topology(
-        1, device_throughput=device_throughput, dram_bandwidth=dram_bandwidth
-    )
+    topology = mlp.get_topology(1)
     fn = mlp.mlp(
         batch_size,
         input_dim,
@@ -209,6 +215,7 @@ def benchmark(
     num_hidden_layers,
     device_throughput,
     dram_bandwidth,
+    kernel_launch_overhead,
     max_memory=10,
 ):
     x, z, weights = get_inputs(
@@ -225,6 +232,7 @@ def benchmark(
         weights,
         device_throughput,
         dram_bandwidth,
+        kernel_launch_overhead,
     )
     if peak_memory / (1024 ** 3) > max_memory:
         return -1, -1, -1
@@ -238,8 +246,6 @@ def benchmark(
         x,
         z,
         weights,
-        device_throughput,
-        dram_bandwidth,
     )
 
     torch.cuda.empty_cache()
@@ -302,6 +308,12 @@ def grid_search(device_throughput, dram_bandwidth):
 
 
 def main(args):
+    if args.calibrate:
+        (
+            args.dram_bandwidth,
+            args.device_throughput,
+            args.kernel_launch_overhead,
+        ) = calibrate_simulator()
     if args.mode == "grid_search":
         grid_search(args.device_throughput, args.dram_bandwidth)
     elif args.mode == "simulation":
@@ -319,6 +331,7 @@ def main(args):
             weights,
             args.device_throughput,
             args.dram_bandwidth,
+            args.kernel_launch_overhead,
         )
         print(f"Simulated latency: {simulated_time * 1000:.2f} ms")
         print(f"Simulated peak memory: {peak_memory / (1024 ** 3):.2f} GB")
@@ -370,12 +383,21 @@ if __name__ == "__main__":
     parser.add_argument("--layers", type=int, default=16, help="# layers")
     parser.add_argument("--warmup_steps", type=int, default=5, help="# warmup steps")
     parser.add_argument("--active_steps", type=int, default=100, help="# active steps")
+    parser.add_argument(
+        "--calibrate", action="store_true", default=False, help="Calibrate simulator"
+    )
     parser.add_argument("--profile", action="store_true", default=False, help="Profile")
     parser.add_argument(
         "--device_throughput", type=float, default=1.4e13, help="Device throughput"
     )
     parser.add_argument(
         "--dram_bandwidth", type=float, default=9e11, help="DRAM Bandwidth"
+    )
+    parser.add_argument(
+        "--kernel_launch_overhead",
+        type=float,
+        default=1e-5,
+        help="Kernel launch overhead",
     )
     args = parser.parse_args()
     main(args)

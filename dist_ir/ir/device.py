@@ -9,6 +9,7 @@ class Device:
     device_type: str
     throughput: float = 1.0e14
     dram_bandwidth: float = 1.2e12
+    kernel_launch_overhead: float = 1e-5
     is_variable: bool = False
 
     device_variable_id: ClassVar[int] = 0

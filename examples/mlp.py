@@ -236,13 +236,20 @@ def get_stats(function):
 
 # TODO: De-duplicate this function with examples/gpt2.py
 def get_topology(
-    world_size, device_throughput=1.4e13, dram_bandwidth=9e11, network_bandwidth=64
+    world_size,
+    device_throughput=1.4e13,
+    dram_bandwidth=9e11,
+    network_bandwidth=64,
+    kernel_launch_overhead=1e-5,
 ):
     topology = Topology()
     d0 = topology.add_device("gpu")
     for i in range(1, world_size + 1):
         topology.add_device(
-            "gpu", throughput=device_throughput, dram_bandwidth=dram_bandwidth
+            "gpu",
+            throughput=device_throughput,
+            dram_bandwidth=dram_bandwidth,
+            kernel_launch_overhead=kernel_launch_overhead,
         )
         for j in range(0, i):
             if j == 0:

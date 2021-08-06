@@ -5,7 +5,6 @@ from operator import mul
 from ..ir.type import Float32, Float64, Int64, Tensor, TupleType
 
 BYTES_IN_Gb = 1.25e8
-KERNEL_LAUNCH_OVERHEAD = 10e-6
 
 
 class CostModel:
@@ -169,20 +168,22 @@ class CostModel:
         flops = n
         communication_cost = data_size / x.device.dram_bandwidth
         computation_cost = flops / x.device.throughput
-        latency = KERNEL_LAUNCH_OVERHEAD + communication_cost + computation_cost
+        latency = (
+            x.device.kernel_launch_overhead + communication_cost + computation_cost
+        )
         return {x.device: latency}
 
     def _concat_cost_fn(self, op, *xs):
         # TODO: Compute cost properly
         devices = [x.device for x in xs]
-        return {device: KERNEL_LAUNCH_OVERHEAD for device in devices}
+        return {device: xs[0].device.kernel_launch_overhead for device in devices}
 
     def _constant_of_shape_cost_fn(self, op, x):
-        return {x.device: KERNEL_LAUNCH_OVERHEAD}
+        return {x.device: x.device.kernel_launch_overhead}
 
     def _gather_cost_fn(self, op, x, y):
         # TODO: Compute cost properly
-        return {x.device: KERNEL_LAUNCH_OVERHEAD}
+        return {x.device: x.device.kernel_launch_overhead}
 
     def _gemm_cost_fn(self, op, x, y, z):
         gemm_costs = self._matmul_cost_fn(op, x, y)
@@ -204,7 +205,9 @@ class CostModel:
         flops = 2 * x.shape[0] * x.shape[1] * y.shape[1]
         communication_cost = data_size / x.device.dram_bandwidth
         computation_cost = flops / x.device.throughput
-        latency = KERNEL_LAUNCH_OVERHEAD + communication_cost + computation_cost
+        latency = (
+            x.device.kernel_launch_overhead + communication_cost + computation_cost
+        )
         return {x.device: latency}
 
     def _matmul_grad_cost_fn(self, op, x, y, dz):
@@ -286,14 +289,14 @@ class CostModel:
         return {d: cost for d in op.attributes["devices"]}
 
     def _nonzero_cost_fn(self, op, x):
-        return {x.device: KERNEL_LAUNCH_OVERHEAD}
+        return {x.device: x.device.kernel_launch_overhead}
 
     def _reduce_mean_cost_fn(self, op, x):
         # TODO: Repace with more accurate function?
         return self._elementwise_cost_fn(op, x)
 
     def _reshape_cost_fn(self, op, x, y):
-        return {x.device: KERNEL_LAUNCH_OVERHEAD}
+        return {x.device: x.device.kernel_launch_overhead}
 
     def _select_cost_fn(self, op, xs):
         costs = {}
@@ -326,24 +329,24 @@ class CostModel:
         return costs
 
     def _shape_cost_fn(self, op, x):
-        return {x.device: KERNEL_LAUNCH_OVERHEAD}
+        return {x.device: x.device.kernel_launch_overhead}
 
     def _slice_cost_fn(self, op, x, starts, ends, axes, steps=None):
-        return {x.device: KERNEL_LAUNCH_OVERHEAD}  # TODO is this accurate?
+        return {x.device: x.device.kernel_launch_overhead}  # TODO is this accurate?
 
     def _softmax_cost_fn(self, op, x):
         # TODO: Repace with more accurate function?
         return self._elementwise_cost_fn(op, x)
 
     def _split_cost_fn(self, op, x):
-        return {x.device: KERNEL_LAUNCH_OVERHEAD}
+        return {x.device: x.device.kernel_launch_overhead}
 
     def _squeeze_cost_fn(self, op, x):
-        return {x.device: KERNEL_LAUNCH_OVERHEAD}
+        return {x.device: x.device.kernel_launch_overhead}
 
     def _transpose_cost_fn(self, op, x):
         # TODO: Repace with more accurate function?
         return self._elementwise_cost_fn(op, x)
 
     def _unsqueeze_cost_fn(self, op, x):
-        return {x.device: KERNEL_LAUNCH_OVERHEAD}
+        return {x.device: x.device.kernel_launch_overhead}

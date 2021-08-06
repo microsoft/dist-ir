@@ -22,18 +22,19 @@ def mlp(
         Tensor(dtype=Float32(), shape=(batch_size, output_dim), device=device),
     )
     weights = []
-    for i in range(num_hidden_layers - 1):
-        if i == 0:
-            w = function.add_input_value(
-                f"w{chr(ord('A')+i)}",
-                Tensor(dtype=Float32(), shape=(input_dim, hidden_dim), device=device),
-            )
-        else:
-            w = function.add_input_value(
-                f"w{chr(ord('A')+i)}",
-                Tensor(dtype=Float32(), shape=(hidden_dim, hidden_dim), device=device),
-            )
+    w = function.add_input_value(
+        f"w{chr(ord('A'))}",
+        Tensor(dtype=Float32(), shape=(input_dim, hidden_dim), device=device),
+    )
+    weights.append(w)
+    for i in range(1, num_hidden_layers - 1):
+        w = function.add_input_value(
+            f"w{chr(ord('A')+i)}",
+            Tensor(dtype=Float32(), shape=(hidden_dim, hidden_dim), device=device),
+        )
         weights.append(w)
+    if num_hidden_layers == 1:
+        i = 0
     w = function.add_input_value(
         f"w{chr(ord('A')+i+1)}",
         Tensor(dtype=Float32(), shape=(hidden_dim, output_dim), device=device),
@@ -140,6 +141,34 @@ def mlp_inference_dp(
     return function.finalize()
 
 
+def mlp_inference_no_relu(
+    batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, device
+):
+    fn = FunctionMaker(name="mlp")
+    x = fn.add_input_value(
+        "x", Tensor(shape=(batch_size, input_dim), dtype=Float32(), device=device)
+    )
+    weights = []
+    w = fn.add_input_value(
+        "w0", Tensor(shape=(input_dim, hidden_dim), dtype=Float32(), device=device)
+    )
+    weights.append(w)
+    for i in range(1, num_hidden_layers - 1):
+        w = fn.add_input_value(
+            f"w{i}",
+            Tensor(shape=(hidden_dim, hidden_dim), dtype=Float32(), device=device),
+        )
+        weights.append(w)
+    w = fn.add_input_value(
+        f"w{num_hidden_layers}",
+        Tensor(shape=(hidden_dim, output_dim), dtype=Float32(), device=device),
+    )
+    weights.append(w)
+    for i, w in enumerate(weights):
+        x = fn.add_op(op_type="MatMul", inputs=[x, w], output_names=[f"y{i}"])
+    return fn.finalize()
+
+
 def add_optimizer_ops(function):
     function = function.to_function_maker()
     hp_group_pattern = "hp\_(.+?(?=\_))"
@@ -243,7 +272,12 @@ def get_topology(
     kernel_launch_overhead=1e-5,
 ):
     topology = Topology()
-    d0 = topology.add_device("gpu")
+    topology.add_device(
+        "gpu",
+        throughput=device_throughput,
+        dram_bandwidth=dram_bandwidth,
+        kernel_launch_overhead=kernel_launch_overhead,
+    )
     for i in range(1, world_size + 1):
         topology.add_device(
             "gpu",

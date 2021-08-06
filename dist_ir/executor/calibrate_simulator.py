@@ -1,4 +1,3 @@
-import nevergrad as ng
 import itertools
 import torch
 import numpy as np
@@ -35,11 +34,11 @@ def calibrate_simulator():
     for i, (batch_size, input_dim, output_dim) in enumerate(
         tqdm(list(itertools.product(all_batch_sizes, all_input_dims, all_output_dims)))
     ):
-        fn = matmul(batch_size, input_dim, output_dim, device)
+        fn = _matmul(batch_size, input_dim, output_dim, device)
         x = fn.inputs[0].type
         y = fn.inputs[1].type
         data_size = x.dtype.size() * (x.shape[0] * x.shape[1] + y.shape[0] * y.shape[1])
-        flops = 2 * x.shape[0] * x.shape[1] * y.shape[1]
+        flops = (2 * x.shape[1] - 1) * x.shape[0] * y.shape[1]
         X[i][0] = data_size
         X[i][1] = flops
 
@@ -57,7 +56,7 @@ def calibrate_simulator():
         Y[i] = pytorch_latency
 
     reg = LinearRegression(positive=True).fit(X, Y)
-    return 1.0 / reg.coef_[0], 1.0 / reg.coeg_[1], reg.intercept_
+    return 1.0 / reg.coef_[0], 1.0 / reg.coef_[1], reg.intercept_
 
 
 def main():

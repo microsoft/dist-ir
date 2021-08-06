@@ -3,8 +3,9 @@ import csv
 import itertools
 import numpy as np
 import time
-import torch
 import tqdm
+import traceback
+import torch
 
 from dist_ir.ir import cpprint
 from dist_ir.backend.torch import run_pytorch
@@ -25,7 +26,7 @@ def get_inputs(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers)
     x = np.random.normal(size=(batch_size, input_dim))
     z = np.random.normal(size=(batch_size, output_dim))
     weights = [np.random.normal(size=(input_dim, hidden_dim))]
-    for i in range(num_hidden_layers - 2):
+    for i in range(1, num_hidden_layers - 1):
         weights.append(np.random.normal(size=(hidden_dim, hidden_dim)))
     weights.append(np.random.normal(size=(hidden_dim, output_dim)))
     return x, z, weights
@@ -61,17 +62,6 @@ def mlp_dist_ir_simulation(
         num_hidden_layers,
         device=topology.devices[0],
     )
-    init_fn, fn = mlp_dhp_transform(
-        fn,
-        1,
-        1,
-        1,
-        1,
-        topology.devices,
-    )
-    init_fn = infer_types(init_fn, init_fn.inputs)
-    fn = infer_types(fn, init_fn.outputs)
-    assert len(fn.inputs) == len(weights) + 2
     input_types = tuple(inp.type for inp in fn.inputs)
     simulator = Simulator(CostModel(topology))
     simulation = simulator.interpret(fn, input_types)
@@ -102,27 +92,14 @@ def mlp_dist_ir_pytorch_backend(
         num_hidden_layers,
         device=topology.devices[0],
     )
-    init_fn, fn = mlp_dhp_transform(
-        fn,
-        1,
-        1,
-        1,
-        1,
-        topology.devices,
-    )
-    init_fn = infer_types(init_fn, init_fn.inputs)
-    fn = infer_types(fn, init_fn.outputs)
-    assert len(fn.inputs) == len(weights) + 2
     seq_executor = SequentialExecutor("numpy")
-    input_data = [x, z] + weights
-    dist_input_data = seq_executor.compute(init_fn, input_data)
-    dist_input_data = tuple(torch.tensor(t) for t in dist_input_data)
-    # assert all(t.shape == v.type.shape for (t, v) in zip(dist_input_data, fn.inputs))
+    input_data = [torch.tensor(v) for v in [x, z] + weights]
+    fn = infer_types(fn, fn.inputs)
 
     # Measure actual execution time
     per_rank_outputs, runtimes = run_pytorch(
         fn,
-        dist_input_data,
+        input_data,
         use_gpu=True,
         num_repetitions=active_steps,
         num_warmup=warmup_steps,
@@ -260,7 +237,7 @@ def benchmark(
     return simulated_time, pytorch_backend_time, pure_pytorch_time
 
 
-def grid_search(device_throughput, dram_bandwidth):
+def grid_search(device_throughput, dram_bandwidth, kernel_launch_overhead):
     all_batch_sizes = [1024, 2048, 4096]
     all_dims = [1024, 2048, 4096]
     all_num_hidden_layers = [8, 12, 16]
@@ -288,8 +265,10 @@ def grid_search(device_throughput, dram_bandwidth):
                     num_hidden_layers,
                     device_throughput,
                     dram_bandwidth,
+                    kernel_launch_overhead,
                 )
             except Exception as e:
+                traceback.print_exc()
                 simulated_time = -1
                 pytorch_backend_time = -1
                 pure_pytorch_time = -1
@@ -308,15 +287,22 @@ def grid_search(device_throughput, dram_bandwidth):
 
 
 def main(args):
-    if args.calibrate:
+    if args.calibrate and (args.mode == "simulate" or args.mode == "grid_search"):
+        print("Calibrating simulator...")
         (
             args.dram_bandwidth,
             args.device_throughput,
             args.kernel_launch_overhead,
         ) = calibrate_simulator()
+        print("Calibration results:")
+        print(f"DRAM bandwidth: {args.dram_bandwidth:.2e}")
+        print(f"Device throughput: {args.device_throughput:.2e}")
+        print(f"Kernel launch overhead: {args.kernel_launch_overhead:.2e}")
     if args.mode == "grid_search":
-        grid_search(args.device_throughput, args.dram_bandwidth)
-    elif args.mode == "simulation":
+        grid_search(
+            args.device_throughput, args.dram_bandwidth, args.kernel_launch_overhead
+        )
+    elif args.mode == "simulate":
         x, z, weights = get_inputs(
             args.batch_size, args.dim, args.dim, args.dim, args.layers
         )
@@ -348,8 +334,6 @@ def main(args):
             x,
             z,
             weights,
-            args.device_throughput,
-            args.dram_bandwidth,
             warmup_steps=args.warmup_steps,
             active_steps=args.active_steps,
             profile=args.profile,
@@ -375,7 +359,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MLP benchmark")
     parser.add_argument(
         "--mode",
-        choices=["grid_search", "pytorch", "simulation", "backend"],
+        choices=["grid_search", "pytorch", "simulate", "backend"],
         default="simulation",
     )
     parser.add_argument("--batch_size", type=int, default=128, help="Batch size")

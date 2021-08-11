@@ -23,12 +23,12 @@ torch.manual_seed(42)
 
 
 def get_inputs(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers):
-    x = np.random.normal(size=(batch_size, input_dim))
-    z = np.random.normal(size=(batch_size, output_dim))
-    weights = [np.random.normal(size=(input_dim, hidden_dim))]
+    x = torch.randn(size=(batch_size, input_dim), dtype=torch.float32)
+    z = torch.randn(size=(batch_size, output_dim), dtype=torch.float32)
+    weights = [torch.randn(size=(input_dim, hidden_dim), dtype=torch.float32)]
     for i in range(1, num_hidden_layers - 1):
-        weights.append(np.random.normal(size=(hidden_dim, hidden_dim)))
-    weights.append(np.random.normal(size=(hidden_dim, output_dim)))
+        weights.append(torch.randn(size=(hidden_dim, hidden_dim), dtype=torch.float32))
+    weights.append(torch.randn(size=(hidden_dim, output_dim), dtype=torch.float32))
     return x, z, weights
 
 
@@ -93,7 +93,7 @@ def mlp_dist_ir_pytorch_backend(
         device=topology.devices[0],
     )
     seq_executor = SequentialExecutor("numpy")
-    input_data = [torch.tensor(v) for v in [x, z] + weights]
+    input_data = [x, z] + weights
     fn = infer_types(fn, fn.inputs)
 
     # Measure actual execution time
@@ -117,9 +117,9 @@ def mlp_dist_ir_pytorch_backend(
 
 def mlp_pure_pytorch(x, z, weights, warmup_steps=5, active_steps=50, profile=False):
     batch_size = x.shape[0]
-    x = torch.from_numpy(x).cuda()
-    z = torch.from_numpy(z).cuda()
-    weights = [torch.from_numpy(w).cuda() for w in weights]
+    x = x.cuda()
+    z = z.cuda()
+    weights = [w.cuda() for w in weights]
     events = []
 
     if active_steps < 10:

@@ -45,8 +45,8 @@ def calibrate_simulator():
         _, runtimes = run_pytorch(
             fn=fn,
             inputs=[
-                torch.randn(size=fn.inputs[0].type.shape),
-                torch.randn(size=fn.inputs[1].type.shape),
+                torch.randn(size=fn.inputs[0].type.shape, dtype=torch.float32),
+                torch.randn(size=fn.inputs[1].type.shape, dtype=torch.float32),
             ],
             use_gpu=True,
             num_repetitions=10,

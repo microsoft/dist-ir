@@ -28,7 +28,7 @@ def calibrate_simulator():
     all_input_dims = [1024, 2048, 4096]
     all_output_dims = [1024, 2048, 4096]
     n = len(all_batch_sizes) * len(all_input_dims) * len(all_output_dims)
-    X = np.zeros(shape=(n, 2))
+    X = np.zeros(shape=(n, 3))
     Y = np.zeros(shape=(n,))
     device = Device(0, "gpu")
     for i, (batch_size, input_dim, output_dim) in enumerate(
@@ -41,6 +41,7 @@ def calibrate_simulator():
         flops = (2 * x.shape[1] - 1) * x.shape[0] * y.shape[1]
         X[i][0] = data_size
         X[i][1] = flops
+        X[i][2] = 1
 
         _, runtimes = run_pytorch(
             fn=fn,
@@ -55,8 +56,8 @@ def calibrate_simulator():
         pytorch_latency = np.median(runtimes[0])
         Y[i] = pytorch_latency
 
-    reg = LinearRegression(positive=True).fit(X, Y)
-    return 1.0 / reg.coef_[0], 1.0 / reg.coef_[1], reg.intercept_
+    reg = LinearRegression(positive=True, fit_intercept=False).fit(X, Y)
+    return 1.0 / reg.coef_[0], 1.0 / reg.coef_[1], reg.coef_[2]
 
 
 def main():

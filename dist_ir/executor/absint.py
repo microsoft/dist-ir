@@ -7,6 +7,7 @@ A semantics is a mapping: OpType -> List[Tuple[Signature, Implementation]].
 OpType is a string, Signature is a tuple of python types (e.g. Tensor,
 np.ndarray), and Implementation is a python function implementing the op that
 additionally takes the Op as its first input and returns corresponding outputs.
+(TODO instead of passing the op, should we pass the attributes as kwargs?)
 
 The order of implementations in the list is sorted into groups according to
 number of inputs, and the implementations in each group are sorted in
@@ -23,9 +24,9 @@ TODO also assume there are no entries with duplicate signatures?
 import networkx as nx
 import numpy as np
 import torch
-from dist_ir.executor.concrete_value import ConcreteValue
 from typing import Any, Callable, Dict, List, Sequence, Tuple
 
+from .concrete_value import ConcreteValue, wrap_concrete_register
 from ..ir import Function, Op, Value
 from ..ir.type import *
 from .numpy_register import NumPyRegister
@@ -47,6 +48,15 @@ _type_abstraction_graph: nx.DiGraph = nx.transitive_closure(
             (np.ndarray, Tensor),
             (torch.Tensor, Tensor),
             (tuple, TupleType),
+            # TODO (if needed) have ConcreteBool, ConcreteFloat, etc
+            (ConcreteValue, Bool),
+            (ConcreteValue, Float32),
+            (ConcreteValue, Float64),
+            (ConcreteValue, Int32),
+            (ConcreteValue, Int64),
+            (ConcreteValue, Tensor),
+            (ConcreteValue, Tensor),
+            (ConcreteValue, TupleType),
         ]
     )
 )
@@ -222,10 +232,7 @@ def _dispatch(
     See module docstring for more details.
     """
     implementations = semantics[op_type]
-    input_types = tuple(
-        type(input.val) if isinstance(input, ConcreteValue) else type(input)
-        for input in inputs
-    )
+    input_types = tuple(type(input) for input in inputs)
 
     # Find most precise implementation that matches input_types
     # (We break ties arbitrarily using lexicographic ordering)
@@ -240,8 +247,8 @@ def _dispatch(
 
 _semantics = {}
 update_semantics_with_register(_semantics, TypePropRegister)
-update_semantics_with_register(_semantics, NumPyRegister)
-update_semantics_with_register(_semantics, TorchRegister)
+update_semantics_with_register(_semantics, wrap_concrete_register(NumPyRegister))
+update_semantics_with_register(_semantics, wrap_concrete_register(TorchRegister))
 interpreter = AbstractInterpreter(AbstractState, _semantics)
 
 

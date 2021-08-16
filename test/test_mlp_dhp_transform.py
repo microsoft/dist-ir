@@ -2,15 +2,10 @@ from collections import defaultdict
 import numpy as np
 import re
 
-from dist_ir.importer import import_from_onnx, parse_tensor_from_file
-from dist_ir.ir import FunctionMaker, cpprint, pformat, Device, Topology, Value
-from dist_ir.executor import infer_types, SequentialExecutor
-from dist_ir.executor.cost_model import CostModel
-from dist_ir.ir.type import Bool, Float32, Int64, Tensor
-from dist_ir.transforms import (
-    mlp_dhp_transform,
-    PipeDreamScheduler,
-)
+from dist_ir.ir import FunctionMaker, Topology
+from dist_ir.executor import infer_types, SequentialExecutor, ConcreteValue
+from dist_ir.ir.type import Float32, Tensor
+from dist_ir.transforms import mlp_dhp_transform
 
 BATCH_SIZE = 64
 INPUT_DIM = 64
@@ -147,11 +142,17 @@ def _test_helper(
     # init_function.outputs = transformed_function.inputs, so get types from there:
     transformed_function = infer_types(transformed_function, init_function.outputs)
 
-    input_data = [np.random.normal(size=inp.type.shape) for inp in function.inputs]
+    input_data = [
+        ConcreteValue(np.random.normal(size=inp.type.shape), d0)
+        for inp in function.inputs
+    ]
     ex = SequentialExecutor("numpy")
     outputs = ex.compute(function, input_data)
     dist_input_data = ex.compute(init_function, input_data)
     transformed_outputs = ex.compute(transformed_function, dist_input_data)
+    # TODO verify outputs are on expected devices
+    outputs = [v.val for v in outputs]
+    transformed_outputs = [v.val for v in transformed_outputs]
 
     if hp_degree > 1:
         _verify_hp(

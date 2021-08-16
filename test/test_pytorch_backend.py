@@ -1,11 +1,10 @@
-from collections import defaultdict
-import csv
 import numpy as np
 import pytest
 import torch
 
 from dist_ir.backend.torch import run_pytorch
 from dist_ir.executor import SequentialExecutor
+from dist_ir.executor.concrete_value import ConcreteValue
 from dist_ir.executor.cost_model import CostModel
 from dist_ir.executor.simulator import Simulator
 from dist_ir.executor.type_inference import infer_types
@@ -128,8 +127,10 @@ def test_owt(num_devices, num_layers):
         else:
             input_arrays += np.split(weights[l], num_devices, axis=1)
     input_arrays += np.split(x, num_devices)
+    inputs = [ConcreteValue(v, None) for v in input_arrays]
     ex = SequentialExecutor("numpy")
-    output_arrays = ex.compute(fn, input_arrays)
+    outputs = ex.compute(fn, inputs)
+    output_arrays = [v.val for v in outputs]
 
     # Expected results
     y = x

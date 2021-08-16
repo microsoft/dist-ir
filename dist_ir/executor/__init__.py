@@ -1,4 +1,5 @@
 from .absint import AbstractInterpreter, AbstractState
+from .concrete_value import ConcreteValue
 from .cost_model import CostModel
 from .simulator import Simulator, PostTypeInferenceSimulator
 from .sequential_executor import SequentialExecutor

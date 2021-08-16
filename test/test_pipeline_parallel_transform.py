@@ -2,7 +2,7 @@ import numpy as np
 
 from dist_ir.ir import cpprint
 from dist_ir.transforms import PipelineParallelTransform
-from dist_ir.executor import SequentialExecutor
+from dist_ir.executor import ConcreteValue, SequentialExecutor
 from . import pipeline_parallel_utils as utils
 
 
@@ -48,9 +48,11 @@ def test_mnist_fw_bw():
     _z = np.ones((batch_size, 1))
     _wA = np.ones((4, 2))
     _wB = np.ones((2, 1))
-    orig_res = ex.compute(function, [_x, _z, _wA, _wB])
+    # TODO output devices are correct
+    inputs = [ConcreteValue(v, None) for v in [_x, _z, _wA, _wB]]
+    orig_res = ex.compute(function, inputs)
 
-    transformed_res = ex.compute(transformed_function, [_x, _z, _wA, _wB])
+    transformed_res = ex.compute(transformed_function, inputs)
 
     print("-" * 88)
     print("Original function results")
@@ -64,7 +66,7 @@ def test_mnist_fw_bw():
     print()
 
     for a, b in zip(orig_res, transformed_res):
-        np.testing.assert_array_almost_equal(a, b)
+        np.testing.assert_array_almost_equal(a.val, b.val)
 
 
 if __name__ == "__main__":

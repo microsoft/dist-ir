@@ -232,7 +232,7 @@ class CostModel:
                 )
         average_bandwidth = np.mean(all_bandwidths)
         average_input_size = np.mean([x.size() for x in xs]) * xs[0].dtype.size()
-        per_device_data = 2 * average_input_size * (len(devices) - 1) / len(devices)
+        per_device_data = 2 * average_input_size * (len(devices) - 1)
         per_device_data_gb = per_device_data / BYTES_IN_Gb
         cost = per_device_data_gb / average_bandwidth
         return {device: cost for device in devices}
@@ -241,7 +241,7 @@ class CostModel:
         input_size = xs[0].size()
         devices = [x.device for x in xs]
         num_devices = len(devices)
-        per_device_data = 2 * input_size * (num_devices - 1) / num_devices
+        per_device_data = 2 * input_size * (num_devices - 1)
         per_device_data_gb = per_device_data / BYTES_IN_Gb
         all_bandwidths = []
         for i in range(len(devices)):

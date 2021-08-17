@@ -271,6 +271,12 @@ def get_topology(
     network_bandwidth=64,
     kernel_launch_overhead=1e-5,
 ):
+    if isinstance(network_bandwidth, float) or isinstance(network_bandwidth, int):
+        network_bandwidth_ = {}
+        for i in range(world_size + 1):
+            for j in range(i + 1, world_size + 1):
+                network_bandwidth_[(i, j)] = network_bandwidth
+        network_bandwidth = network_bandwidth_
     topology = Topology()
     topology.add_device(
         "gpu",
@@ -286,14 +292,9 @@ def get_topology(
             kernel_launch_overhead=kernel_launch_overhead,
         )
         for j in range(0, i):
-            if j == 0:
-                topology.set_bandwidth(
-                    topology.devices[i], topology.devices[j], network_bandwidth
-                )
-            else:
-                topology.set_bandwidth(
-                    topology.devices[i], topology.devices[j], network_bandwidth
-                )
+            topology.set_bandwidth(
+                topology.devices[i], topology.devices[j], network_bandwidth[(j, i)]
+            )
     return topology
 
 
@@ -306,7 +307,11 @@ def simulate(function, input_types, topology):
 def main(args):
     world_size = args.dp_degree * args.hp_degree * args.pp_degree
     topology = get_topology(
-        world_size, args.device_throughput, args.dram_bandwidth, args.network_bandwidth
+        world_size,
+        args.device_throughput,
+        args.dram_bandwidth,
+        args.network_bandwidth,
+        args.kernel_launch_overhead,
     )
 
     if args.mode == "training":
@@ -388,6 +393,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--dram_bandwidth", type=float, default=9e11, help="DRAM Bandwidth"
+    )
+    parser.add_argument(
+        "--kernel_launch_overhead",
+        type=float,
+        default=1e-5,
+        help="Kernel launch overhead",
     )
     parser.add_argument(
         "--mode",

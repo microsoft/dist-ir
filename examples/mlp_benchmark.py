@@ -13,11 +13,12 @@ from dist_ir.executor import (
     CostModel,
     Simulator,
     SequentialExecutor,
-    calibrate_simulator,
+    calibrate_device_parameters,
+    calibrate_network_bandwidth,
     infer_types,
 )
 from dist_ir.transforms import mlp_dhp_transform
-from examples import mlp
+from examples import mlp, mlp_grid_search
 
 torch.manual_seed(42)
 
@@ -44,15 +45,23 @@ def mlp_dist_ir_simulation(
     device_throughput,
     dram_bandwidth,
     kernel_launch_overhead,
-    max_memory_gb=10,
+    network_bandwidth,
+    d,
+    t,
+    p,
+    k,
+    max_memory_GB=10,
     warmup_steps=5,
     active_steps=50,
+    verbose=False,
 ):
+    world_size = d * t * p
     topology = mlp.get_topology(
-        1,
+        world_size,
         device_throughput=device_throughput,
         dram_bandwidth=dram_bandwidth,
         kernel_launch_overhead=kernel_launch_overhead,
+        network_bandwidth=network_bandwidth,
     )
     fn = mlp.mlp(
         batch_size,
@@ -62,7 +71,17 @@ def mlp_dist_ir_simulation(
         num_hidden_layers,
         device=topology.devices[0],
     )
-    input_types = tuple(inp.type for inp in fn.inputs)
+    if world_size > 1:
+        init_fn, fn = mlp_dhp_transform(fn, d, t, p, k, topology.devices)
+        init_fn = infer_types(init_fn, init_fn.inputs)
+        input_types = tuple(output.type for output in init_fn.outputs)
+    else:
+        input_types = tuple(inp.type for inp in fn.inputs)
+    if verbose:
+        init_fn = infer_types(init_fn, init_fn.inputs)
+        fn = infer_types(fn, init_fn.outputs)
+        cpprint(fn)
+
     simulator = Simulator(CostModel(topology))
     simulation = simulator.interpret(fn, input_types)
     simulated_time = max([simulation.timestamps[d] for d in simulation.timestamps])
@@ -79,11 +98,17 @@ def mlp_dist_ir_pytorch_backend(
     x,
     z,
     weights,
+    d,
+    t,
+    p,
+    k,
     warmup_steps=5,
     active_steps=50,
     profile=False,
+    verbose=False,
 ):
-    topology = mlp.get_topology(1)
+    world_size = d * t * p
+    topology = mlp.get_topology(world_size)
     fn = mlp.mlp(
         batch_size,
         input_dim,
@@ -92,9 +117,19 @@ def mlp_dist_ir_pytorch_backend(
         num_hidden_layers,
         device=topology.devices[0],
     )
-    seq_executor = SequentialExecutor("numpy")
     input_data = [x, z] + weights
-    fn = infer_types(fn, fn.inputs)
+    if world_size > 1:
+        init_fn, fn = mlp_dhp_transform(fn, d, t, p, k, topology.devices)
+        init_fn = infer_types(init_fn, init_fn.inputs)
+        fn = infer_types(fn, init_fn.outputs)
+        ex = SequentialExecutor("numpy")
+        input_data = [
+            torch.from_numpy(v).to(torch.float32)
+            for v in ex.compute(init_fn, [v.numpy() for v in input_data])
+        ]
+    if verbose:
+        fn = infer_types(fn, fn.inputs)
+        cpprint(fn)
 
     # Measure actual execution time
     per_rank_outputs, runtimes = run_pytorch(
@@ -108,9 +143,12 @@ def mlp_dist_ir_pytorch_backend(
     # TODO or median of max?
     actual_time = max(np.median(times) for times in runtimes)
 
-    gradients = [
-        per_rank_outputs[0][i] for i, v in enumerate(fn.outputs) if "dw" in v.name
-    ]
+    if world_size == 1:
+        gradients = [
+            per_rank_outputs[0][i] for i, v in enumerate(fn.outputs) if "dw" in v.name
+        ]
+    else:
+        gradients = None
 
     return gradients, actual_time
 
@@ -193,8 +231,14 @@ def benchmark(
     device_throughput,
     dram_bandwidth,
     kernel_launch_overhead,
-    max_memory=10,
+    network_bandwidth,
+    d=1,
+    t=1,
+    p=1,
+    k=1,
+    max_memory_GB=10,
 ):
+    world_size = d * t * p
     x, z, weights = get_inputs(
         batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers
     )
@@ -210,8 +254,13 @@ def benchmark(
         device_throughput,
         dram_bandwidth,
         kernel_launch_overhead,
+        network_bandwidth,
+        d,
+        t,
+        p,
+        k,
     )
-    if peak_memory / (1024 ** 3) > max_memory:
+    if peak_memory / (1024 ** 3) > max_memory_GB:
         return -1, -1, -1
 
     dist_ir_gradients, pytorch_backend_time = mlp_dist_ir_pytorch_backend(
@@ -223,18 +272,97 @@ def benchmark(
         x,
         z,
         weights,
+        d,
+        t,
+        p,
+        k,
     )
-
     torch.cuda.empty_cache()
 
-    pytorch_gradients, pure_pytorch_time = mlp_pure_pytorch(x, z, weights)
+    if world_size == 1:
+        pytorch_gradients, pure_pytorch_time = mlp_pure_pytorch(x, z, weights)
 
-    for x, y in zip(pytorch_gradients, dist_ir_gradients):
-        np.testing.assert_array_almost_equal(
-            x.detach().cpu().numpy(), y.detach().cpu().numpy(), decimal=2
-        )
+        for x, y in zip(pytorch_gradients, dist_ir_gradients):
+            np.testing.assert_array_almost_equal(
+                x.detach().cpu().numpy(), y.detach().cpu().numpy(), decimal=2
+            )
 
-    return simulated_time, pytorch_backend_time, pure_pytorch_time
+        return simulated_time, pytorch_backend_time, pure_pytorch_time
+    else:
+        return simulated_time, pytorch_backend_time
+
+
+def distributed_grid_search(
+    device_throughput, dram_bandwidth, kernel_launch_overhead, network_bandwidth
+):
+    batch_size = 8192
+    all_dims = [1024, 2048, 4096]
+    all_num_layers = [8, 16]
+    world_size = torch.cuda.device_count()
+    all_degrees = mlp_grid_search.get_all_degrees(world_size)
+    configs = []
+    for (d, t, p) in all_degrees:
+        if p == 1:
+            k = 1
+        else:
+            for i in range(1, 5):
+                k = int(2 ** i)
+
+        for (dim, num_layers) in itertools.product(all_dims, all_num_layers):
+            configs.append((d, t, p, k, dim, num_layers))
+
+    fieldnames = [
+        "Dim",
+        "Layers",
+        "Data parallel degree",
+        "Tensor model parallel degree",
+        "Pipeline parallel degree",
+        "Microbatches",
+        "Simulated time",
+        "PyTorch backend time",
+    ]
+
+    with open("mlp_benchmark_.csv", "w") as f:
+        writer = csv.writer(f)
+        writer.writerow(fieldnames)
+        for (d, t, p, k, dim, layers) in configs:
+            # for (d, t, p, k, dim, layers) in tqdm.tqdm(configs):
+            try:
+                assert d > 1 or t > 1 or p > 1
+                simulated_time, pytorch_backend_time = benchmark(
+                    batch_size,
+                    dim,
+                    dim,
+                    dim,
+                    layers,
+                    device_throughput,
+                    dram_bandwidth,
+                    kernel_launch_overhead,
+                    network_bandwidth,
+                    d,
+                    t,
+                    p,
+                    k,
+                )
+            except Exception as e:
+                traceback.print_exc()
+                simulated_time = -1
+                pytorch_backend_time = -1
+                pure_pytorch_time = -1
+            writer.writerow(
+                [
+                    dim,
+                    layers,
+                    d,
+                    t,
+                    p,
+                    k,
+                    simulated_time,
+                    pytorch_backend_time,
+                ]
+            )
+            f.flush()
+            torch.cuda.empty_cache()
 
 
 def grid_search(device_throughput, dram_bandwidth, kernel_launch_overhead):
@@ -287,20 +415,35 @@ def grid_search(device_throughput, dram_bandwidth, kernel_launch_overhead):
 
 
 def main(args):
-    if args.calibrate and (args.mode == "simulate" or args.mode == "grid_search"):
-        print("Calibrating simulator...")
+    if args.calibrate_device_parameters and (
+        args.mode == "simulate" or args.mode == "grid_search"
+    ):
+        print("Calibrating device parameters...")
         (
             args.dram_bandwidth,
             args.device_throughput,
             args.kernel_launch_overhead,
-        ) = calibrate_simulator()
-        print("Calibration results:")
+        ) = calibrate_device_parameters()
         print(f"DRAM bandwidth: {args.dram_bandwidth:.2e}")
         print(f"Device throughput: {args.device_throughput:.2e}")
         print(f"Kernel launch overhead: {args.kernel_launch_overhead:.2e}")
+    if args.calibrate_network_bandwidth and (
+        args.mode == "simulate" or args.mode == "grid_search"
+    ):
+        args.network_bandwidth = calibrate_network_bandwidth()
+        print(f"Network bandwidth: {args.network_bandwidth}")
     if args.mode == "grid_search":
         grid_search(
-            args.device_throughput, args.dram_bandwidth, args.kernel_launch_overhead
+            args.device_throughput,
+            args.dram_bandwidth,
+            args.kernel_launch_overhead,
+        )
+    elif args.mode == "distributed_grid_search":
+        distributed_grid_search(
+            args.device_throughput,
+            args.dram_bandwidth,
+            args.kernel_launch_overhead,
+            args.network_bandwidth,
         )
     elif args.mode == "simulate":
         x, z, weights = get_inputs(
@@ -318,6 +461,12 @@ def main(args):
             args.device_throughput,
             args.dram_bandwidth,
             args.kernel_launch_overhead,
+            args.network_bandwidth,
+            args.d,
+            args.t,
+            args.p,
+            args.k,
+            verbose=args.verbose,
         )
         print(f"Simulated latency: {simulated_time * 1000:.2f} ms")
         print(f"Simulated peak memory: {peak_memory / (1024 ** 3):.2f} GB")
@@ -334,9 +483,14 @@ def main(args):
             x,
             z,
             weights,
+            args.d,
+            args.t,
+            args.p,
+            args.k,
             warmup_steps=args.warmup_steps,
             active_steps=args.active_steps,
             profile=args.profile,
+            verbose=args.verbose,
         )
         print(f"PyTorch backend latency: {pytorch_backend_time * 1000:.2f} ms")
     elif args.mode == "pytorch":
@@ -359,8 +513,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MLP benchmark")
     parser.add_argument(
         "--mode",
-        choices=["grid_search", "pytorch", "simulate", "backend"],
-        default="simulation",
+        choices=[
+            "grid_search",
+            "distributed_grid_search",
+            "pytorch",
+            "simulate",
+            "backend",
+        ],
+        required=True,
     )
     parser.add_argument("--batch_size", type=int, default=128, help="Batch size")
     parser.add_argument("--dim", type=int, default=256, help="Weight dim")
@@ -368,7 +528,16 @@ if __name__ == "__main__":
     parser.add_argument("--warmup_steps", type=int, default=5, help="# warmup steps")
     parser.add_argument("--active_steps", type=int, default=100, help="# active steps")
     parser.add_argument(
-        "--calibrate", action="store_true", default=False, help="Calibrate simulator"
+        "--calibrate_device_parameters",
+        action="store_true",
+        default=False,
+        help="Calibrate device parameters",
+    )
+    parser.add_argument(
+        "--calibrate_network_bandwidth",
+        action="store_true",
+        default=False,
+        help="Calibrate network bandwidth",
     )
     parser.add_argument("--profile", action="store_true", default=False, help="Profile")
     parser.add_argument(
@@ -378,10 +547,18 @@ if __name__ == "__main__":
         "--dram_bandwidth", type=float, default=9e11, help="DRAM Bandwidth"
     )
     parser.add_argument(
+        "--network_bandwidth", type=float, default=64, help="Network bandwidth in Gbps"
+    )
+    parser.add_argument(
         "--kernel_launch_overhead",
         type=float,
         default=1e-5,
         help="Kernel launch overhead",
     )
+    parser.add_argument("-d", type=int, default=1, help="Data parallel degree")
+    parser.add_argument("-t", type=int, default=1, help="Tensor model parallel degree")
+    parser.add_argument("-p", type=int, default=1, help="Pipeline parallel degree")
+    parser.add_argument("-k", type=int, default=1, help="# microbatches")
+    parser.add_argument("--verbose", action="store_true", help="Verbose")
     args = parser.parse_args()
     main(args)

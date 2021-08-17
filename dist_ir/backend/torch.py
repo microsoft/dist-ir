@@ -394,6 +394,10 @@ def run_function(
         kwargs = {} if op.attributes is None else {**op.attributes}
         kwargs["ctx"] = ctx
 
+        # TODO: Consider adding this to mitigate network contention:
+        # if "MPI" in op.op_type or op.op_type == "Send":
+        #     torch.cuda.synchronize()
+
         output = op_to_torch[op.op_type](*inputs, **kwargs)
 
         if len(op.outputs) > 1:
@@ -431,6 +435,10 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
         ranks = [ctx.device_to_rank[d] for d in group]
         # ctx is a curried arg, hence is thread-local and can be modified:
         ctx.groups[group] = dist.new_group(ranks)
+    if ctx.world_size > 1:
+        global_group = sorted(
+            list(ctx.groups.items()), key=lambda x: len(x[0]), reverse=True
+        )[0][1]
 
     if ctx.use_gpu:
         # Move inputs to GPU
@@ -459,9 +467,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
             wait=num_wait_steps, warmup=num_warmup_steps, active=num_repetitions
         ),
         # on_trace_ready=lambda p: p.export_chrome_trace(f"{rank}_profile.json"),
-        on_trace_ready=torch.profiler.tensorboard_trace_handler(
-            f"{fn.name}_{rank}_profile"
-        ),
+        on_trace_ready=torch.profiler.tensorboard_trace_handler(f"{fn.name}_profile"),
     ) as p:
         for i in range(num_warmup_steps + num_repetitions):
             add_event()
@@ -469,14 +475,14 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
                 try:
                     outputs = run_function(ctx, fn, inputs)
                     if ctx.world_size > 1:
-                        torch.distributed.barrier()
+                        torch.distributed.barrier(group=global_group)
                 except Exception as e:
                     print_exc()
                     sys.exit(1)
             else:
                 outputs = run_function(ctx, fn, inputs)
                 if ctx.world_size > 1:
-                    torch.distributed.barrier()
+                    torch.distributed.barrier(group=global_group)
 
             if i == (num_warmup_steps + num_repetitions - 1):
                 add_event()

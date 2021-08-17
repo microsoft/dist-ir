@@ -1,12 +1,19 @@
 import itertools
-import torch
-import numpy as np
 from sklearn.linear_model import LinearRegression
+import numpy as np
+import time
+import torch
 from tqdm import tqdm
 
-from dist_ir.ir import FunctionMaker
+from dist_ir.ir import FunctionMaker, Topology, cpprint
 from dist_ir.ir.type import Device, Float32, Tensor
 from dist_ir.backend.torch import run_pytorch
+from .type_inference import infer_types
+from .sequential_executor import SequentialExecutor
+from .cost_model import CostModel
+from .simulator import Simulator
+
+BYTES_IN_Gb = 1.25e8
 
 
 def _matmul(batch_size, input_dim, output_dim, device):
@@ -23,7 +30,129 @@ def _matmul(batch_size, input_dim, output_dim, device):
     return fn.finalize()
 
 
-def calibrate_simulator():
+def _send(src, dst, m=1024, n=1024):
+    fn = FunctionMaker(name=f"send_{src.device_id}_to_{dst.device_id}")
+    x = fn.add_input_value("x", Tensor(shape=(m, n), dtype=Float32(), device=src))
+    y = fn.add_op(
+        op_type="Send", inputs=[x], attributes={"device": dst}, output_names=["y"]
+    )
+    return fn.finalize()
+
+
+def _allreduce(devices, m=1024, n=1024):
+    fn = FunctionMaker(name=f"allreduce")
+    xs = [
+        fn.add_input_value(
+            f"x{i}", Tensor(shape=(m, n), dtype=Float32(), device=devices[i])
+        )
+        for i in range(2)
+    ]
+    xs_contention = [
+        fn.add_input_value(
+            f"x2", Tensor(shape=(8192, 8192), dtype=Float32(), device=devices[2])
+        ),
+        fn.add_input_value(
+            f"x3", Tensor(shape=(8192, 8192), dtype=Float32(), device=devices[2])
+        ),
+        fn.add_input_value(
+            f"x4", Tensor(shape=(8192, 8192), dtype=Float32(), device=devices[3])
+        ),
+        fn.add_input_value(
+            f"x5", Tensor(shape=(8192, 8192), dtype=Float32(), device=devices[3])
+        ),
+    ]
+    ys = fn.add_op(
+        op_type="MPIAllreduce",
+        inputs=xs,
+        output_names=[f"y{i}" for i in range(2)],
+    )
+    ys_contention = [
+        fn.add_op(op_type="MatMul", inputs=xs_contention[:2], output_names=["y2"]),
+        fn.add_op(op_type="MatMul", inputs=xs_contention[2:], output_names=["y3"]),
+    ]
+    """
+    ys_contention = fn.add_op(
+        op_type="MPIAllreduce",
+        inputs=xs_contention,
+        output_names=[f"y{i}" for i in range(2, 4)],
+    )
+    """
+    return fn.finalize()
+
+
+def _memcpy(rank):
+    t = torch.randn(size=(8192, 8192), dtype=torch.float32)
+    start = time.time()
+    t = t.to(f"cuda:{rank}")
+    torch.cuda.synchronize()
+    latency = time.time() - start
+    size_in_bytes = t.element_size() * t.nelement()
+    return size_in_bytes / BYTES_IN_Gb / latency
+
+
+def network_bandwidth_debug():
+    # devices = [Device(i + 1, "gpu") for i in range(4)]
+    topology = Topology()
+    topology.add_device(0, "cpu")
+    for i in range(4):
+        topology.add_device(i + 1, "gpu")
+    for i in range(4):
+        for j in range(i + 1, 4):
+            topology.set_bandwidth(topology.devices[i + 1], topology.devices[j + 1], 56)
+    sizes = [32, 64, 128, 256, 1024, 2048, 4096, 8192, 16384]
+    for i in range(len(sizes)):
+        for j in range(i, len(sizes)):
+            m = sizes[i]
+            n = sizes[j]
+            fn = _allreduce(topology.devices, m, n)
+            fn = infer_types(fn, fn.inputs)
+            _, runtimes = run_pytorch(
+                fn=fn,
+                inputs=[
+                    torch.randn(size=fn.inputs[i].type.shape, dtype=torch.float32)
+                    for i in range(len(fn.inputs))
+                ],
+                use_gpu=True,
+                num_repetitions=10,
+                num_warmup=5,
+            )
+            latency = np.median(runtimes[0])
+            # ex = Simulator(CostModel(topology))
+            # state = ex.interpret(fn, tuple(inp.type for inp in fn.inputs))
+            # latency = np.max([state.timestamps[d] for d in state.timestamps])
+            # bandwidth = fn.inputs[0].type.size() / BYTES_IN_Gb / latency
+
+            print(
+                f"{m}x{n}: shape={fn.inputs[0].type.shape}, "
+                f"size={fn.inputs[0].type.size()}, latency={latency}"
+            )
+
+
+def calibrate_network_bandwidth():
+    devices = [Device(i + 1, "gpu") for i in range(torch.cuda.device_count())]
+    bandwidths = {}
+    for i in range(len(devices)):
+        bandwidths[(0, i + 1)] = _memcpy(i)
+        for j in range(i + 1, len(devices)):
+            fn = _send(devices[i], devices[j])
+            _, runtimes = run_pytorch(
+                fn=fn,
+                inputs=[
+                    torch.randn(size=fn.inputs[0].type.shape, dtype=torch.float32),
+                ],
+                use_gpu=True,
+                num_repetitions=10,
+                num_warmup=5,
+            )
+            pytorch_latency = np.median(runtimes[0])
+            print(f"Latency[{i+1},{j+1}] = {pytorch_latency}")
+            bandwidths[(i + 1, j + 1)] = (
+                fn.inputs[0].type.size() / BYTES_IN_Gb / pytorch_latency
+            )
+    return bandwidths
+
+
+def calibrate_device_parameters():
     all_batch_sizes = [1024, 2048, 4096]
     all_input_dims = [1024, 2048, 4096]
     all_output_dims = [1024, 2048, 4096]
@@ -60,12 +189,7 @@ def calibrate_simulator():
     return 1.0 / reg.coef_[0], 1.0 / reg.coef_[1], reg.coef_[2]
 
 
-def main():
-    dram_bandwidth, device_throughput, kernel_launch_overhead = calibrate_simulator()
-    print(f"Device throughput: {device_throughput:e}")
-    print(f"DRAM bandwidth: {dram_bandwidth:.2e}")
-    print(f"Kernel launch overhead: {kernel_launch_overhead}")
-
-
-if __name__ == "__main__":
-    main()
+def calibrate_simulator():
+    device_parameters = calibrate_device_parameters()
+    network_bandwidth = calibrate_network_bandwidth()
+    return (*device_parameters, network_bandwidth)

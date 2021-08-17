@@ -1,18 +1,18 @@
 from copy import deepcopy
 from collections import defaultdict
 import json
-from typing import Any, Dict, Sequence, Set, Tuple
-
-import numpy as np
+from typing import Any, Callable, Dict, Sequence, Set, Tuple
 
 from ..ir import Function, Device, Op
-from ..ir.type import Type, Tensor
-from .absint import AbstractState, AbstractInterpreter
+from ..ir.type import Type
+from .absint import (
+    AbstractState,
+    interpreter,
+    update_semantics_with_register,
+    _dispatch,
+)
 from .concrete_value import ConcreteValue
-from .cost_model import KERNEL_LAUNCH_OVERHEAD
-from .numpy_register import NumPyRegister
-from .type_inference import TypePropRegister
-from .mixed_register import MixedImplementations
+from .cost_model import CostModel, KERNEL_LAUNCH_OVERHEAD
 
 SECONDS_TO_MICROSECONDS = 1e6
 
@@ -32,6 +32,7 @@ def _get_all_devices(values: Sequence[Any]) -> Set[Device]:
 
 
 class SimulatorState(AbstractState):
+    # TODO remove subclass, unnecessary init args?
     def __init__(self, function: Function, inputs: Sequence[Any]):
         AbstractState.__init__(self, function, inputs)
         self.timestamps = defaultdict(float)
@@ -146,124 +147,36 @@ def _simulate_op(
     _update_live_memory(state, live_memory_deltas)
 
 
-def _create_semantics(cost_functions, implementations):
-    """Creates a semantics (dictionary mapping op signatures to abstract state
-    modifiers) given a dictionary of cost functions (input values -> costs) and
-    a dictionary of implementations (input values -> output values).
-    """
+class Simulator:
+    def __init__(
+        self,
+        cost_model: CostModel,
+        # self, cost_functions: Dict[Tuple[str, Tuple[type, ...]], Callable]
+    ) -> None:
+        # Make semantics of cost_functions
+        self.cost_functions = {}
+        update_semantics_with_register(self.cost_functions, cost_model.cost_functions)
 
-    def _default_cost_fn(op, inputs, outputs):
-        devices = _get_all_devices(inputs + outputs)
-        return {device: KERNEL_LAUNCH_OVERHEAD for device in devices}
+    def simulate(self, function: Function, inputs: Sequence[Any]) -> SimulatorState:
+        state = SimulatorState(function, inputs)
 
-    def convert_impl(impl_fn, cost_fn):
-        def semantics(op: Op, state: SimulatorState):
-            # Find the op's inputs in state's environment
+        # First, interpret the function on inputs to get all values
+        state = interpreter.interpret(function, inputs, state)
+
+        # Then, run each op's cost function
+        for op in function.ops:
+            # Find the op's inputs & outputs in state's environment
             inputs = tuple(state.env[v] for v in op.inputs)
+            outputs = tuple(state.env[v] for v in op.outputs)
 
-            # Run the abstract/concrete implementation
-            outputs = impl_fn(op, *inputs)
-
-            # Run the cost function
-            costs = cost_fn(op, *inputs)
-
-            if not isinstance(outputs, tuple):
-                outputs = (outputs,)
-            for x, val in zip(op.outputs, outputs):
-                state.env[x] = val
+            # Dispatch to find cost function for op
+            try:
+                cost_function = _dispatch(self.cost_functions, op.op_type, inputs)
+                costs = cost_function(op, *inputs)
+            except ValueError:
+                # Use default cost function if signature not in cost_functions
+                devices = _get_all_devices(inputs + outputs)
+                costs = {device: KERNEL_LAUNCH_OVERHEAD for device in devices}
 
             _simulate_op(state, op, costs, inputs, outputs)
-
-        return semantics
-
-    semantics = {}
-    for signature in implementations:
-        # Use default cost function if signature not in cost_functions:
-        cost_fn = cost_functions.get(signature, _default_cost_fn)
-        semantics[signature] = convert_impl(implementations[signature], cost_fn)
-
-    return semantics
-
-
-# All these cost functions assume they are getting the type of each input value
-# TODO instead of passing the op, should we pass the attributes as kwargs?
-
-
-def Simulator(cost_model):
-    return AbstractInterpreter(
-        SimulatorState,
-        _create_semantics(
-            cost_model.cost_functions,
-            {**NumPyRegister, **MixedImplementations, **TypePropRegister},
-        ),
-    )
-
-
-# TODO: Remove once we have simulation with mixed types
-def _create_post_type_inference_semantics(cost_functions):
-    """Creates a semantics (dictionary mapping op signatures to abstract state
-    modifiers) given a dictionary of cost functions (input values -> costs) and
-    a dictionary of implementations (input values -> output values).
-    """
-
-    def convert_impl(cost_fn):
-        def semantics(op: Op, state: SimulatorState):
-            # Find the op's inputs in state's environment
-            inputs = tuple(state.env[v] for v in op.inputs)
-            outputs = tuple(x.type for x in op.outputs)
-
-            # Run the cost function
-            costs = cost_fn(op, *inputs)
-
-            for x in op.outputs:
-                state.env[x] = x.type
-
-            _simulate_op(state, op, costs, inputs, outputs)
-
-        return semantics
-
-    signatures = cost_functions.keys()
-
-    return {f: convert_impl(cost_functions[f]) for f in signatures}
-
-
-def PostTypeInferenceSimulator(cost_model):
-    return AbstractInterpreter(
-        SimulatorState,
-        _create_post_type_inference_semantics(cost_model.cost_functions),
-    )
-
-
-# TODO: Remove once we have simulation with mixed types
-def _create_post_type_inference_semantics(cost_functions):
-    """Creates a semantics (dictionary mapping op signatures to abstract state
-    modifiers) given a dictionary of cost functions (input values -> costs) and
-    a dictionary of implementations (input values -> output values).
-    """
-
-    def convert_impl(cost_fn):
-        def semantics(op: Op, state: SimulatorState):
-            # Find the op's inputs in state's environment
-            inputs = tuple(state.env[v] for v in op.inputs)
-            outputs = tuple(x.type for x in op.outputs)
-
-            # Run the cost function
-            costs = cost_fn(op, *inputs)
-
-            for x in op.outputs:
-                state.env[x] = x.type
-
-            _simulate_op(state, op, costs, inputs, outputs)
-
-        return semantics
-
-    signatures = cost_functions.keys()
-
-    return {f: convert_impl(cost_functions[f]) for f in signatures}
-
-
-def PostTypeInferenceSimulator(cost_model):
-    return AbstractInterpreter(
-        SimulatorState,
-        _create_post_type_inference_semantics(cost_model.cost_functions),
-    )
+        return state

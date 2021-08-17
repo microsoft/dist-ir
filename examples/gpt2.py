@@ -10,7 +10,6 @@ import dist_ir.backend.torch as torch_backend
 from dist_ir.executor import (
     CostModel,
     infer_types,
-    PostTypeInferenceSimulator,
     Simulator,
     SequentialExecutor,
 )

@@ -2,7 +2,6 @@ import numpy as np
 
 from dist_ir.executor import absint
 from dist_ir.executor.numpy_register import NumPyRegister
-from dist_ir.executor.simulator import MixedImplementations
 
 # NOTE: Disabling mlir_parser tests to pass GitHub automated test
 # from dist_ir.importer import mlir_parser
@@ -82,3 +81,6 @@ def _test_shape_slice():
     ]
     state = mixed_interpreter.interpret(fn, abs_inputs)
     assert state.env[fn.outputs[0]] == Tensor(shape=(1, 6))
+
+
+# TODO add some basic absint tests here

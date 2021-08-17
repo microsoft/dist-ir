@@ -19,7 +19,7 @@ def test_single_device():
     function = function.finalize()
     function = infer_types(function, [a, b])
     simulator = Simulator(CostModel(topology))
-    state = simulator.interpret(function, (v.type for v in function.inputs))
+    state = simulator.simulate(function, (v.type for v in function.inputs))
     assert d in state.timestamps
     assert d in state.peak_memory
     # TODO: Check specific values
@@ -57,7 +57,7 @@ def _test_data_parallel():
 
     cpprint(transformed_function)
     simulator = Simulator(CostModel(topology))
-    simulator_state = simulator.interpret(
+    simulator_state = simulator.simulate(
         transformed_function, (v.type for v in transformed_function.inputs)
     )
     assert d0 in simulator_state.timestamps
@@ -79,5 +79,9 @@ def test_chrome_trace():
     function = function.finalize()
     function = infer_types(function, [a, b])
     simulator = Simulator(CostModel(topology))
-    state = simulator.interpret(function, (v.type for v in function.inputs))
+    state = simulator.simulate(function, (v.type for v in function.inputs))
     state.dump_chrome_trace("test/trace.json")
+
+
+if __name__ == "__main__":
+    test_single_device()

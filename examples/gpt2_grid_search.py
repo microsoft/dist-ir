@@ -9,11 +9,7 @@ import tqdm
 from dist_ir.importer import import_from_onnx
 from dist_ir.ir import FunctionMaker, cpprint, Device, Topology, Value
 from dist_ir.ir.type import Float32, Tensor
-from dist_ir.executor import (
-    CostModel,
-    SequentialExecutor,
-    PostTypeInferenceSimulator,
-)
+from dist_ir.executor import CostModel, SequentialExecutor
 from dist_ir.transforms import gpt2_dhp_transform, filter_transform
 from . import gpt2
 

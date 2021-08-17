@@ -9,7 +9,6 @@ import torch
 import dist_ir.backend.torch as torch_backend
 from dist_ir.executor import (
     CostModel,
-    infer_types,
     Simulator,
     SequentialExecutor,
 )
@@ -568,8 +567,8 @@ def get_transformed_function_and_input_data(
 
 def simulate(function, input_data, topology):
     input_types = (v.type for v in function.inputs)
-    simulator = PostTypeInferenceSimulator(CostModel(topology))
-    simulation = simulator.interpret(function, input_types)
+    simulator = Simulator(CostModel(topology))
+    simulation = simulator.simulate(function, input_types)
     return simulation
 
 
@@ -584,7 +583,6 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
         function,
         pytorch_input_data,
         use_gpu=use_gpu,
-        run_type_inference=False,
     )
     return per_rank_outputs, runtimes
 

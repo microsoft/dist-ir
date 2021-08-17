@@ -1,10 +1,14 @@
 from collections import defaultdict
-from dist_ir.executor.type_inference import TypePropRegister
 from typing import Any, Dict, Sequence, Set, Tuple
 
-from ..ir import Function, FunctionMaker, Device, Op, Value
+from ..ir import Function, FunctionMaker, Device, Op
 from ..ir.type import Type, Float32, Float64, Int64, Tensor
-from .absint import AbstractState, AbstractInterpreter
+from .absint import (
+    AbstractState,
+    _dispatch,
+    interpreter,
+    update_semantics_with_register,
+)
 
 
 # TODO merge this with torch backend -- it breaks semantics to have P2P send/recv
@@ -131,7 +135,7 @@ def _send_projector(op: Op, state: ProjectorState):
     )
 
 
-ProjectorRegister = {
+_ProjectorRegister = {
     ("Add", (Tensor, Tensor)): _identity_projector,
     ("Add", (Tensor, Float32)): _identity_projector,
     ("Cast", (Tensor,)): _identity_projector,
@@ -189,85 +193,13 @@ ProjectorRegister = {
 }
 
 
-def _create_semantics(type_prop_register, projector_register):
-    """Creates a semantics for AbstractInterpreter by combining a register of
-    projector functions and the type propagation register.
-    """
-
-    def convert_impl(type_prop_fn, projector):
-        def semantics(op: Op, state: AbstractState):
-            # Find the op's inputs in state's environment
-            inputs = tuple(state.env[v] for v in op.inputs)
-            # Run the type propagation function
-            outputs = type_prop_fn(op, *inputs)
-
-            # Write outputs to state's environment
-            if not isinstance(outputs, tuple):
-                outputs = (outputs,)
-            for x, val in zip(op.outputs, outputs):
-                state.env[x] = val
-
-            # Project op and add to appropriate per-rank function
-            projector(op, state)
-
-            # If op involves more than one device, create a group
-            devices = [v.device for v in outputs] + [v.type.device for v in op.inputs]
-            group = _make_group(devices)
-            if len(group) > 1:
-                state.groups.add(group)
-
-        return semantics
-
-    signatures = set(projector_register.keys()).intersection(type_prop_register.keys())
-
-    return {
-        f: convert_impl(type_prop_register[f], projector_register[f])
-        for f in signatures
-    }
+# Make semantics of projector functions
+_ProjectorSemantics = {}
+update_semantics_with_register(_ProjectorSemantics, _ProjectorRegister)
 
 
-def _create_post_type_inference_semantics(projector_register):
-    """Creates a semantics for AbstractInterpreter using a register of
-    projector functions.
-    """
-
-    def convert_impl(projector):
-        def semantics(op: Op, state: AbstractState):
-            for output in op.outputs:
-                state.env[output] = output.type
-
-            # Project op and add to appropriate per-rank function
-            projector(op, state)
-
-            # If op involves more than one device, create a group
-            devices = [
-                v.type.device for v in op.outputs if v.type.device is not None
-            ] + [v.type.device for v in op.inputs if v.type.device is not None]
-            group = _make_group(devices)
-            if len(group) > 1:
-                state.groups.add(group)
-
-        return semantics
-
-    signatures = projector_register.keys()
-
-    return {f: convert_impl(projector_register[f]) for f in signatures}
-
-
-Projector = AbstractInterpreter(
-    AbstractState=ProjectorState,
-    semantics=_create_semantics(TypePropRegister, ProjectorRegister),
-)
-
-PostTypeInferenceProjector = AbstractInterpreter(
-    AbstractState=ProjectorState,
-    semantics=_create_post_type_inference_semantics(ProjectorRegister),
-)
-
-
-# TODO: Remove run_type_inference once we have mixed implementations
 def project(
-    fn: Function, input_types: Sequence[Type], run_type_inference: bool = True
+    fn: Function, input_types: Sequence[Type]
 ) -> Tuple[Dict[Device, Function], Set[Tuple[Device]]]:
     """Project `fn` to per-rank functions. Returns a mapping from Devices to
     per-rank Functions, and a set of Device groups that perform collective
@@ -279,10 +211,25 @@ def project(
     for v in fn.inputs:
         state.per_rank_fns[v.type.device].inputs.append(v)
 
-    if run_type_inference:
-        state = Projector.interpret(fn, input_types, state=state)
-    else:
-        state = PostTypeInferenceProjector.interpret(fn, input_types, state=state)
+    # First, interpret the function on inputs to get all values
+    state = interpreter.interpret(fn, input_types, state)
+
+    # Then, run each op's projector function
+    for op in fn.ops:
+        # Find the op's inputs & outputs in state's environment
+        inputs = tuple(state.env[v] for v in op.inputs)
+        outputs = tuple(state.env[v] for v in op.outputs)
+
+        # Dispatch to find projector function for op
+        projector = _dispatch(_ProjectorSemantics, op.op_type, inputs)
+        # Project op and add to appropriate per-rank function
+        projector(op, state)
+
+        # If op involves more than one device, create a group
+        devices = [v.device for v in outputs] + [v.type.device for v in op.inputs]
+        group = _make_group(devices)
+        if len(group) > 1:
+            state.groups.add(group)
 
     result_fns = {}
     for d, per_rank_fn in state.per_rank_fns.items():

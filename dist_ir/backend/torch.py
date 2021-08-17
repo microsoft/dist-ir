@@ -520,7 +520,6 @@ def run_pytorch(
     num_warmup=0,
     debug_mock=False,
     debug_stacktrace=False,
-    run_type_inference=True,  # TODO: Remove once we have mixed implementations
 ):
     """Project `fn` and run on `inputs` over `num_devices` devices using the
     PyTorch backend.
@@ -538,9 +537,7 @@ def run_pytorch(
     # print(*(x.shape for x in inputs))
     # cpprint(fn)
 
-    device_to_fns, groups = project(
-        fn, tuple(v.type for v in fn.inputs), run_type_inference
-    )
+    device_to_fns, groups = project(fn, tuple(v.type for v in fn.inputs))
 
     # Map between DistIR devices and pytorch ranks:
     device_to_rank = {}

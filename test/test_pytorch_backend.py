@@ -205,20 +205,21 @@ def test_mlp_grid_search():
 
         # Create random input data
         input_data = tuple(
-            np.random.randn(*v.type.shape).astype(np.float32) for v in seq_mlp.inputs
+            ConcreteValue(np.random.randn(*v.type.shape).astype(np.float32), d0)
+            for v in seq_mlp.inputs
         )
 
         init_fn, fn = mlp_dist(seq_mlp, d, h, p, m, topology)
         print(fn.name)
 
         # Simulate
-        simulation = simulator.interpret(fn, (v.type for v in fn.inputs))
+        simulation = simulator.simulate(fn, (v.type for v in fn.inputs))
         simulated_time = max([simulation.timestamps[d] for d in simulation.timestamps])
         print(simulated_time)
 
         # Reference-execute init_fn to get inputs for fn
         dist_input_data = seq_executor.compute(init_fn, input_data)
-        dist_input_data = tuple(torch.tensor(t) for t in dist_input_data)
+        dist_input_data = tuple(torch.tensor(t.val) for t in dist_input_data)
         assert all(
             t.shape == v.type.shape for (t, v) in zip(dist_input_data, fn.inputs)
         )

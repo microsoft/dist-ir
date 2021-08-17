@@ -73,15 +73,14 @@ class SimulatorState(AbstractState):
         with open(fname, "w") as fout:
             json.dump(_trace, fout, indent=0)
 
-
-def _update_live_memory(state, deltas):
-    for device in deltas:
-        state.live_memory[device].append(
-            (
-                state.timestamps[device],
-                state.live_memory[device][-1][1] + deltas[device],
+    def update_live_memory(self, deltas):
+        for device in deltas:
+            self.live_memory[device].append(
+                (
+                    self.timestamps[device],
+                    self.live_memory[device][-1][1] + deltas[device],
+                )
             )
-        )
 
 
 def _simulate_op(
@@ -119,7 +118,7 @@ def _simulate_op(
         output_devices = _get_all_devices([output])
         for output_device in output_devices:
             live_memory_deltas[output_device] += output.size()
-    _update_live_memory(state, live_memory_deltas)
+    state.update_live_memory(live_memory_deltas)
 
     # Update the peak memory.
     for device in state.live_memory:
@@ -144,7 +143,7 @@ def _simulate_op(
             input_devices = in_edge.type.get_all_devices()
             for input_device in input_devices:
                 live_memory_deltas[input_device] -= in_edge.type.size()
-    _update_live_memory(state, live_memory_deltas)
+    state.update_live_memory(live_memory_deltas)
 
 
 class Simulator:

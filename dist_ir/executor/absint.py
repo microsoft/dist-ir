@@ -112,6 +112,31 @@ def update_semantics_with_register(
     return semantics
 
 
+def dispatch(
+    semantics: Dict[str, List[Tuple[Tuple[type, ...], Callable]]],
+    op_type: str,
+    inputs: Sequence[Any],
+) -> Callable:
+    """Function dispatch. Looks at the types of `inputs` and finds the appropriate
+    implementation function in `semantics`.
+
+    `semantics`: Mapping: OpType -> List[Tuple[Signature, Implementation]].
+    See module docstring for more details.
+    """
+    implementations = semantics[op_type]
+    input_types = tuple(type(input) for input in inputs)
+
+    # Find most precise implementation that matches input_types
+    # (We break ties arbitrarily using lexicographic ordering)
+    # Note: if this takes too long, memoize the answers
+    # TODO do binary search?
+    for (signature, implementation) in implementations:
+        if _abstractable_types(input_types, signature):
+            return implementation
+
+    raise ValueError(f"Could not dispatch {op_type} with input types {input_types}")
+
+
 class AbstractState:
     """An abstract state. env is an environment, i.e. a mapping from Value
     objects to abstract values.
@@ -204,7 +229,7 @@ class AbstractInterpreter:
                 inputs = tuple(state.env[v] for v in op.inputs)
 
                 # Execute this op's semantics on the state
-                implementation = _dispatch(self.semantics, op.op_type, inputs)
+                implementation = dispatch(self.semantics, op.op_type, inputs)
                 # TODO abstract inputs as necessary
                 outputs = implementation(op, *inputs)
 
@@ -219,58 +244,8 @@ class AbstractInterpreter:
         return state
 
 
-# TODO Move above AbstractState?
-def _dispatch(
-    semantics: Dict[str, List[Tuple[Tuple[type, ...], Callable]]],
-    op_type: str,
-    inputs: Sequence[Any],
-) -> Callable:
-    """Function dispatch. Looks at the types of `inputs` and finds the appropriate
-    implementation function in `semantics`.
-
-    `semantics`: Mapping: OpType -> List[Tuple[Signature, Implementation]].
-    See module docstring for more details.
-    """
-    implementations = semantics[op_type]
-    input_types = tuple(type(input) for input in inputs)
-
-    # Find most precise implementation that matches input_types
-    # (We break ties arbitrarily using lexicographic ordering)
-    # Note: if this takes too long, memoize the answers
-    # TODO do binary search?
-    for (signature, implementation) in implementations:
-        if _abstractable_types(input_types, signature):
-            return implementation
-
-    raise ValueError(f"Could not dispatch {op_type} with input types {input_types}")
-
-
 _semantics = {}
 update_semantics_with_register(_semantics, TypePropRegister)
 update_semantics_with_register(_semantics, wrap_concrete_register(NumPyRegister))
 update_semantics_with_register(_semantics, wrap_concrete_register(TorchRegister))
 interpreter = AbstractInterpreter(AbstractState, _semantics)
-
-
-# TODO remove
-def convert_impls_to_semantics(impls):
-    """Converts a dictionary of semantics functions that take in input values
-    and spit out output values to one that modifies an abstract state in place.
-    """
-
-    def convert_impl(impl_fn):
-        def semantics(op: Op, state: AbstractState):
-            # Find the op's inputs in state's environment
-            inputs = (state.env[v] for v in op.inputs)
-            # Execute the implementation on the inputs
-            outputs = impl_fn(op, *inputs)
-            # Put the outputs back into the state's environment
-            if len(op.outputs) == 1:
-                outputs = (outputs,)
-            assert len(outputs) == len(op.outputs)
-            for x, val in zip(op.outputs, outputs):
-                state.env[x] = val
-
-        return semantics
-
-    return {signature: convert_impl(impl) for signature, impl in impls.items()}

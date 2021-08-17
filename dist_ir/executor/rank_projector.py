@@ -5,7 +5,7 @@ from ..ir import Function, FunctionMaker, Device, Op
 from ..ir.type import Type, Float32, Float64, Int64, Tensor
 from .absint import (
     AbstractState,
-    _dispatch,
+    dispatch,
     interpreter,
     update_semantics_with_register,
 )
@@ -225,7 +225,7 @@ def project(
         outputs = tuple(state.env[v] for v in op.outputs)
 
         # Dispatch to find projector function for op
-        projector = _dispatch(_ProjectorSemantics, op.op_type, inputs)
+        projector = dispatch(_ProjectorSemantics, op.op_type, inputs)
         # Project op and add to appropriate per-rank function
         projector(op, state)
 

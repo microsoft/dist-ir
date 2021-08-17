@@ -9,7 +9,7 @@ from .absint import (
     AbstractState,
     interpreter,
     update_semantics_with_register,
-    _dispatch,
+    dispatch,
 )
 from .concrete_value import ConcreteValue
 from .cost_model import CostModel, KERNEL_LAUNCH_OVERHEAD
@@ -170,7 +170,7 @@ class Simulator:
 
             # Dispatch to find cost function for op
             try:
-                cost_function = _dispatch(self.cost_functions, op.op_type, inputs)
+                cost_function = dispatch(self.cost_functions, op.op_type, inputs)
                 costs = cost_function(op, *inputs)
             except ValueError:
                 # Use default cost function if signature not in cost_functions

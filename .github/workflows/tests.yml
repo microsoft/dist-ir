@@ -55,13 +55,13 @@ jobs:
     - name: Download GPT ONNX file (if not already present)
       run: |
         if [ ! -f "$GPT_ONNX_FNAME" ]; then \
-          sudo apt-get install git-lfs; \
+          pushd /tmp; \
           git clone https://github.com/onnx/models.git; \
           pushd models; \
           git checkout ${{ env.GPT_ONNX_COMMIT }}; \
           git lfs pull --include="text/machine_comprehension/gpt-2/model/${GPT_ONNX_FNAME}" --exclude ""; \
-          mv text/machine_comprehension/gpt-2/model/${GPT_ONNX_FNAME} ../${GPT_ONNX_FNAME}; \
-          popd; \
+          popd; popd; \
+          mv /tmp/models/text/machine_comprehension/gpt-2/model/${GPT_ONNX_FNAME} ./; \
         fi
 
     - name: Check formatting (black)

@@ -2,7 +2,7 @@ import numpy as np
 
 from dist_ir.ir import cpprint
 from dist_ir.transforms import PipelineParallelTransform
-from dist_ir.executor import ConcreteValue, SequentialExecutor
+from dist_ir.executor import ConcreteValue, sequentially_execute
 from . import pipeline_parallel_utils as utils
 
 
@@ -43,16 +43,15 @@ def test_mnist_fw_bw():
     cpprint(transformed_function)
 
     batch_size = 16
-    ex = SequentialExecutor("numpy")
     _x = np.arange(batch_size * 4).reshape((batch_size, 4))
     _z = np.ones((batch_size, 1))
     _wA = np.ones((4, 2))
     _wB = np.ones((2, 1))
     # TODO output devices are correct
     inputs = [ConcreteValue(v, None) for v in [_x, _z, _wA, _wB]]
-    orig_res = ex.compute(function, inputs)
+    orig_res = sequentially_execute(function, inputs)
 
-    transformed_res = ex.compute(transformed_function, inputs)
+    transformed_res = sequentially_execute(transformed_function, inputs)
 
     print("-" * 88)
     print("Original function results")

@@ -3,7 +3,7 @@ import numpy as np
 import re
 
 from dist_ir.ir import FunctionMaker, Topology
-from dist_ir.executor import infer_types, SequentialExecutor, ConcreteValue
+from dist_ir.executor import infer_types, sequentially_execute, ConcreteValue
 from dist_ir.ir.type import Float32, Tensor
 from dist_ir.transforms import mlp_dhp_transform
 
@@ -146,10 +146,9 @@ def _test_helper(
         ConcreteValue(np.random.normal(size=inp.type.shape), d0)
         for inp in function.inputs
     ]
-    ex = SequentialExecutor("numpy")
-    outputs = ex.compute(function, input_data)
-    dist_input_data = ex.compute(init_function, input_data)
-    transformed_outputs = ex.compute(transformed_function, dist_input_data)
+    outputs = sequentially_execute(function, input_data)
+    dist_input_data = sequentially_execute(init_function, input_data)
+    transformed_outputs = sequentially_execute(transformed_function, dist_input_data)
     # TODO verify outputs are on expected devices
     outputs = [v.val for v in outputs]
     transformed_outputs = [v.val for v in transformed_outputs]

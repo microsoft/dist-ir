@@ -3,7 +3,7 @@ import numpy as np
 from pathlib import Path
 import pytest
 
-from dist_ir.executor import SequentialExecutor
+from dist_ir.executor import sequentially_execute
 from dist_ir.ir import cpprint
 from examples.gpt2 import get_transformed_function_and_input_data
 
@@ -50,8 +50,7 @@ def _run_gpt(
     if verbose:
         cpprint(transformed_function)
     if use_real_weights:
-        ex = SequentialExecutor("numpy")
-        outputs = ex.compute(transformed_function, initialized_input_data)
+        outputs = sequentially_execute(transformed_function, initialized_input_data)
         return outputs
 
 

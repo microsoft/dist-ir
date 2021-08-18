@@ -3,7 +3,7 @@ import pytest
 import torch
 
 from dist_ir.backend.torch import run_pytorch
-from dist_ir.executor import SequentialExecutor
+from dist_ir.executor import sequentially_execute
 from dist_ir.executor.concrete_value import ConcreteValue
 from dist_ir.executor.cost_model import CostModel
 from dist_ir.executor.simulator import Simulator
@@ -141,8 +141,7 @@ def test_owt(num_devices, num_layers, use_gpu):
             input_arrays += np.split(weights[l], num_devices, axis=1)
     input_arrays += np.split(x, num_devices)
     inputs = [ConcreteValue(v, None) for v in input_arrays]
-    ex = SequentialExecutor("numpy")
-    outputs = ex.compute(fn, inputs)
+    outputs = sequentially_execute(fn, inputs)
     output_arrays = [v.val for v in outputs]
 
     # Expected results
@@ -226,7 +225,6 @@ def test_mlp_grid_search(use_gpu):
         d0 = topology.add_device("gpu")
         add_devices_to_topology(topology, world_size)
         simulator = Simulator(CostModel(topology))
-        seq_executor = SequentialExecutor("numpy")
         seq_mlp = mlp(batch_size, hidden_dim, hidden_dim, hidden_dim, num_layers, d0)
         seq_mlp = infer_types(seq_mlp, seq_mlp.inputs)
 
@@ -245,7 +243,7 @@ def test_mlp_grid_search(use_gpu):
         print(simulated_time)
 
         # Reference-execute init_fn to get inputs for fn
-        dist_input_data = seq_executor.compute(init_fn, input_data)
+        dist_input_data = sequentially_execute(init_fn, input_data)
         dist_input_data = tuple(torch.tensor(t.val) for t in dist_input_data)
         assert all(
             t.shape == v.type.shape for (t, v) in zip(dist_input_data, fn.inputs)

@@ -6,7 +6,7 @@ import time
 
 from dist_ir.importer import import_from_onnx, parse_tensor_from_file
 from dist_ir.ir import FunctionMaker, cpprint, pformat, Device, Topology, Value
-from dist_ir.executor import infer_types, SequentialExecutor, Simulator
+from dist_ir.executor import infer_types, sequentially_execute, Simulator
 from dist_ir.executor.cost_model import CostModel
 from dist_ir.ir.type import Bool, Float32, Int64, Tensor
 from dist_ir.transforms import (
@@ -53,11 +53,10 @@ def main(args):
     if args.verbose:
         cpprint(function)
     if args.evaluate:
-        ex = SequentialExecutor("numpy")
         input_data = [
             np.random.normal(size=(inp.type.shape)) for inp in function.inputs
         ]
-        res = ex.compute(function, input_data)
+        res = sequentially_execute(function, input_data)
 
     start_time = time.time()
     transformed_function = mlp_dhp_transform(
@@ -77,7 +76,7 @@ def main(args):
     if args.verbose:
         cpprint(transformed_function, width=1000)
     if args.evaluate:
-        transformed_res = ex.compute(transformed_function, input_data)
+        transformed_res = sequentially_execute(transformed_function, input_data)
         for i, a in enumerate(function.outputs):
             for j, b in enumerate(transformed_function.outputs):
                 if a.name == b.name and a.type.shape == b.type.shape:

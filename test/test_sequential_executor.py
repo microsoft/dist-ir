@@ -1,155 +1,98 @@
 from collections import OrderedDict
-from typing import Union
 
 import numpy as np
-import pytest
-import torch
 
-from dist_ir.executor.concrete_value import ConcreteValue
+from dist_ir.executor import ConcreteValue, sequentially_execute
 from dist_ir.ir import Device, FunctionMaker, cpprint
 from dist_ir.ir.type import Float32, Tensor, TupleType
 from dist_ir.ir.value import Value
-from dist_ir.executor import SequentialExecutor
 
 
 class Helper:
-    def __init__(self, backend):
-        self.backend = backend
-        self.executor = SequentialExecutor(self.backend)
+    def __init__(self):
         self.function = FunctionMaker()
         self.a = self.function.add_input_value("a", Tensor(Float32(), (4, 4)))
         self.b = self.function.add_input_value("b", Tensor(Float32(), (4, 4)))
         self.c = self.function.add_input_value("c", Tensor(Float32(), (4, 4)))
-        if self.backend == "numpy":
-            a = np.random.normal(size=(4, 4))
-            b = np.random.normal(size=(4, 4))
-            c = np.random.normal(size=(4, 4))
-        elif self.backend == "torch":
-            a = torch.randn(size=(4, 4))
-            b = torch.randn(size=(4, 4))
-            c = torch.randn(size=(4, 4))
-        else:
-            raise ValueError(f"Unknown backend {self.backend}")
+        a = np.random.normal(size=(4, 4))
+        b = np.random.normal(size=(4, 4))
+        c = np.random.normal(size=(4, 4))
         self.input_data = OrderedDict(((self.a, a), (self.b, b), (self.c, c)))
         for v in self.input_data:
             self.input_data[v] = ConcreteValue(self.input_data[v], None)
-        print(f"Backend: {self.backend}")
 
-    def input(self, v: Value) -> Union[np.ndarray, torch.tensor]:
+    def input(self, v: Value) -> np.ndarray:
         return self.input_data[v].val
 
 
-@pytest.fixture(params=["numpy", "torch"])
-def backend(request):
-    return request.param
-
-
-def test_single_add(backend):
-    h = Helper(backend)
+def test_single_add():
+    h = Helper()
     res = h.function.add_op("Add", "Add_0", inputs=[h.a, h.b])
     h.function.set_outputs([res])
     h.function = h.function.finalize()
-    (result,) = h.executor.compute(h.function, h.input_data.values())
-    if h.backend == "numpy":
-        assert np.array_equal(result.val, np.add(h.input(h.a), h.input(h.b)))
-    elif h.backend == "torch":
-        assert result.val.equal(torch.add(h.input(h.a), h.input(h.b)))
+    (result,) = sequentially_execute(h.function, h.input_data.values())
+    assert np.array_equal(result.val, np.add(h.input(h.a), h.input(h.b)))
 
 
-def test_double_add(backend):
-    h = Helper(backend)
+def test_double_add():
+    h = Helper()
     x = h.function.add_op("Add", "Add_0", inputs=[h.a, h.b])
     res = h.function.add_op("Add", "Add_1", inputs=[h.c, x])
     h.function.set_outputs([res])
     h.function = h.function.finalize()
-    (result,) = h.executor.compute(h.function, h.input_data.values())
-    if h.backend == "numpy":
-        assert np.array_equal(
-            result.val,
-            np.add(h.input(h.c), np.add(h.input(h.a), h.input(h.b))),
-        )
-    elif h.backend == "torch":
-        assert result.val.equal(
-            torch.add(
-                h.input(h.c),
-                torch.add(h.input(h.a), h.input(h.b)),
-            )
-        )
+    (result,) = sequentially_execute(h.function, h.input_data.values())
+    assert np.array_equal(
+        result.val,
+        np.add(h.input(h.c), np.add(h.input(h.a), h.input(h.b))),
+    )
 
 
-def test_double_add_inverted(backend):
-    h = Helper(backend)
+def test_double_add_inverted():
+    h = Helper()
     x = h.function.add_op("Add", "Add_0", inputs=[h.a, h.b])
     res = h.function.add_op("Add", "Add_1", inputs=[x, h.c])
     h.function.set_outputs([res])
     h.function = h.function.finalize()
-    (result,) = h.executor.compute(h.function, h.input_data.values())
-    if h.backend == "numpy":
-        assert np.array_equal(
-            result.val,
-            np.add(np.add(h.input(h.a), h.input(h.b)), h.input(h.c)),
-        )
-    elif h.backend == "torch":
-        assert result.val.equal(
-            torch.add(
-                torch.add(h.input(h.a), h.input(h.b)),
-                h.input(h.c),
-            )
-        )
+    (result,) = sequentially_execute(h.function, h.input_data.values())
+    assert np.array_equal(
+        result.val,
+        np.add(np.add(h.input(h.a), h.input(h.b)), h.input(h.c)),
+    )
 
 
-def test_single_matmul(backend):
-    h = Helper(backend)
+def test_single_matmul():
+    h = Helper()
     res = h.function.add_op("MatMul", "MatMul_0", inputs=[h.a, h.b])
     h.function.set_outputs([res])
     h.function = h.function.finalize()
-    (result,) = h.executor.compute(h.function, h.input_data.values())
-    if h.backend == "numpy":
-        assert np.array_equal(result.val, np.matmul(h.input(h.a), h.input(h.b)))
-    elif h.backend == "torch":
-        assert result.val.equal(torch.matmul(h.input(h.a), h.input(h.b)))
+    (result,) = sequentially_execute(h.function, h.input_data.values())
+    assert np.array_equal(result.val, np.matmul(h.input(h.a), h.input(h.b)))
 
 
-def test_double_matmul(backend):
-    h = Helper(backend)
+def test_double_matmul():
+    h = Helper()
     x = h.function.add_op("MatMul", "MatMul_0", inputs=[h.a, h.b])
     res = h.function.add_op("MatMul", "MatMul_1", inputs=[h.c, x])
     h.function.set_outputs([res])
     h.function = h.function.finalize()
-    (result,) = h.executor.compute(h.function, h.input_data.values())
-    if h.backend == "numpy":
-        assert np.array_equal(
-            result.val,
-            np.matmul(h.input(h.c), np.matmul(h.input(h.a), h.input(h.b))),
-        )
-    elif h.backend == "torch":
-        assert result.val.equal(
-            torch.matmul(
-                h.input(h.c),
-                torch.matmul(h.input(h.a), h.input(h.b)),
-            )
-        )
+    (result,) = sequentially_execute(h.function, h.input_data.values())
+    assert np.array_equal(
+        result.val,
+        np.matmul(h.input(h.c), np.matmul(h.input(h.a), h.input(h.b))),
+    )
 
 
-def test_double_matmul_inverted(backend):
-    h = Helper(backend)
+def test_double_matmul_inverted():
+    h = Helper()
     x = h.function.add_op("MatMul", "MatMul_0", inputs=[h.a, h.b])
     res = h.function.add_op("MatMul", "MatMul_1", inputs=[x, h.c])
     h.function.set_outputs([res])
     h.function = h.function.finalize()
-    (result,) = h.executor.compute(h.function, h.input_data.values())
-    if h.backend == "numpy":
-        assert np.array_equal(
-            result.val,
-            np.matmul(np.matmul(h.input(h.a), h.input(h.b)), h.input(h.c)),
-        )
-    elif h.backend == "torch":
-        assert result.val.equal(
-            torch.matmul(
-                torch.matmul(h.input(h.a), h.input(h.b)),
-                h.input(h.c),
-            )
-        )
+    (result,) = sequentially_execute(h.function, h.input_data.values())
+    assert np.array_equal(
+        result.val,
+        np.matmul(np.matmul(h.input(h.a), h.input(h.b)), h.input(h.c)),
+    )
 
 
 # TODO: Add test for op with multiple outputs
@@ -164,7 +107,6 @@ def test_double_matmul_inverted(backend):
 def _test_pmap_on_executor():
     d0 = Device(0, "gpu")
     d1 = Device(1, "gpu")
-    ex = SequentialExecutor("numpy")
 
     x_type = lambda d: Tensor(Float32(), (8, 4), device=d)
     y_type = lambda d: Tensor(Float32(), (4, 2), device=d)
@@ -196,7 +138,7 @@ def _test_pmap_on_executor():
     function = function.finalize()
 
     cpprint(function)
-    (res,) = ex.compute(function, [(_x_0, _x_1)])
+    (res,) = sequentially_execute(function, [(_x_0, _x_1)])
     assert np.array_equal(res[0], _x_0 + _x_0)
     assert np.array_equal(res[1], _x_1 + _x_1)
 
@@ -222,7 +164,7 @@ def _test_pmap_on_executor():
     function = function.finalize()
 
     cpprint(function)
-    (res,) = ex.compute(function, [(_x_0, _x_1), (_y_0, _y_1)])
+    (res,) = sequentially_execute(function, [(_x_0, _x_1), (_y_0, _y_1)])
     assert np.array_equal(res[0], np.matmul(_x_0, _y_0))
     assert np.array_equal(res[1], np.matmul(_x_1, _y_1))
 
@@ -250,7 +192,7 @@ def _test_pmap_on_executor():
     function = function.finalize()
 
     cpprint(function)
-    (res_wis, res_zis) = ex.compute(function, [(_x_0, _x_1), (_y_0, _y_1)])
+    (res_wis, res_zis) = sequentially_execute(function, [(_x_0, _x_1), (_y_0, _y_1)])
     assert np.array_equal(res_wis[0], _x_0 + _x_0)
     assert np.array_equal(res_wis[1], _x_1 + _x_1)
     assert np.array_equal(res_zis[0], np.matmul(_x_0, _y_0))
@@ -279,7 +221,7 @@ def _test_pmap_on_executor():
     function = function.finalize()
 
     cpprint(function)
-    (res_wis, res_zis) = ex.compute(function, [(_x_0,), (_y_0,)])
+    (res_wis, res_zis) = sequentially_execute(function, [(_x_0,), (_y_0,)])
     assert np.array_equal(res_wis[0], _x_0 + _x_0)
     assert np.array_equal(res_zis[0], np.matmul(_x_0, _y_0))
 
@@ -329,12 +271,11 @@ def _test_pmap_dp():
     function = function.finalize()
     cpprint(function)
 
-    ex = SequentialExecutor("numpy")
     _x = np.arange(16 * 4).reshape((16, 4))
     x_0, x_1 = _x[:8], _x[8:]
     _wA = np.ones((4, 2))
     _wB = np.ones((2, 1))
-    (res,) = ex.compute(function, [(x_0, x_1), (_wA, _wA), (_wB, _wB)])
+    (res,) = sequentially_execute(function, [(x_0, x_1), (_wA, _wA), (_wB, _wB)])
     assert np.array_equal(res[0], np.matmul(np.matmul(x_0, _wA), _wB))
     assert np.array_equal(res[1], np.matmul(np.matmul(x_1, _wA), _wB))
 

@@ -9,12 +9,13 @@ import torch
 import dist_ir.backend.torch as torch_backend
 from dist_ir.executor import (
     CostModel,
+    infer_types,
+    sequentially_execute,
     Simulator,
-    SequentialExecutor,
 )
 from dist_ir.importer import import_from_onnx
 from dist_ir.ir import cpprint, Device, FunctionMaker, Op, Topology, Value
-from dist_ir.ir.type import Float32, Tensor
+from dist_ir.ir.type import Float32, Int64, Tensor
 from dist_ir.transforms import (
     gpt2_dhp_transform,
     update_attributes,
@@ -491,14 +492,13 @@ def _transform(
         d_embd,
         n_head,
     )
-    ex = SequentialExecutor("numpy")
-    init_function = ex.infer_types(
+    init_function = infer_types(
         init_function,
         input_data,
         input_devices=[topology.devices[0] for _ in range(len(input_data))],
     )
-    initialized_input_data = ex.compute(init_function, input_data)
-    transformed_function = ex.infer_types(
+    initialized_input_data = sequentially_execute(init_function, input_data)
+    transformed_function = infer_types(
         transformed_function,
         initialized_input_data,
         [output.type.device for output in init_function.outputs],
@@ -535,9 +535,8 @@ def get_transformed_function_and_input_data(
         default_device=d0,
         use_real_weights=use_real_weights,
     )
-    ex = SequentialExecutor("numpy")
     if print_stats:
-        function = ex.infer_types(
+        function = infer_types(
             function,
             input_data,
             input_devices=[topology.devices[0] for _ in range(len(input_data))],

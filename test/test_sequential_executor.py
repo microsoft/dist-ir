@@ -39,7 +39,7 @@ class Helper:
         return self.input_data[v].val
 
 
-@pytest.fixture(params=["numpy", "torch"])
+@pytest.fixture(params=["numpy"])
 def backend(request):
     return request.param
 

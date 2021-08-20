@@ -56,22 +56,19 @@ def _cast_prop_fn(op, x):
     return Tensor(dtype=dtype, shape=x.shape, device=x.device)
 
 
-def _concat_prop_fn(op, x, y):
-    if not (
-        isinstance(x, Tensor)
-        and isinstance(y, Tensor)
-        and x.dtype == y.dtype
-        and x.device == y.device
+def _concat_prop_fn(op, *xs):
+    if not all(
+        isinstance(x, Tensor) and x.dtype == xs[0].dtype and x.device == xs[0].device
+        for x in xs
     ):
-        _raise_type_error(op, x, y)
+        _raise_type_error(op, *xs)
     dim = op.attributes["axis"]
-    for i, (d0, d1) in enumerate(zip(x.shape, y.shape)):
-        if i != dim and d0 != d1:
-            _raise_type_error(op, x, y)
-    output_shape = tuple(
-        n + (y.shape[i] if i == dim else 0) for i, n in enumerate(x.shape)
-    )
-    return Tensor(dtype=x.dtype, shape=output_shape, device=x.device)
+    for i, ds in enumerate(zip(x.shape for x in xs)):
+        if i != dim and any(d != ds[0] for d in ds):
+            _raise_type_error(op, *xs)
+    new_dim = sum(x.shape[dim] for x in xs)
+    output_shape = tuple(new_dim if i == dim else n for i, n in enumerate(xs[0].shape))
+    return Tensor(dtype=xs[0].dtype, shape=output_shape, device=xs[0].device)
 
 
 def _constant_prop_fn(op):
@@ -131,29 +128,46 @@ def _expand_prop_fn(op, x, y):
 
 
 def _gather_prop_fn(op, x, y):
-    # TODO: Compute the new shape directly instead of using numpy
-    # TODO: Fix so that y is a constant
     if not (
         isinstance(x, Tensor)
-        and x.shape is not None
         and isinstance(y, Tensor)
+        and x.shape is not None
         and y.shape is not None
+        and x.device is not None
+        and y.device is not None
+        and x.device == y.device
     ):
         _raise_type_error(op, x, y)
-    if x.device is None and y.device is None:
-        _raise_type_error(op, x, y)
-    elif x.device is not None and y.device is None:
-        device = x.device
-    elif x.device is None and y.device is not None:
-        device = y.device
+    device = x.device
+    if "axis" in op.attributes:
+        axis = op.attributes["axis"]
     else:
-        if x.device != y.device:
-            _raise_type_error(op, x, y)
-        device = x.device
-    temp = np.zeros(x.shape)
-    axis = op.attributes["axis"]
-    new_shape = np.take(temp, y.shape, axis=axis).shape
+        axis = 0
+    if axis == 0:
+        # Manually compute the new shape for the common case
+        new_shape = y.shape + x.shape[1:]
+    else:
+        raise NotImplementedError(
+            "Abstract gather type function only available when axis is 0"
+        )
     return Tensor(dtype=x.dtype, shape=new_shape, device=device)
+
+
+def _gemm_prop_fn(op, x, y, z):
+    if not (
+        isinstance(x, Tensor)
+        and isinstance(y, Tensor)
+        and isinstance(z, Tensor)
+        and x.dtype == y.dtype
+        and x.dtype == z.dtype
+        and x.device == y.device
+        and x.device == z.device
+        and x.shape[1] == y.shape[0]
+        and len(z.shape) == 1
+        and z.shape[0] == y.shape[1]
+    ):
+        _raise_type_error(op, x, y, z)
+    return Tensor(shape=(x.shape[0], y.shape[1]), dtype=x.dtype, device=x.device)
 
 
 def _identity_prop_fn(op, x):
@@ -200,10 +214,14 @@ def _matmul_prop_fn(op, x, y):
         and isinstance(y, Tensor)
         and x.dtype == y.dtype
         and x.device == y.device
-        and x.shape[1] == y.shape[0]
+        and len(x.shape) == len(y.shape)
+        and x.shape[len(x.shape) - 1] == y.shape[len(y.shape) - 2]
     ):
         _raise_type_error(op, x, y)
-    return Tensor(dtype=x.dtype, shape=(x.shape[0], y.shape[1]), device=x.device)
+    new_shape = list(x.shape[:-2])
+    new_shape.append(x.shape[len(x.shape) - 2])
+    new_shape.append(y.shape[len(y.shape) - 1])
+    return Tensor(dtype=x.dtype, shape=tuple(new_shape), device=x.device)
 
 
 def _matmul_grad_prop_fn(op, x, y, z):
@@ -404,6 +422,38 @@ def _mpi_scatter_prop_fn(op, x, to_tuple_type=False):
         )
 
 
+def _mul_prop_fn(op, x, y):
+    if not (
+        isinstance(x, Tensor)
+        and isinstance(y, Tensor)
+        and x.shape == y.shape
+        and x.dtype == y.dtype
+        and x.device == y.device
+    ):
+        _raise_type_error(op, x, y)
+    return x
+
+
+def _reduce_mean_prop_fn(op, x):
+    if not isinstance(x, Tensor):
+        _raise_type_error(op, x)
+    if "keepdims" in op.attributes:
+        keepdims = op.attributes["keepdims"]
+    else:
+        keepdims = 1
+    axis = set(tuple(op.attributes["axes"]))
+    output_shape = []
+    for i in range(len(x.shape)):
+        j = len(x.shape) - i - 1
+        reduce_dim = j in axis or (j == len(x.shape) - 1 and -1 in axis)
+        if not reduce_dim:
+            output_shape.append(x.shape[j])
+        elif keepdims:
+            output_shape.append(1)
+    output_shape.reverse()
+    return Tensor(shape=tuple(output_shape), dtype=x.dtype, device=x.device)
+
+
 def _relu_prop_fn(op, x):
     if not isinstance(x, Tensor):
         _raise_type_error(x)
@@ -421,12 +471,6 @@ def _relu_grad_prop_fn(op, x, y):
         _raise_type_error(op, x, y)
     return x
     # return Tensor(dtype=x.dtype, shape=(x.shape[1], y.shape[1]), device=x.device)
-
-
-def _reshape_prop_fn(op, x, y):
-    if not (isinstance(x, Tensor) and isinstance(y, Tensor) and x.device == y.device):
-        _raise_type_error(op, x, y)
-    return Tensor(device=x.device)
 
 
 def _select_prop_fn(op, x):
@@ -449,18 +493,32 @@ def _send_prop_fn(op, x):
     return Tensor(dtype=x.dtype, shape=x.shape, device=device)
 
 
-def _shape_prop_fn(op, x):
-    if not isinstance(x, Tensor):
-        _raise_type_error(op, x)
-    return x  # Tensor(dtype=Int64(), shape=None, device=x.device)
-
-
-def _slice_prop_fn(op, x, starts, ends, axes):
-    # We don't know the shape of the output, so:
-    return Tensor(dtype=x.dtype, shape=None, device=x.device)
-
-
 def _split_prop_fn(op, x):
+    axis = op.attributes["axis"]
+    split = op.attributes["split"]
+    sections = []
+    n = 0
+    for s in split[:-1]:
+        sections.append(n + s)
+        n += s
+    sections.append(x.shape[axis])
+    output_types = []
+    prev_section = 0
+    for section in sections:
+        output_shape = []
+        for i in range(axis):
+            output_shape.append(x.shape[i])
+        output_shape.append(section - prev_section)
+        for i in range(axis + 1, len(x.shape)):
+            output_shape.append(x.shape[i])
+        prev_section = section
+        output_types.append(
+            Tensor(shape=tuple(output_shape), device=x.device, dtype=x.dtype)
+        )
+    return tuple(output_types)
+
+
+def _split_uniform_prop_fn(op, x):
     if not isinstance(x, Tensor):
         _raise_type_error(op, x)
     num_splits = op.attributes["num_splits"]
@@ -470,28 +528,32 @@ def _split_prop_fn(op, x):
     assert output_shape[split_dim] % num_splits == 0
     output_shape[split_dim] //= num_splits
     output_shape = tuple(output_shape)
-    return tuple(
+    output_types = tuple(
         Tensor(dtype=x.dtype, shape=output_shape, device=x.device)
         for i in range(num_splits)
     )
+    if op.op_type == "SplitUniformToTupleType":
+        return TupleType(output_types)
+    else:
+        return output_types
 
 
-def _split_v2_prop_fn(op, x):
+def _softmax_prop_fn(op, x):
     if not isinstance(x, Tensor):
         _raise_type_error(op, x)
-    num_splits = op.attributes["num_splits"]
-    split_dim = op.attributes["dim"]
-    output_shape = list(x.shape)
-    # TODO: Move this check to attribute error function?
-    assert output_shape[split_dim] % num_splits == 0
-    output_shape[split_dim] //= num_splits
-    output_shape = tuple(output_shape)
-    return TupleType(
-        tuple(
-            Tensor(dtype=x.dtype, shape=output_shape, device=x.device)
-            for i in range(num_splits)
-        )
-    )
+    return x
+
+
+def _sqrt_prop_fn(op, x):
+    if not isinstance(x, Tensor):
+        _raise_type_error(op, x)
+    return x
+
+
+def _tanh_prop_fn(op, x):
+    if not isinstance(x, Tensor):
+        _raise_type_error(op, x)
+    return x
 
 
 def _transpose_prop_fn(op, x):
@@ -529,14 +591,32 @@ def _unsqueeze_prop_fn(op, x):
 TypePropRegister = {
     ("Add", (Tensor, Tensor)): _elementwise_tensor_op_prop_fn,
     ("Cast", (Tensor,)): _cast_prop_fn,
-    # ("Concat", (TupleType,)): _concat_prop_fn,
-    ("Concat", (Tensor, Tensor)): _concat_prop_fn,
-    ("Constant", ()): _constant_prop_fn,
+    ("Concat", tuple(Tensor for _ in range(2))): _concat_prop_fn,
+    ("Concat", tuple(Tensor for _ in range(3))): _concat_prop_fn,
+    ("Concat", tuple(Tensor for _ in range(4))): _concat_prop_fn,
+    ("Concat", tuple(Tensor for _ in range(5))): _concat_prop_fn,
+    ("Concat", tuple(Tensor for _ in range(3 * 2))): _concat_prop_fn,
+    ("Concat", tuple(Tensor for _ in range(3 * 4))): _concat_prop_fn,
+    ("Concat", tuple(Tensor for _ in range(3 * 8))): _concat_prop_fn,
+    ("Concat", tuple(Tensor for _ in range(3 * 16))): _concat_prop_fn,
+    ("Concat", tuple(Tensor for _ in range(3 * 32))): _concat_prop_fn,
+    ("Concat", tuple(Tensor for _ in range(3 * 64))): _concat_prop_fn,
+    ("Concat", tuple(Tensor for _ in range(3 * 128))): _concat_prop_fn,
+    ("Concat", tuple(Tensor for _ in range(3 * 256))): _concat_prop_fn,
+    ("Concat", tuple(Tensor for _ in range(3 * 2))): _concat_prop_fn,
+    ("Concat", tuple(Tensor for _ in range(3 * 4))): _concat_prop_fn,
+    ("Concat", tuple(Tensor for _ in range(3 * 8))): _concat_prop_fn,
+    ("Concat", tuple(Tensor for _ in range(3 * 16))): _concat_prop_fn,
+    ("Concat", tuple(Tensor for _ in range(3 * 32))): _concat_prop_fn,
+    ("Concat", tuple(Tensor for _ in range(3 * 64))): _concat_prop_fn,
+    ("Concat", tuple(Tensor for _ in range(3 * 128))): _concat_prop_fn,
+    ("Concat", tuple(Tensor for _ in range(3 * 256))): _concat_prop_fn,
     ("ConstantOfShape", (Tensor,)): _constant_of_shape_prop_fn,
     ("Div", (Tensor, Tensor)): _elementwise_tensor_op_prop_fn,
     ("Dropout", (Tensor, Tensor, type(Bool()))): _dropout_prop_fn,
     ("Expand", (Tensor, Tensor)): _expand_prop_fn,
     ("Gather", (Tensor, Tensor)): _gather_prop_fn,
+    ("Gemm", (Tensor, Tensor, Tensor)): _gemm_prop_fn,
     ("Identity", (Tensor,)): _identity_prop_fn,
     (
         "Join",
@@ -623,17 +703,19 @@ TypePropRegister = {
     ("MatMul", (Tensor, Tensor)): _matmul_prop_fn,
     ("MatMulGrad", (Tensor, Tensor, Tensor)): _matmul_grad_prop_fn,
     ("Min", (Tensor, Tensor)): _min_prop_fn,
+    ("Mul", (Tensor, Tensor)): _elementwise_tensor_op_prop_fn,
+    ("ReduceMean", (Tensor,)): _reduce_mean_prop_fn,
     ("Relu", (Tensor,)): _relu_prop_fn,
     ("ReluGrad", (Tensor, Tensor)): _relu_grad_prop_fn,
-    ("Reshape", (Tensor, Tensor)): _reshape_prop_fn,
     ("Select", (TupleType,)): _select_prop_fn,
     ("Send", (Tensor,)): _send_prop_fn,
-    ("Shape", (Tensor,)): _shape_prop_fn,
-    ("SplitDistIR", (Tensor,)): _split_prop_fn,
-    ("Split_v2", (Tensor,)): _split_v2_prop_fn,
-    # ("Shape", (Tensor,)): TODO
-    ("Slice", (Tensor, Tensor, Tensor, Tensor)): _slice_prop_fn,
+    ("SplitUniform", (Tensor,)): _split_uniform_prop_fn,
+    ("SplitUniformToTupleType", (Tensor,)): _split_uniform_prop_fn,
+    ("Split", (Tensor,)): _split_prop_fn,
+    ("Softmax", (Tensor,)): _softmax_prop_fn,
+    ("Sqrt", (Tensor,)): _sqrt_prop_fn,
     ("Sub", (Tensor, Tensor)): _elementwise_tensor_op_prop_fn,
+    ("Tanh", (Tensor,)): _tanh_prop_fn,
     ("Transpose", (Tensor,)): _transpose_prop_fn,
     ("Unsqueeze", (Tensor,)): _unsqueeze_prop_fn,
 }

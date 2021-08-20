@@ -10,6 +10,7 @@ from ..ir.type import Type, Tensor
 from .absint import AbstractState, AbstractInterpreter
 from .numpy_register import NumPyRegister
 from .type_inference import TypePropRegister
+from .mixed_register import MixedImplementations
 
 SECONDS_TO_MICROSECONDS = 1e6
 
@@ -33,6 +34,7 @@ class SimulatorState(AbstractState):
     def add_trace_event(self, op_type, device, start_time, duration):
         if device is None:
             raise ValueError(f"No device specified for {op_type} op trace event")
+
         self.trace.append(
             {
                 "name": op_type,
@@ -166,39 +168,6 @@ def _create_semantics(cost_functions, implementations):
 # TODO instead of passing the op, should we pass the attributes as kwargs?
 
 
-# Some "mixed" abstract/concrete implementations of ops that are needed for
-# more precise simulation:
-# TODO what's the right place for these?
-
-
-def _shape_abstract_to_concrete(op, x: Tensor):
-    return np.array(x.shape, dtype=np.int64)
-
-
-def _matmul_abstract(op, x, y):
-    if not (x.dtype == y.dtype and x.device == y.device and x.shape[1] == y.shape[0]):
-        raise Exception
-        # _raise_type_error(op, x, y)
-    return Tensor(dtype=x.dtype, shape=(x.shape[0], y.shape[1]), device=x.device)
-
-
-def _slice_abstract_exact(op, x, starts, ends, axes):
-    """The case when we know the slice indices concretely but x is abstract."""
-    # TODO handle the other cases, e.g. negative indices
-    slices = {axis: slice(s, e) for (s, e, axis) in zip(starts, ends, axes)}
-    slices = tuple(slices.get(d, slice(None)) for d in range(len(x.shape)))
-    # Create a fake tensor and slice it because I'm lazy to work out the new shape
-    y = np.zeros(x.shape)
-    return Tensor(dtype=x.dtype, shape=y[slices].shape, device=x.device)
-
-
-MixedImplementations = {
-    ("MatMul", (Tensor, Tensor)): _matmul_abstract,
-    ("Shape", (Tensor,)): _shape_abstract_to_concrete,
-    ("Slice", (Tensor, np.ndarray, np.ndarray, np.ndarray)): _slice_abstract_exact,
-}
-
-
 def Simulator(cost_model):
     return AbstractInterpreter(
         SimulatorState,
@@ -206,6 +175,41 @@ def Simulator(cost_model):
             cost_model.cost_functions,
             {**NumPyRegister, **MixedImplementations, **TypePropRegister},
         ),
+    )
+
+
+# TODO: Remove once we have simulation with mixed types
+def _create_post_type_inference_semantics(cost_functions):
+    """Creates a semantics (dictionary mapping op signatures to abstract state
+    modifiers) given a dictionary of cost functions (input values -> costs) and
+    a dictionary of implementations (input values -> output values).
+    """
+
+    def convert_impl(cost_fn):
+        def semantics(op: Op, state: SimulatorState):
+            # Find the op's inputs in state's environment
+            inputs = tuple(state.env[v] for v in op.inputs)
+            outputs = tuple(x.type for x in op.outputs)
+
+            # Run the cost function
+            costs = cost_fn(op, *inputs)
+
+            for x in op.outputs:
+                state.env[x] = x.type
+
+            _simulate_op(state, op, costs, inputs, outputs)
+
+        return semantics
+
+    signatures = cost_functions.keys()
+
+    return {f: convert_impl(cost_functions[f]) for f in signatures}
+
+
+def PostTypeInferenceSimulator(cost_model):
+    return AbstractInterpreter(
+        SimulatorState,
+        _create_post_type_inference_semantics(cost_model.cost_functions),
     )
 
 

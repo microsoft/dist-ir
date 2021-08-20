@@ -19,6 +19,7 @@ from dist_ir.ir import cpprint, Device, FunctionMaker, Op, Topology, Value
 from dist_ir.ir.type import Float32, Tensor
 from dist_ir.transforms import (
     gpt2_dhp_transform,
+    update_attributes,
     sanitize_unhashable_attributes,
     restore_unhashable_attributes,
 )
@@ -81,7 +82,7 @@ def _filter_extra_outputs(function):
     return filtered_function.finalize()
 
 
-def _set_model_size(function, n_layer, n_head, d_embd, hp_degree):
+def _set_model_size(function, n_layer, n_head, d_embd):
     function, attribute_map = sanitize_unhashable_attributes(function)
 
     # Prepare a list of the existing Transformer blocks in the function.
@@ -185,37 +186,18 @@ def _set_model_size(function, n_layer, n_head, d_embd, hp_degree):
         for k, op in enumerate(blocks[i]):
             max_op_id = max(max_op_id, int(re.match(".*_(\d+)", op.name).group(1)))
             inputs = tuple(value_map[inp] for inp in op.inputs)
-            attributes = op.attributes
-            if op.op_type == "Split":
-                if "split" in attributes and attributes["split"] == (
-                    768,
-                    768,
-                    768,
-                ):
-                    assert len(attributes) == 2
-                    attributes = frozendict(
-                        {
-                            "axis": attributes["axis"],
-                            "split": (
-                                d_embd // hp_degree,
-                                d_embd // hp_degree,
-                                d_embd // hp_degree,
-                            ),
-                        }
-                    )
-            elif op.op_type == "Constant":
-                value = attribute_map[("value", attributes["value"])]
-                if (
-                    isinstance(value, np.ndarray)
-                    and value.shape == (1,)
-                    and value[0] == 12
-                ):
-                    value = np.array([n_head // hp_degree])
-                    sanitized_value = value.tobytes()
-                    attributes = frozendict(
-                        {"value": sanitized_value, "device": attributes["device"]}
-                    )
-                    attribute_map[("value", sanitized_value)] = value
+            if op.op_type == "Split" or op.op_type == "Constant":
+                attributes = update_attributes(
+                    op.op_type,
+                    op.attributes,
+                    attribute_map,
+                    old_d_embd=768,
+                    new_d_embd=d_embd,
+                    old_n_head=12,
+                    new_n_head=n_head,
+                )
+            else:
+                attributes = op.attributes
             new_op = Op(
                 name=op.name,
                 op_type=op.op_type,
@@ -334,7 +316,7 @@ def _set_model_size(function, n_layer, n_head, d_embd, hp_degree):
     return transformed_function.finalize(), inputs_to_remove
 
 
-def get_stats(function):
+def _get_stats(function):
     parameter_count = 0
     model_size = 0
     for inp in function.inputs:
@@ -364,7 +346,13 @@ def get_stats(function):
 
 
 def _import_function_and_get_input_data(
-    model_path, batch_size, n_layer, n_head, d_embd, hp_degree, default_device
+    model_path,
+    batch_size,
+    n_layer,
+    n_head,
+    d_embd,
+    default_device,
+    use_real_weights=False,
 ):
     function, input_data_map = import_from_onnx(
         model_path,
@@ -373,10 +361,13 @@ def _import_function_and_get_input_data(
         parse_input_data=True,
     )
 
+    if not use_real_weights:
+        for inp in input_data_map:
+            if "weight" in inp.name or "bias" in inp.name:
+                input_data_map[inp] = inp.type
+
     function = _filter_extra_outputs(function)
-    function, inputs_to_remove = _set_model_size(
-        function, n_layer, n_head, d_embd, hp_degree
-    )
+    function, inputs_to_remove = _set_model_size(function, n_layer, n_head, d_embd)
 
     tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
     tokens = tokenizer.encode(
@@ -390,25 +381,39 @@ def _import_function_and_get_input_data(
     for i in inputs_to_remove[::-1]:
         input_data.pop(i)
 
-    # If any weight shapes were changed, zero-pad the new weights.
-    for i in range(1, len(function.inputs)):
+    # Update the input data if any weight shapes were changed.
+    for i in range(1, len(input_data)):
         old_shape = input_data[i].shape
         if old_shape != function.inputs[i].type.shape:
-            new_tensor = np.zeros(function.inputs[i].type.shape)
-            if len(old_shape) == 1:
-                new_tensor[: old_shape[0]] = input_data[i]
-            elif len(old_shape) == 2:
-                new_tensor[: old_shape[0], : old_shape[1]] = input_data[i]
-            input_data[i] = new_tensor
+            assert (
+                "weight" in function.inputs[i].name or "bias" in function.inputs[i].name
+            )
+            if use_real_weights:
+                # Zero-pad the new weights.
+                new_tensor = np.zeros(
+                    function.inputs[i].type.shape, dtype=input_data[i].dtype
+                )
+                if len(old_shape) == 1:
+                    new_tensor[: old_shape[0]] = input_data[i]
+                elif len(old_shape) == 2:
+                    new_tensor[: old_shape[0], : old_shape[1]] = input_data[i]
+                input_data[i] = new_tensor
+            else:
+                input_data[i] = function.inputs[i].type
         elif old_shape == (1,):
+            assert (
+                "weight" not in function.inputs[i].name
+                and "bias" not in function.inputs[i].name
+            )
             if input_data[i][0] == 768:
-                input_data[i] = np.array([d_embd])
+                input_data[i] = np.array([d_embd], dtype=input_data[i].dtype)
             elif input_data[i][0] == 768 * 3:
-                input_data[i] = np.array([d_embd * 3])
+                input_data[i] = np.array([d_embd * 3], dtype=input_data[i].dtype)
             elif input_data[i][0] == 768 * 4:
-                input_data[i] = np.array([d_embd * 4])
+                input_data[i] = np.array([d_embd * 4], dtype=input_data[i].dtype)
             elif input_data[i][0] == 12:
-                input_data[i] = np.array([n_head])
+                input_data[i] = np.array([n_head], dtype=input_data[i].dtype)
+
     # If any extra input weights were added, use the last occurence of the
     # corresponding weights in the original function as the initial weights.
     # This minimizes risk of numerical stability issues.
@@ -424,6 +429,27 @@ def _import_function_and_get_input_data(
     return function, input_data
 
 
+def _update_input_data_for_hp(
+    input_data, function, d_embd, n_head, hp_degree, use_real_weights
+):
+    for i, inp in enumerate(function.inputs):
+        if input_data[i].shape == (1,):
+            if input_data[i][0] == d_embd * 3:
+                input_data[i] = np.array(
+                    [d_embd * 3 // hp_degree], dtype=input_data[i].dtype
+                )
+            elif input_data[i][0] == d_embd * 4:
+                input_data[i] = np.array(
+                    [d_embd * 4 // hp_degree], dtype=input_data[i].dtype
+                )
+            elif input_data[i][0] == n_head:
+                input_data[i] = np.array(
+                    [n_head // hp_degree], dtype=input_data[i].dtype
+                )
+        elif use_real_weights and "c_proj.bias" in inp.name:
+            input_data[i] = np.copy(input_data[i]) / hp_degree
+
+
 def _transform(
     function,
     input_data,
@@ -437,7 +463,12 @@ def _transform(
     device_throughput,
     dram_bandwidth,
     network_bandwidth,
+    use_real_weights=False,
 ):
+    if hp_degree > 1:
+        _update_input_data_for_hp(
+            input_data, function, d_embd, n_head, hp_degree, use_real_weights
+        )
     world_size = dp_degree * hp_degree * pp_degree
     for i in range(1, world_size + 1):
         topology.add_device(
@@ -462,16 +493,6 @@ def _transform(
         d_embd,
         n_head,
     )
-    # Manual adjustments for horizontal parallelism
-    if hp_degree > 1:
-        for i in range(len(input_data)):
-            if "c_proj.bias" in init_function.inputs[i].name:
-                input_data[i] = np.copy(input_data[i]) / hp_degree
-            elif input_data[i].shape == (1,):
-                if input_data[i][0] == d_embd * 3 or input_data[i][0] == d_embd * 4:
-                    input_data[i] = np.array([input_data[i][0] // hp_degree])
-                elif input_data[i][0] == n_head:
-                    input_data[i] = np.array([n_head // hp_degree])
     ex = SequentialExecutor("numpy")
     init_function = ex.infer_types(
         init_function,
@@ -500,6 +521,7 @@ def get_transformed_function_and_input_data(
     n_layer,
     n_head,
     d_embd,
+    use_real_weights=False,
     print_stats=False,
 ):
     topology = Topology()
@@ -512,8 +534,8 @@ def get_transformed_function_and_input_data(
         n_layer=n_layer,
         n_head=n_head,
         d_embd=d_embd,
-        hp_degree=hp_degree,
         default_device=d0,
+        use_real_weights=use_real_weights,
     )
     ex = SequentialExecutor("numpy")
     if print_stats:
@@ -522,7 +544,7 @@ def get_transformed_function_and_input_data(
             input_data,
             input_devices=[topology.devices[0] for _ in range(len(input_data))],
         )
-        parameter_count, model_size, parameter_count_str, model_size_str = get_stats(
+        parameter_count, model_size, parameter_count_str, model_size_str = _get_stats(
             function
         )
         print("Parameter count:", parameter_count_str)
@@ -540,6 +562,7 @@ def get_transformed_function_and_input_data(
         device_throughput=device_throughput,
         dram_bandwidth=dram_bandwidth,
         network_bandwidth=network_bandwidth,
+        use_real_weights=use_real_weights,
     )
     return transformed_function, initialized_input_data, topology
 
@@ -589,6 +612,7 @@ def main(args):
         args.n_layer,
         args.n_head,
         args.d_embd,
+        args.use_real_weights,
         print_stats=True,
     )
 
@@ -656,6 +680,12 @@ if __name__ == "__main__":
         action="store_true",
         default=False,
         help="Use GPU with PyTorch backend",
+    )
+    parser.add_argument(
+        "--use_real_weights",
+        action="store_true",
+        default=False,
+        help="Use real weights",
     )
     parser.add_argument(
         "--network_bandwidth", type=float, default=64, help="Network bandwidth in Gbps"

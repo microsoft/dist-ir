@@ -7,6 +7,7 @@ import logging
 import re
 import roundrobin
 
+
 from ..ir import cpprint, Op
 from ..ir.function import Function, FunctionMaker
 from .pipedream_scheduler import PipeDreamScheduler
@@ -35,7 +36,7 @@ def _identity(v, function, output_name):
 def _split_value(v, function, num_splits, parallelism_level, dim=0):
     output_names = [f"{v.name}_{parallelism_level}_{i}" for i in range(num_splits)]
     return function.add_op(
-        "SplitDistIR",
+        "SplitUniform",
         inputs=[v],
         attributes={"axis": dim, "num_splits": num_splits},
         output_names=output_names,
@@ -278,14 +279,21 @@ def _partition_inputs_pp(
                             partition_maps[i][j],
                         )
                         for consumer_device in consumer_devices:
-                            forwarded_value = _send_value(
-                                hp_input,
-                                init_function,
-                                consumer_device,
-                                output_name=f"{hp_input.name}_pp_all",
-                            )
+                            if consumer_device != hp_device:
+                                pp_input = _send_value(
+                                    hp_input,
+                                    init_function,
+                                    consumer_device,
+                                    output_name=f"{hp_input.name}_pp_all",
+                                )
+                            else:
+                                pp_input = _identity(
+                                    hp_input,
+                                    init_function,
+                                    output_name=f"{hp_input.name}_pp_all",
+                                )
                             pp_inputs[hp_input][pp_devices.index(consumer_device)] = [
-                                forwarded_value for _ in range(num_microbatches)
+                                pp_input for _ in range(num_microbatches)
                             ]
                 else:
                     # If not using pipeline parallelism, no action necessary here.
@@ -373,6 +381,52 @@ def _get_device_tree(dp_degree, hp_degree, pp_degree, devices):
         }
     }
     return device_tree
+
+
+def update_attributes(
+    op_type,
+    attributes,
+    attribute_map,
+    old_d_embd,
+    new_d_embd,
+    old_n_head,
+    new_n_head,
+    new_device=None,
+):
+    """Updates attributes for Split and Constant ops to reflect new model paramters."""
+    if op_type == "Split":
+        if "split" in attributes and attributes["split"] == (
+            old_d_embd,
+            old_d_embd,
+            old_d_embd,
+        ):
+            assert len(attributes) == 2
+            attributes = frozendict(
+                {
+                    "axis": attributes["axis"],
+                    "split": (
+                        new_d_embd,
+                        new_d_embd,
+                        new_d_embd,
+                    ),
+                }
+            )
+    elif op_type == "Constant":
+        value = attribute_map[("value", attributes["value"])]
+        if (
+            isinstance(value, np.ndarray)
+            and value.shape == (1,)
+            and value[0] == old_n_head
+        ):
+            value = np.array([new_n_head])
+            sanitized_value = value.tobytes()
+            new_device = new_device if new_device is not None else attributes["device"]
+            attributes = frozendict({"value": sanitized_value, "device": new_device})
+            attribute_map[("value", sanitized_value)] = value
+        elif new_device is not None:
+            sanitized_value = attributes["value"]
+            attributes = frozendict({"value": sanitized_value, "device": new_device})
+    return attributes
 
 
 def gpt2_dhp_transform(
@@ -529,11 +583,24 @@ def gpt2_dhp_transform(
                                 ][inp]
                                 input_values.append(output_value)
                         # Add the op once for each device to the transformed function.
+                        if op.op_type == "Split" or op.op_type == "Constant":
+                            attributes = update_attributes(
+                                op.op_type,
+                                op.attributes,
+                                attribute_map,
+                                old_d_embd=d_embd,
+                                new_d_embd=d_embd // hp_degree,
+                                old_n_head=n_head,
+                                new_n_head=n_head // hp_degree,
+                                new_device=device,
+                            )
+                        else:
+                            attributes = op.attributes
                         transformed_outputs = transformed_function.add_op(
                             op.op_type,
                             name=op.name,
                             inputs=input_values,
-                            attributes=op.attributes,
+                            attributes=attributes,
                             output_names=[
                                 (
                                     f"{v.name}_dp_{i}_hp_{j}_pp_{microbatch_id}"
@@ -763,15 +830,6 @@ def gpt2_dhp_transform(
             else:
                 # Do nothing for other outputs
                 pass
-                """
-                for i, hp_group in enumerate(hp_groups):
-                    _mpi_allgather_values(
-                        hp_group,
-                        transformed_function,
-                        dim=0,
-                        output_names=[f"{output.name}_dp_all_hp_all_pp_all" for _ in range(len(hp_group))],
-                    )
-                """
 
     # Hack to get around unhashable numpy array attributes
     # TODO: Fix this more gracefully?

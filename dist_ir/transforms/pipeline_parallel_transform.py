@@ -46,7 +46,7 @@ class PipelineParallelTransform:
             pipelined_input_map = pipelined_value_map[input_value]
             if input_value in self._batch_dims:
                 vs = transformed_function.add_op(
-                    "SplitDistIR",
+                    "SplitUniformToTupleType",
                     name=f"Split/{v.name}",
                     inputs=[v],
                     attributes={

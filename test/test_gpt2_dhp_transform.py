@@ -12,8 +12,7 @@ MODEL_PATH = (Path(__file__).parent.parent / "gpt2-10.onnx").absolute()
 
 np.random.seed(42)
 
-# TODO: Increase model size and make varying model size separate tests after
-# merging in #28
+
 def _run_gpt(
     device_throughput=1.4e13,
     dram_bandwidth=9e11,
@@ -26,6 +25,7 @@ def _run_gpt(
     n_layer=4,
     n_head=12,
     n_embd=768,
+    use_real_weights=True,
     verbose=False,
 ):
     (
@@ -45,15 +45,19 @@ def _run_gpt(
         n_layer,
         n_head,
         n_embd,
+        use_real_weights=use_real_weights,
     )
     if verbose:
         cpprint(transformed_function)
-    ex = SequentialExecutor("numpy")
-    outputs = ex.compute(transformed_function, initialized_input_data)
-    return outputs
+    if use_real_weights:
+        ex = SequentialExecutor("numpy")
+        outputs = ex.compute(transformed_function, initialized_input_data)
+        return outputs
 
 
 def _test(original_outputs, dp_degree=1, hp_degree=1, pp_degree=1, num_microbatches=1):
+
+    # Test with real weights
     transformed_outputs = _run_gpt(
         dp_degree=dp_degree,
         hp_degree=hp_degree,
@@ -65,6 +69,16 @@ def _test(original_outputs, dp_degree=1, hp_degree=1, pp_degree=1, num_microbatc
         np.testing.assert_array_almost_equal(
             original_outputs[0], transformed_outputs[i], decimal=2
         )
+
+    # Test with mixed implementations
+    # TODO: Factor this out into a separate test?
+    _run_gpt(
+        dp_degree=dp_degree,
+        hp_degree=hp_degree,
+        pp_degree=pp_degree,
+        num_microbatches=num_microbatches,
+        use_real_weights=False,
+    )
 
 
 @pytest.fixture(scope="session")

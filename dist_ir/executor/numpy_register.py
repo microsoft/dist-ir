@@ -601,27 +601,18 @@ def softmax_cross_entropy_loss_grad(op, dy, log_prob, label, weight=None):
     return d_logit
 
 
-# NOTE: This is the DistIR version of Split
-# TODO: Merge split and split_v2
-def split(op, x):
+def split_uniform(op, x):
     dim = op.attributes["axis"]
-    if op.op_type == "Split" or op.op_type == "SplitDistIR":
+    if op.op_type == "SplitUniform" or op.op_type == "SplitUniformToTupleType":
         num_splits = op.attributes["num_splits"]
     elif op.op_type == "MPIScatter" or op.op_type == "MPIScatterToTupleType":
         num_splits = len(op.attributes["devices"])
     else:
         raise NotImplementedError(op.op_type)
-
-    try:
-        return tuple(y for y in np.split(x, num_splits, axis=dim))
-    except Exception as e:
-        import pdb
-
-        pdb.set_trace()
+    return tuple(y for y in np.split(x, num_splits, axis=dim))
 
 
-# NOTE: This is the ONNX version of Split
-def split_v2(op, x):
+def split(op, x):
     split = op.attributes["split"]
     sections = []
     n = 0
@@ -780,8 +771,8 @@ NumPyRegister = {
     ("MPIReduce", (np.ndarray,) * 2048): mpi_reduce,
     ("MPIReduce", (np.ndarray,) * 4096): mpi_reduce,
     ("MPIReduce", (np.ndarray,) * 8192): mpi_reduce,
-    ("MPIScatter", (np.ndarray,)): split,
-    ("MPIScatterToTupleType", (np.ndarray,)): split,
+    ("MPIScatter", (np.ndarray,)): split_uniform,
+    ("MPIScatterToTupleType", (np.ndarray,)): split_uniform,
     ("Mul", (np.ndarray, np.ndarray)): mul,
     ("Mul", (np.ndarray, np.float32)): mul,
     ("Mul", (np.int64, np.int64)): mul,
@@ -804,8 +795,9 @@ NumPyRegister = {
     ("Shape", (np.ndarray,)): shape,
     ("Slice", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): slice_conc,
     ("Slice", (np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.int64)): slice_conc,
-    ("SplitDistIR", (np.ndarray,)): split,
-    ("Split", (np.ndarray,)): split_v2,
+    ("SplitUniform", (np.ndarray,)): split_uniform,
+    ("SplitUniformToTupleType", (np.ndarray,)): split_uniform,
+    ("Split", (np.ndarray,)): split,
     ("Softmax", (np.ndarray,)): softmax,
     ("SoftmaxCrossEntropyLoss", (np.ndarray, np.ndarray)): softmax_cross_entropy_loss,
     (

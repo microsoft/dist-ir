@@ -82,8 +82,21 @@ def create_owt_model(num_devices, num_layers):
     return fn.finalize()
 
 
-@pytest.mark.parametrize(["num_devices", "num_layers"], [(2, 4)])
-def test_owt(num_devices, num_layers):
+@pytest.mark.parametrize(
+    "num_devices, num_layers, use_gpu",
+    [
+        (2, 4, False),
+        pytest.param(
+            2,
+            4,
+            True,
+            marks=pytest.mark.skipif(
+                torch.cuda.device_count() < 2, reason="Not enough available GPUs"
+            ),
+        ),
+    ],
+)
+def test_owt(num_devices, num_layers, use_gpu):
     fn = create_owt_model(num_devices, num_layers)
 
     devices = [Device(0, "cpu")]
@@ -139,7 +152,9 @@ def test_owt(num_devices, num_layers):
     assert all(np.allclose(y, o) for y, o in zip(ys, output_arrays))
 
     # Run per-rank modules using PyTorch backend:
-    per_rank_outputs, _ = run_pytorch(fn, [torch.tensor(a) for a in input_arrays])
+    per_rank_outputs, _ = run_pytorch(
+        fn, [torch.tensor(a) for a in input_arrays], use_gpu=use_gpu
+    )
 
     # Check outputs:
     assert all(np.allclose(y[0], o) for y, o in zip(per_rank_outputs, output_arrays))
@@ -180,7 +195,19 @@ def test_dp_mp_matmuls():
         cpprint(per_rank_fn)
 
 
-def test_mlp_grid_search():
+@pytest.mark.parametrize(
+    "use_gpu",
+    [
+        False,
+        pytest.param(
+            True,
+            marks=pytest.mark.skipif(
+                torch.cuda.device_count() < 8, reason="Not enough available GPUs"
+            ),
+        ),
+    ],
+)
+def test_mlp_grid_search(use_gpu):
     # batch_sizes = [2 ** i for i in range(10, 15)]
     # hidden_dims = [2 ** i for i in range(8, 13)]
     batch_sizes = [64]
@@ -228,7 +255,7 @@ def test_mlp_grid_search():
         _, runtimes = run_pytorch(
             fn,
             dist_input_data,
-            use_gpu=False,
+            use_gpu=use_gpu,
             num_repetitions=1,  # TODO use 100
             num_warmup=1,
         )
@@ -238,7 +265,19 @@ def test_mlp_grid_search():
         print(fn.name, simulated_time, actual_time)
 
 
-def test_single_device():
+@pytest.mark.parametrize(
+    "use_gpu",
+    [
+        False,
+        pytest.param(
+            True,
+            marks=pytest.mark.skipif(
+                torch.cuda.device_count() < 1, reason="Not enough available GPUs"
+            ),
+        ),
+    ],
+)
+def test_single_device(use_gpu):
     d1 = Device(1, "gpu")
     fn = FunctionMaker()
     x = fn.add_input_value("x", Tensor(Float32(), (4, 4), d1))
@@ -249,12 +288,24 @@ def test_single_device():
 
     x = torch.randn(4, 4)
     inputs = (x,)
-    outputs, _ = run_pytorch(fn, inputs)
+    outputs, _ = run_pytorch(fn, inputs, use_gpu=use_gpu)
     print(outputs)
     assert torch.allclose(torch.matmul(x, x), outputs[0][0])
 
 
-def test_send_recv():
+@pytest.mark.parametrize(
+    "use_gpu",
+    [
+        False,
+        pytest.param(
+            True,
+            marks=pytest.mark.skipif(
+                torch.cuda.device_count() < 2, reason="Not enough available GPUs"
+            ),
+        ),
+    ],
+)
+def test_send_recv(use_gpu):
     d1 = Device(1, "gpu")
     d2 = Device(2, "gpu")
     fn = FunctionMaker()
@@ -266,11 +317,23 @@ def test_send_recv():
 
     x = torch.randn(4, 4)
     inputs = (x,)
-    outputs, _ = run_pytorch(fn, inputs)
+    outputs, _ = run_pytorch(fn, inputs, use_gpu=use_gpu)
     assert torch.allclose(x, outputs[1][0])
 
 
-def test_dp_mlp():
+@pytest.mark.parametrize(
+    "use_gpu",
+    [
+        False,
+        pytest.param(
+            True,
+            marks=pytest.mark.skipif(
+                torch.cuda.device_count() < 2, reason="Not enough available GPUs"
+            ),
+        ),
+    ],
+)
+def test_dp_mlp(use_gpu):
     num_devices = 2
     num_layers = 4
     batch_size = 4
@@ -302,7 +365,9 @@ def test_dp_mlp():
         y = torch.relu(y)
 
     # Project and run on backend:
-    per_rank_outputs, runtimes = run_pytorch(fn, convert_inputs_dp(weights, x))
+    per_rank_outputs, runtimes = run_pytorch(
+        fn, convert_inputs_dp(weights, x), use_gpu=use_gpu
+    )
 
     # Check outputs:
     assert torch.allclose(y, torch.cat([o[0] for o in per_rank_outputs], 0))

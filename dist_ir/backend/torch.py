@@ -32,6 +32,8 @@ DistributedContext = NamedTuple(
     groups_list=Iterable[Tuple[int]],
     # Debug flag
     debug_stacktrace=bool,
+    # Profile flag
+    profile=bool,
 )
 
 
@@ -380,6 +382,12 @@ def run_function(
         value_map[v] = x
     assert len(fn.inputs) == len(inputs)
 
+    def print_memory_usage():
+        t = torch.cuda.get_device_properties(0).total_memory
+        r = torch.cuda.memory_reserved(0)
+        a = torch.cuda.memory_allocated(0)
+        print(f"Total: {t} Reserved: {r} Allocated: {a} Free: {r-a}")
+
     # Run ops
     for op in fn.ops:
         inputs = tuple(value_map[v] for v in op.inputs)
@@ -437,21 +445,42 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
         else:
             events.append(perf_counter())
 
-    add_event()
+    if ctx.profile:
+        num_wait_steps = 0
+    else:
+        num_wait_steps = num_warmup_steps + num_repetitions
+
     if ctx.debug_stacktrace:
         try:
             outputs = run_function(ctx, fn, inputs)
-            add_event()
+            if ctx.world_size > 1:
+                torch.distributed.barrier()
         except Exception as e:
             print_exc()
-            sys.exit(1)
-    else:
-        # Time a bunch of executions, use last run's output values
-        for _ in range(num_warmup_steps + num_repetitions):
+        print("PyTorch backend exiting after 1 run in debug mode.")
+        dist.destroy_process_group()
+        sys.exit(1)
+
+    # Time a bunch of executions, then execute once for output values
+    with torch.profiler.profile(
+        activities=[
+            torch.profiler.ProfilerActivity.CPU,
+            torch.profiler.ProfilerActivity.CUDA,
+        ],
+        schedule=torch.profiler.schedule(
+            wait=num_wait_steps, warmup=num_warmup_steps, active=num_repetitions
+        ),
+        on_trace_ready=torch.profiler.tensorboard_trace_handler(
+            f"{fn.name}_{rank}_profile"
+        ),
+    ) as p:
+        for i in range(num_warmup_steps + num_repetitions):
+            add_event()
             outputs = run_function(ctx, fn, inputs)
             if ctx.world_size > 1:
                 torch.distributed.barrier()
             add_event()
+            p.step()
 
     if ctx.use_gpu:
         # Move outputs back to cpu
@@ -520,6 +549,7 @@ def run_pytorch(
     num_warmup=0,
     debug_mock=False,
     debug_stacktrace=False,
+    profile=False,
     run_type_inference=True,  # TODO: Remove once we have mixed implementations
 ):
     """Project `fn` and run on `inputs` over `num_devices` devices using the
@@ -533,10 +563,9 @@ def run_pytorch(
     `debug_mock` runs the function sequentially, replacing communication ops with
     mock versions that return arbitrary values. `debug_stacktrace` wraps the
     run function with a try-catch block and prints the stack trace and exits if
-    any thread raises an exception.
+    any thread raises an exception. `profile` runs the code with the PyTorch
+    profiler and outputs logs to TensorBoard.
     """
-    # print(*(x.shape for x in inputs))
-    # cpprint(fn)
 
     device_to_fns, groups = project(
         fn, tuple(v.type for v in fn.inputs), run_type_inference
@@ -558,16 +587,13 @@ def run_pytorch(
         groups_list=list(groups),
         device_to_rank=device_to_rank,
         debug_stacktrace=debug_stacktrace,
+        profile=profile,
     )
 
     per_rank_inputs = [[] for _ in range(world_size)]
     for v, a in zip(fn.inputs, inputs):
         per_rank_inputs[device_to_rank[v.type.device]].append(a)
     assert len(fn.inputs) == len(inputs)
-
-    # for xs, per_rank_fn in zip(per_rank_inputs, per_rank_fns):
-    #     print(*(x.shape for x in xs))
-    #     cpprint(per_rank_fn)
 
     if debug_mock:
         return run_mock_multiprocess(per_rank_fns, per_rank_inputs)

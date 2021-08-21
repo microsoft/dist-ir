@@ -317,28 +317,7 @@ def _set_model_size(function, n_layer, n_head, d_embd):
     return transformed_function.finalize(), inputs_to_remove
 
 
-def _update_input_data_for_hp(
-    input_data, function, d_embd, n_head, hp_degree, use_real_weights
-):
-    for i, inp in enumerate(function.inputs):
-        if input_data[i].shape == (1,):
-            if input_data[i][0] == d_embd * 3:
-                input_data[i] = np.array(
-                    [d_embd * 3 // hp_degree], dtype=input_data[i].dtype
-                )
-            elif input_data[i][0] == d_embd * 4:
-                input_data[i] = np.array(
-                    [d_embd * 4 // hp_degree], dtype=input_data[i].dtype
-                )
-            elif input_data[i][0] == n_head:
-                input_data[i] = np.array(
-                    [n_head // hp_degree], dtype=input_data[i].dtype
-                )
-        elif use_real_weights and "c_proj.bias" in inp.name:
-            input_data[i] = np.copy(input_data[i]) / hp_degree
-
-
-def get_stats(function):
+def _get_stats(function):
     parameter_count = 0
     model_size = 0
     for inp in function.inputs:
@@ -386,8 +365,14 @@ def get_topology(world_size, device_throughput, dram_bandwidth, network_bandwidt
     return topology
 
 
-def import_function_and_get_input_data(
-    model_path, default_device, use_real_weights=False
+def _import_function_and_get_input_data(
+    model_path,
+    batch_size,
+    n_layer,
+    n_head,
+    d_embd,
+    default_device,
+    use_real_weights=False,
 ):
     function, input_data_map = import_from_onnx(
         model_path,
@@ -396,7 +381,13 @@ def import_function_and_get_input_data(
         parse_input_data=True,
     )
 
+    if not use_real_weights:
+        for inp in input_data_map:
+            if "weight" in inp.name or "bias" in inp.name:
+                input_data_map[inp] = inp.type
+
     function = _filter_extra_outputs(function)
+    function, inputs_to_remove = _set_model_size(function, n_layer, n_head, d_embd)
 
     if not use_real_weights:
         for inp in input_data_map:
@@ -410,11 +401,9 @@ def import_function_and_get_input_data(
 def resize_function_and_input_data(function, input_data, n_layer, n_head, d_embd):
     function, inputs_to_remove = _set_model_size(function, n_layer, n_head, d_embd)
 
-    input_data = input_data
-
     # If we shrunk the model, remove any unnecessary inputs.
     for i in inputs_to_remove[::-1]:
-        input_data.pop(i)
+        input_data.pop(i - 1)
 
     # Update the input data if any weight shapes were changed.
     for i in range(len(input_data)):
@@ -466,6 +455,27 @@ def create_input_ids(batch_size):
     )
     input_ids = torch.tensor([[tokens] for _ in range(batch_size)])
     return _to_numpy(input_ids)
+
+
+def _update_input_data_for_hp(
+    input_data, function, d_embd, n_head, hp_degree, use_real_weights
+):
+    for i, inp in enumerate(function.inputs):
+        if input_data[i].shape == (1,):
+            if input_data[i][0] == d_embd * 3:
+                input_data[i] = np.array(
+                    [d_embd * 3 // hp_degree], dtype=input_data[i].dtype
+                )
+            elif input_data[i][0] == d_embd * 4:
+                input_data[i] = np.array(
+                    [d_embd * 4 // hp_degree], dtype=input_data[i].dtype
+                )
+            elif input_data[i][0] == n_head:
+                input_data[i] = np.array(
+                    [n_head // hp_degree], dtype=input_data[i].dtype
+                )
+        elif use_real_weights and "c_proj.bias" in inp.name:
+            input_data[i] = np.copy(input_data[i]) / hp_degree
 
 
 def transform(
@@ -526,19 +536,23 @@ def get_transformed_function_and_input_data(
     use_real_weights=False,
     print_stats=False,
 ):
-    world_size = args.dp_degree * args.hp_degree * args.pp_degree
+    world_size = dp_degree * hp_degree * pp_degree
     topology = get_topology(
-        world_size, args.device_throughput, args.dram_bandwidth, args.network_bandwidth
+        world_size, device_throughput, dram_bandwidth, network_bandwidth
     )
 
-    function, input_data = import_function_and_get_input_data(
+    function, input_data = _import_function_and_get_input_data(
         model_path,
+        batch_size=batch_size,
+        n_layer=n_layer,
+        n_head=n_head,
+        d_embd=d_embd,
         default_device=topology.devices[0],
         use_real_weights=use_real_weights,
     )
 
     function, input_data = resize_function_and_input_data(
-        function, input_data, args.n_layer, args.n_head, args.d_embd
+        function, input_data, n_layer, n_head, d_embd
     )
 
     input_ids = create_input_ids(batch_size)
@@ -551,7 +565,7 @@ def get_transformed_function_and_input_data(
             input_data,
             input_devices=[topology.devices[0] for _ in range(len(input_data))],
         )
-        parameter_count, model_size, parameter_count_str, model_size_str = get_stats(
+        parameter_count, model_size, parameter_count_str, model_size_str = _get_stats(
             function
         )
         print("Parameter count:", parameter_count_str)

@@ -295,7 +295,7 @@ def benchmark(
 def distributed_grid_search(
     device_throughput, dram_bandwidth, kernel_launch_overhead, network_bandwidth
 ):
-    batch_size = 8192
+    batch_size = 16384
     all_dims = [1024, 2048, 4096]
     all_num_layers = [8, 16]
     world_size = torch.cuda.device_count()
@@ -325,8 +325,8 @@ def distributed_grid_search(
     with open("mlp_benchmark_.csv", "w") as f:
         writer = csv.writer(f)
         writer.writerow(fieldnames)
-        for (d, t, p, k, dim, layers) in configs:
-            # for (d, t, p, k, dim, layers) in tqdm.tqdm(configs):
+        #for (d, t, p, k, dim, layers) in configs:
+        for (d, t, p, k, dim, layers) in tqdm.tqdm(configs):
             try:
                 assert d > 1 or t > 1 or p > 1
                 simulated_time, pytorch_backend_time = benchmark(
@@ -416,7 +416,9 @@ def grid_search(device_throughput, dram_bandwidth, kernel_launch_overhead):
 
 def main(args):
     if args.calibrate_device_parameters and (
-        args.mode == "simulate" or args.mode == "grid_search"
+        args.mode == "simulate"
+        or args.mode == "grid_search"
+        or args.mode == "distributed_grid_search"
     ):
         print("Calibrating device parameters...")
         (
@@ -428,7 +430,9 @@ def main(args):
         print(f"Device throughput: {args.device_throughput:.2e}")
         print(f"Kernel launch overhead: {args.kernel_launch_overhead:.2e}")
     if args.calibrate_network_bandwidth and (
-        args.mode == "simulate" or args.mode == "grid_search"
+        args.mode == "simulate"
+        or args.mode == "grid_search"
+        or args.mode == "distributed_grid_search"
     ):
         args.network_bandwidth = calibrate_network_bandwidth()
         print(f"Network bandwidth: {args.network_bandwidth}")

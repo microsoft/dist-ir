@@ -19,11 +19,10 @@ from dist_ir.ir import cpprint, Device, FunctionMaker, Op, Topology, Value
 from dist_ir.ir.type import Float32, Tensor
 from dist_ir.transforms import (
     gpt2_dhp_transform,
-    check_params,
-    update_attributes,
     sanitize_unhashable_attributes,
     restore_unhashable_attributes,
 )
+from dist_ir.transforms.gpt2_dhp_transform import check_params, update_attributes
 
 
 def _to_numpy(x):
@@ -346,6 +345,7 @@ def _get_stats(function):
     return parameter_count, model_size, parameter_count_str, model_size_str
 
 
+# TODO: Move this to dist_ir/ir/topology (perhaps as uniform_topology)
 def get_topology(world_size, device_throughput, dram_bandwidth, network_bandwidth):
     topology = Topology()
     d0 = topology.add_device("gpu")

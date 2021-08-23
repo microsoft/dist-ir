@@ -137,39 +137,32 @@ def network_bandwidth_debug():
 
 
 def calibrate_network_bandwidth():
+    def _get_bandwidth(src, dst, size):
+        fn = _send(src, dst, m=size, n=size)
+        _, runtimes = run_pytorch(
+            fn=fn,
+            inputs=[
+                torch.randn(size=fn.inputs[0].type.shape, dtype=torch.float32),
+            ],
+            use_gpu=True,
+            num_repetitions=10,
+            num_warmup=5,
+        )
+        pytorch_latency = np.median(runtimes[0])
+        bandwidth = fn.inputs[0].type.size() / BYTES_IN_Gb / pytorch_latency
+        return bandwidth
+
     devices = [Device(0, "cpu")] + [
         Device(i + 1, "gpu") for i in range(torch.cuda.device_count())
     ]
     bandwidths = {}
-    sizes = [128, 256, 512, 1024, 2048, 4096, 8192, 16384]
+    size = 8192
     for i in range(1, len(devices)):
-        bandwidths[(0, i)] = _memcpy(i-1)
+        bandwidths[(0, i)] = _get_bandwidth(devices[0], devices[i], size)
         print(f"bandwidth[(0, {i})] = {bandwidths[(0, i)]} Gbps")
         for j in range(i + 1, len(devices)):
-            X = np.zeros(shape=(len(sizes), 2))
-            X[:, 1] = 1
-            Y = np.zeros(shape=(len(sizes),))
-            for k, size in enumerate(sizes):
-                fn = _send(devices[i], devices[j], m=size, n=size)
-                X[k][0] = fn.inputs[0].type.size() / BYTES_IN_Gb
-                _, runtimes = run_pytorch(
-                    fn=fn,
-                    inputs=[
-                        torch.randn(size=fn.inputs[0].type.shape, dtype=torch.float32),
-                    ],
-                    use_gpu=True,
-                    num_repetitions=10,
-                    num_warmup=5,
-                )
-                pytorch_latency = np.median(runtimes[0])
-                Y[k] = pytorch_latency
-            reg = LinearRegression(positive=True, fit_intercept=False).fit(X, Y)
-            bandwidth = 1.0 / reg.coef_[0]
-            kernel_launch_overhead = reg.coef_[1]
-            print(
-                f"bandwidth[({i}, {j})] = {bandwidth} Gbps, "
-                f"kernel_launch_overhead={kernel_launch_overhead}"
-            )
+            bandwidth = _get_bandwidth(devices[i], devices[j], size)
+            print(f"bandwidth[({i}, {j})] = {bandwidth} Gbps")
             bandwidths[(i, j)] = bandwidth
     return bandwidths
 

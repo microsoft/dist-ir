@@ -2,6 +2,8 @@ import argparse
 import csv
 import itertools
 import numpy as np
+import os
+import pickle
 import time
 import tqdm
 import traceback
@@ -295,7 +297,7 @@ def benchmark(
 def distributed_grid_search(
     device_throughput, dram_bandwidth, kernel_launch_overhead, network_bandwidth
 ):
-    batch_size = 16384
+    batch_size = 8192
     all_dims = [1024, 2048, 4096]
     all_num_layers = [8, 16]
     world_size = torch.cuda.device_count()
@@ -322,7 +324,7 @@ def distributed_grid_search(
         "PyTorch backend time",
     ]
 
-    with open("mlp_benchmark_.csv", "w") as f:
+    with open("mlp_benchmark.csv", "w") as f:
         writer = csv.writer(f)
         writer.writerow(fieldnames)
         # for (d, t, p, k, dim, layers) in configs:
@@ -415,6 +417,19 @@ def grid_search(device_throughput, dram_bandwidth, kernel_launch_overhead):
 
 
 def main(args):
+    if args.simulation_parameters_file is not None and os.path.exists(
+        args.simulation_parameters_file
+    ):
+        with open(args.simulation_parameters_file, "rb") as f:
+            simulation_parameters = pickle.load(f)
+        print(f"Reading simulation parameters from {args.simulation_parameters_file}...")
+        args.device_throughput = simulation_parameters["device_throughput"]
+        args.dram_bandwidth = simulation_parameters["dram_bandwidth"]
+        args.kernel_launch_overhead = simulation_parameters["kernel_launch_overhead"]
+        args.network_bandwidth = simulation_parameters["network_bandwidth"]
+    else:
+        simulation_parameters = {}
+    update_simulation_parameters = False
     if args.calibrate_device_parameters and (
         args.mode == "simulate"
         or args.mode == "grid_search"
@@ -426,6 +441,10 @@ def main(args):
             args.device_throughput,
             args.kernel_launch_overhead,
         ) = calibrate_device_parameters()
+        simulation_parameters["dram_bandwidth"] = args.dram_bandwidth
+        simulation_parameters["device_throughput"] = args.device_throughput
+        simulation_parameters["kernel_launch_overhead"] = args.kernel_launch_overhead
+        update_simulation_parameters = True
         print(f"DRAM bandwidth: {args.dram_bandwidth:.2e}")
         print(f"Device throughput: {args.device_throughput:.2e}")
         print(f"Kernel launch overhead: {args.kernel_launch_overhead:.2e}")
@@ -435,7 +454,12 @@ def main(args):
         or args.mode == "distributed_grid_search"
     ):
         args.network_bandwidth = calibrate_network_bandwidth()
+        simulation_parameters["network_bandwidth"] = args.network_bandwidth
         print(f"Network bandwidth: {args.network_bandwidth}")
+        update_simulation_parameters = True
+    if update_simulation_parameters and args.simulation_parameters_file is not None:
+        with open(args.simulation_parameters_file, "wb") as f:
+            pickle.dump(simulation_parameters, f)
     if args.mode == "grid_search":
         grid_search(
             args.device_throughput,
@@ -455,7 +479,7 @@ def main(args):
         )
         simulated_time, peak_memory = mlp_dist_ir_simulation(
             args.batch_size,
-            args.dim,
+            Gargs.dim,
             args.dim,
             args.dim,
             args.layers,
@@ -542,6 +566,12 @@ if __name__ == "__main__":
         action="store_true",
         default=False,
         help="Calibrate network bandwidth",
+    )
+    parser.add_argument(
+        "--simulation_parameters_file",
+        type=str,
+        default=None,
+        help="File to load/save simulation parameters from/to",
     )
     parser.add_argument("--profile", action="store_true", default=False, help="Profile")
     parser.add_argument(

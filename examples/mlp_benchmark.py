@@ -301,15 +301,15 @@ def distributed_grid_search(
     world_size = torch.cuda.device_count()
     all_degrees = mlp_grid_search.get_all_degrees(world_size)
     configs = []
-    for (d, t, p) in all_degrees:
-        if p == 1:
-            k = 1
-        else:
-            for i in range(1, 5):
-                k = int(2 ** i)
-
-        for (dim, num_layers) in itertools.product(all_dims, all_num_layers):
-            configs.append((d, t, p, k, dim, num_layers))
+    for (dim, num_layers) in itertools.product(all_dims, all_num_layers):
+        for (d, t, p) in all_degrees:
+            if p == 1:
+                k = 1
+                configs.append((d, t, p, k, dim, num_layers))
+            else:
+                for i in range(1, 5):
+                    k = int(2 ** i)
+                    configs.append((d, t, p, k, dim, num_layers))
 
     fieldnames = [
         "Dim",
@@ -325,7 +325,7 @@ def distributed_grid_search(
     with open("mlp_benchmark_.csv", "w") as f:
         writer = csv.writer(f)
         writer.writerow(fieldnames)
-        #for (d, t, p, k, dim, layers) in configs:
+        # for (d, t, p, k, dim, layers) in configs:
         for (d, t, p, k, dim, layers) in tqdm.tqdm(configs):
             try:
                 assert d > 1 or t > 1 or p > 1

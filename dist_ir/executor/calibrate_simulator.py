@@ -45,8 +45,9 @@ def _allreduce(devices, m=1024, n=1024):
         fn.add_input_value(
             f"x{i}", Tensor(shape=(m, n), dtype=Float32(), device=devices[i])
         )
-        for i in range(2)
+        for i in range(len(devices))
     ]
+    """
     xs_contention = [
         fn.add_input_value(
             f"x2", Tensor(shape=(8192, 8192), dtype=Float32(), device=devices[2])
@@ -61,15 +62,18 @@ def _allreduce(devices, m=1024, n=1024):
             f"x5", Tensor(shape=(8192, 8192), dtype=Float32(), device=devices[3])
         ),
     ]
+    """
     ys = fn.add_op(
         op_type="MPIAllreduce",
         inputs=xs,
-        output_names=[f"y{i}" for i in range(2)],
+        output_names=[f"y{i}" for i in range(len(xs))],
     )
+    """
     ys_contention = [
         fn.add_op(op_type="MatMul", inputs=xs_contention[:2], output_names=["y2"]),
         fn.add_op(op_type="MatMul", inputs=xs_contention[2:], output_names=["y3"]),
     ]
+    """
     """
     ys_contention = fn.add_op(
         op_type="MPIAllreduce",
@@ -98,13 +102,14 @@ def network_bandwidth_debug():
         topology.add_device(i + 1, "gpu")
     for i in range(4):
         for j in range(i + 1, 4):
-            topology.set_bandwidth(topology.devices[i + 1], topology.devices[j + 1], 56)
-    sizes = [32, 64, 128, 256, 1024, 2048, 4096, 8192, 16384]
+            topology.set_bandwidth(topology.devices[i + 1], topology.devices[j + 1], 7)
+    sizes = [2048, 4096, 8192, 16384]
+    # sizes = [32, 64, 128, 256, 1024, 2048, 4096, 8192, 16384]
     for i in range(len(sizes)):
         for j in range(i, len(sizes)):
             m = sizes[i]
             n = sizes[j]
-            fn = _allreduce(topology.devices, m, n)
+            fn = _allreduce(topology.devices[1:], m, n)
             fn = infer_types(fn, fn.inputs)
             _, runtimes = run_pytorch(
                 fn=fn,
@@ -116,39 +121,56 @@ def network_bandwidth_debug():
                 num_repetitions=10,
                 num_warmup=5,
             )
-            latency = np.median(runtimes[0])
-            # ex = Simulator(CostModel(topology))
-            # state = ex.interpret(fn, tuple(inp.type for inp in fn.inputs))
-            # latency = np.max([state.timestamps[d] for d in state.timestamps])
-            # bandwidth = fn.inputs[0].type.size() / BYTES_IN_Gb / latency
+            real_latency = np.median(runtimes[0])
+            ex = Simulator(CostModel(topology))
+            state = ex.interpret(fn, tuple(inp.type for inp in fn.inputs))
+            simulated_latency = np.max([state.timestamps[d] for d in state.timestamps])
+            simulated_bandwidth = (
+                fn.inputs[0].type.size() / BYTES_IN_Gb / simulated_latency
+            )
 
             print(
                 f"{m}x{n}: shape={fn.inputs[0].type.shape}, "
-                f"size={fn.inputs[0].type.size()}, latency={latency}"
+                f"size={fn.inputs[0].type.size()}, real latency={real_latency}, "
+                f"simulated latency={simulated_latency}"
             )
 
 
 def calibrate_network_bandwidth():
-    devices = [Device(i + 1, "gpu") for i in range(torch.cuda.device_count())]
+    devices = [Device(0, "cpu")] + [
+        Device(i + 1, "gpu") for i in range(torch.cuda.device_count())
+    ]
     bandwidths = {}
-    for i in range(len(devices)):
-        bandwidths[(0, i + 1)] = _memcpy(i)
+    sizes = [128, 256, 512, 1024, 2048, 4096, 8192, 16384]
+    for i in range(1, len(devices)):
+        bandwidths[(0, i)] = _memcpy(i-1)
+        print(f"bandwidth[(0, {i})] = {bandwidths[(0, i)]} Gbps")
         for j in range(i + 1, len(devices)):
-            fn = _send(devices[i], devices[j])
-            _, runtimes = run_pytorch(
-                fn=fn,
-                inputs=[
-                    torch.randn(size=fn.inputs[0].type.shape, dtype=torch.float32),
-                ],
-                use_gpu=True,
-                num_repetitions=10,
-                num_warmup=5,
+            X = np.zeros(shape=(len(sizes), 2))
+            X[:, 1] = 1
+            Y = np.zeros(shape=(len(sizes),))
+            for k, size in enumerate(sizes):
+                fn = _send(devices[i], devices[j], m=size, n=size)
+                X[k][0] = fn.inputs[0].type.size() / BYTES_IN_Gb
+                _, runtimes = run_pytorch(
+                    fn=fn,
+                    inputs=[
+                        torch.randn(size=fn.inputs[0].type.shape, dtype=torch.float32),
+                    ],
+                    use_gpu=True,
+                    num_repetitions=10,
+                    num_warmup=5,
+                )
+                pytorch_latency = np.median(runtimes[0])
+                Y[k] = pytorch_latency
+            reg = LinearRegression(positive=True, fit_intercept=False).fit(X, Y)
+            bandwidth = 1.0 / reg.coef_[0]
+            kernel_launch_overhead = reg.coef_[1]
+            print(
+                f"bandwidth[({i}, {j})] = {bandwidth} Gbps, "
+                f"kernel_launch_overhead={kernel_launch_overhead}"
             )
-            pytorch_latency = np.median(runtimes[0])
-            print(f"Latency[{i+1},{j+1}] = {pytorch_latency}")
-            bandwidths[(i + 1, j + 1)] = (
-                fn.inputs[0].type.size() / BYTES_IN_Gb / pytorch_latency
-            )
+            bandwidths[(i, j)] = bandwidth
     return bandwidths
 
 

@@ -383,6 +383,37 @@ def _get_device_tree(dp_degree, hp_degree, pp_degree, devices):
     return device_tree
 
 
+def check_params(
+    batch_size, dp_degree, hp_degree, pp_degree, num_microbatches, n_head, d_embd
+):
+    power_of_two = lambda x: int(np.log2(x)) == np.log2(x)
+    if not power_of_two(dp_degree):
+        raise ValueError("Data parallel degree must be a power of two")
+    elif not power_of_two(hp_degree):
+        raise ValueError("Horizontal parallel degree must be a power of two")
+    elif not power_of_two(pp_degree):
+        raise ValueError("Pipeline parallel degree must be a power of two")
+    elif not power_of_two(num_microbatches):
+        raise ValueError("# of microbatches must be a power of two")
+    elif dp_degree > batch_size:
+        raise ValueError("Data parallel degree must be <= batch size")
+    elif pp_degree > 1 and num_microbatches == 1:
+        raise ValueError(
+            "# of microbatches must be > 1 for pipeline parallel degree > 1"
+        )
+    elif batch_size // dp_degree < num_microbatches:
+        raise ValueError(
+            "Number of pipeline parallel microbatches must be <= "
+            "the data parallel batch size"
+        )
+    elif d_embd % n_head != 0:
+        raise ValueError(
+            "Embedding dimension must be divisible by number of attention heads"
+        )
+    elif hp_degree > n_head:
+        raise ValueError("# of attention heads must be > horizontal parallel degree")
+
+
 def update_attributes(
     op_type,
     attributes,
@@ -393,6 +424,7 @@ def update_attributes(
     new_n_head,
     new_device=None,
 ):
+    """Updates attributes for Split and Constant ops to reflect new model paramters."""
     if op_type == "Split":
         if "split" in attributes and attributes["split"] == (
             old_d_embd,
@@ -444,11 +476,6 @@ def gpt2_dhp_transform(
 
     if debug:
         logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.DEBUG)
-
-    if pp_degree > 1 and num_microbatches == 1:
-        raise ValueError(
-            "# of microbatches must be > 1 for pipeline parallel degree > 1"
-        )
 
     # Temporarily remove unhashable attributes.
     (function, attribute_map) = sanitize_unhashable_attributes(function)

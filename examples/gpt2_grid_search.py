@@ -152,8 +152,8 @@ def run(config):
         print(
             f"Failed to run the configuration (model_size={model_size}, "
             f"batch_size={batch_size}, dp_degree={dp_degree}, "
-            "hp_degree={hp_degree}, pp_degree={pp_degree}, "
-            "num_microbatches={num_microbatches)"}
+            f"hp_degree={hp_degree}, pp_degree={pp_degree}, "
+            f"num_microbatches={num_microbatches}"
         )
         latency = -1
         peak_memory = -1

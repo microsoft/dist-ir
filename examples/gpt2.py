@@ -365,12 +365,8 @@ def get_topology(world_size, device_throughput, dram_bandwidth, network_bandwidt
     return topology
 
 
-def _import_function_and_get_input_data(
+def import_function_and_get_input_data(
     model_path,
-    batch_size,
-    n_layer,
-    n_head,
-    d_embd,
     default_device,
     use_real_weights=False,
 ):
@@ -540,12 +536,8 @@ def get_transformed_function_and_input_data(
         world_size, device_throughput, dram_bandwidth, network_bandwidth
     )
 
-    function, input_data = _import_function_and_get_input_data(
+    function, input_data = import_function_and_get_input_data(
         model_path,
-        batch_size=batch_size,
-        n_layer=n_layer,
-        n_head=n_head,
-        d_embd=d_embd,
         default_device=topology.devices[0],
         use_real_weights=use_real_weights,
     )

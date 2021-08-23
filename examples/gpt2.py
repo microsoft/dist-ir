@@ -387,7 +387,6 @@ def _import_function_and_get_input_data(
                 input_data_map[inp] = inp.type
 
     function = _filter_extra_outputs(function)
-    function, inputs_to_remove = _set_model_size(function, n_layer, n_head, d_embd)
 
     if not use_real_weights:
         for inp in input_data_map:

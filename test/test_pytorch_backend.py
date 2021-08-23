@@ -210,10 +210,10 @@ def test_dp_mp_matmuls():
 def test_mlp_grid_search(use_gpu):
     # batch_sizes = [2 ** i for i in range(10, 15)]
     # hidden_dims = [2 ** i for i in range(8, 13)]
-    batch_sizes = [64]
-    hidden_dims = [64]
+    batch_sizes = [32]
+    hidden_dims = [32]
     world_sizes = [1, 2, 4, 8]
-    all_num_layers = [32]
+    all_num_layers = [8]
 
     results = []
     for (batch_size, hidden_dim, num_layers, d, h, p, m) in gen_configurations(

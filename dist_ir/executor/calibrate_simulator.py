@@ -4,6 +4,7 @@ import numpy as np
 import time
 import torch
 from tqdm import tqdm
+import pandas as pd
 
 from dist_ir.ir import FunctionMaker, Topology, cpprint
 from dist_ir.ir.type import Device, Float32, Tensor
@@ -96,15 +97,19 @@ def _memcpy(rank):
 
 def network_bandwidth_debug():
     # devices = [Device(i + 1, "gpu") for i in range(4)]
+    bandwidth = 56  # Gbps
     topology = Topology()
     topology.add_device(0, "cpu")
     for i in range(4):
         topology.add_device(i + 1, "gpu")
     for i in range(4):
         for j in range(i + 1, 4):
-            topology.set_bandwidth(topology.devices[i + 1], topology.devices[j + 1], 7)
+            topology.set_bandwidth(
+                topology.devices[i + 1], topology.devices[j + 1], bandwidth
+            )
     sizes = [2048, 4096, 8192, 16384]
     # sizes = [32, 64, 128, 256, 1024, 2048, 4096, 8192, 16384]
+    results = []
     for i in range(len(sizes)):
         for j in range(i, len(sizes)):
             m = sizes[i]
@@ -135,6 +140,20 @@ def network_bandwidth_debug():
                 f"simulated latency={simulated_latency}"
             )
 
+            results.append(
+                (
+                    m,
+                    n,
+                    fn.inputs[0].type.shape,
+                    fn.inputs[0].type.size(),
+                    real_latency,
+                    simulated_latency,
+                )
+            )
+
+    df = pd.DataFrame(results, columns=["M", "N", "Shape", "Size", "PyTorch Latency", "Simulated Latency"])
+    df.to_csv("allreduce_benchmark_results.csv")
+    print(df)
 
 def calibrate_network_bandwidth():
     def _get_bandwidth(src, dst, size):

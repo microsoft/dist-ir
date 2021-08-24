@@ -262,8 +262,13 @@ def benchmark(
         p,
         k,
     )
+    return simulated_time, -1
+
     if peak_memory / (1024 ** 3) > max_memory_GB:
-        return -1, -1, -1
+        if world_size == 1:
+            return -1, -1, -1
+        else:
+            return -1, -1
 
     dist_ir_gradients, pytorch_backend_time = mlp_dist_ir_pytorch_backend(
         batch_size,
@@ -300,7 +305,7 @@ def distributed_grid_search(
     batch_size = 8192
     all_dims = [1024, 2048, 4096]
     all_num_layers = [8, 16]
-    world_size = torch.cuda.device_count()
+    world_size = 8 #torch.cuda.device_count()
     all_degrees = mlp_grid_search.get_all_degrees(world_size)
     configs = []
     for (dim, num_layers) in itertools.product(all_dims, all_num_layers):
@@ -324,7 +329,7 @@ def distributed_grid_search(
         "PyTorch backend time",
     ]
 
-    with open("mlp_benchmark.csv", "w") as f:
+    with open("mlp_benchmark_dgx_simulation.csv", "w") as f:
         writer = csv.writer(f)
         writer.writerow(fieldnames)
         # for (d, t, p, k, dim, layers) in configs:

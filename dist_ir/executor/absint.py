@@ -32,7 +32,7 @@ from ..ir.type import *
 from .numpy_register import NumPyRegister
 from .torch_register import TorchRegister
 from .type_register import TypePropRegister
-
+from .mixed_register import MixedRegister
 
 # This is a graph of types supported by the AbstractInterpreter, with an edge
 # (t1, t2) indicating that type t2 abstracts type t1.
@@ -66,7 +66,10 @@ _type_index = {t: i for i, t in enumerate(nx.topological_sort(_type_abstraction_
 
 
 def _abstracts(type1: type, type2: type):
-    assert type1 in _type_abstraction_graph and type2 in _type_abstraction_graph
+    if type1 not in _type_abstraction_graph:
+        raise ValueError(f"type1 ({type1}) not in type_abstraction_graph")
+    if type2 not in _type_abstraction_graph:
+        raise ValueError(f"type2 ({type2}) not in type_abstraction_graph")
     return type1 == type2 or _type_abstraction_graph.has_edge(type1, type2)
 
 
@@ -248,4 +251,5 @@ _semantics = {}
 update_semantics_with_register(_semantics, TypePropRegister)
 update_semantics_with_register(_semantics, wrap_concrete_register(NumPyRegister))
 update_semantics_with_register(_semantics, wrap_concrete_register(TorchRegister))
+update_semantics_with_register(_semantics, MixedRegister)
 interpreter = AbstractInterpreter(AbstractState, _semantics)

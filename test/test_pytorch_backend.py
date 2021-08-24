@@ -208,7 +208,7 @@ def test_dp_mp_matmuls():
         ),
     ],
 )
-def test_mlp_grid_search(use_gpu):
+def _test_mlp_grid_search(use_gpu):
     # batch_sizes = [2 ** i for i in range(10, 15)]
     # hidden_dims = [2 ** i for i in range(8, 13)]
     batch_sizes = [32]

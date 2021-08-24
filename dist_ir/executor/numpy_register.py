@@ -326,6 +326,10 @@ def mul(op, x, y):
     return x * y
 
 
+def nonzero(op, x):
+    return np.array(np.nonzero(x))
+
+
 def reduce_all_l2(op, *xs):
     return np.sqrt(sum([np.linalg.norm(x) for x in xs]))
 
@@ -776,7 +780,7 @@ NumPyRegister = {
     ("Mul", (np.ndarray, np.ndarray)): mul,
     ("Mul", (np.ndarray, np.float32)): mul,
     ("Mul", (np.int64, np.int64)): mul,
-    ("NonZero", (np.ndarray,)): lambda op, x: np.array(np.nonzero(x)),
+    ("NonZero", (np.ndarray,)): nonzero,
     ("Pow", (np.ndarray, np.float32)): lambda op, x, y: pow(x, y),
     ("ReduceAllL2", tuple(np.ndarray for i in range(60))): reduce_all_l2,
     ("ReduceAllL2", tuple(np.ndarray for i in range(61))): reduce_all_l2,

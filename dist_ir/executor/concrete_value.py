@@ -3,6 +3,7 @@ import numpy as np
 from typing import Any, Callable, Dict, Tuple
 
 from ..ir import Device, Op
+from ..ir.type import Int64, Float32, Float64, Tensor
 
 
 @dataclass(frozen=True)
@@ -16,10 +17,41 @@ class ConcreteValue:
     device: Device
 
     def size(self):
-        if isinstance(self.val, np.ndarray):
+        if (
+            isinstance(self.val, np.ndarray)
+            or isinstance(self.val, np.int64)
+            or isinstance(self.val, np.float32)
+            or isinstance(self.val, np.float64)
+        ):
             return self.val.size
         else:
             raise NotImplementedError()
+
+    def to_abstract(self):
+        def _resolve_dtype(dtype):
+            if dtype == np.int64:
+                return Int64()
+            elif dtype == np.float32:
+                return Float32()
+            elif dtype == np.float64:
+                return Float64()
+            else:
+                raise NotImplementedError(f"{dtype}")
+
+        if isinstance(self.val, np.ndarray):
+            return Tensor(
+                shape=self.val.shape,
+                dtype=_resolve_dtype(self.val.dtype),
+                device=self.device,
+            )
+        elif isinstance(self.val, np.int64):
+            return Int64(device=self.device)
+        elif isinstance(self.val, np.float32):
+            return Float32(device=self.device)
+        elif isinstance(self.val, np.float64):
+            return Float64(device=self.device)
+        else:
+            raise NotImplementedError(f"{type(self.val)}")
 
 
 def _wrap_concrete_implementation(implementation):
@@ -43,7 +75,7 @@ def _wrap_concrete_implementation(implementation):
             unwrapped_args.append(arg.val)
 
         # Special case for constant (TODO better way?)
-        if op.op_type == "Constant":
+        if op.op_type == "Constant" or op.op_type == "Send":
             device = op.attributes["device"]
         # assert device is not None
 

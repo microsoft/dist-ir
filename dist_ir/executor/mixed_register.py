@@ -8,23 +8,38 @@ For example, Reshape requires a concrete shape input to determine the output sha
 import numpy as np
 
 from ..ir.type import Tensor
+from dist_ir.executor.concrete_value import ConcreteValue
+
+
+def _raise_type_error(op, *args):
+    raise ValueError(f"Type error: op\n{op}\nwas given arguments\n{tuple(args)}")
 
 
 def _elementwise_numpy_op_prop_fn(op, x, y):
-    if isinstance(x, Tensor) and isinstance(y, np.float32):
+    if (
+        isinstance(x, Tensor)
+        and isinstance(y, ConcreteValue)
+        and isinstance(y.val, np.float32)
+    ):
         return x
-    elif isinstance(x, np.float32) and isinstance(y, Tensor):
+    elif (
+        isinstance(x, ConcreteValue)
+        and isinstance(x.val, np.float32)
+        and isinstance(y, Tensor)
+    ):
         return y
     else:
         _raise_type_error(op, x, y)
 
 
 def _gather_prop_fn(op, x, y):
-    # TODO: Compute the new shape directly instead of using numpy
     if not (
         isinstance(x, Tensor)
+        and isinstance(y, ConcreteValue)
         and x.shape is not None
-        and (isinstance(y, np.ndarray) or isinstance(y, np.int64))
+        and y.val is not None
+        and x.device == y.device
+        and isinstance(y.val, np.ndarray)
     ):
         _raise_type_error(op, x, y)
     if x.device is None:
@@ -40,14 +55,18 @@ def _gather_prop_fn(op, x, y):
     else:
         # Use the NumPy implementation in the general case
         temp = np.zeros(x.shape)
-        new_shape = np.take(temp, y.astype(np.int64), axis=axis).shape
+        new_shape = np.take(temp, y.val.astype(np.int64), axis=axis).shape
     return Tensor(dtype=x.dtype, shape=new_shape, device=device)
 
 
 def _reshape_prop_fn(op, x, y):
-    if not (isinstance(x, Tensor) and isinstance(y, np.ndarray)):
+    if not (
+        isinstance(x, Tensor)
+        and isinstance(y, ConcreteValue)
+        and isinstance(y.val, np.ndarray)
+    ):
         _raise_type_error(op, x, y)
-    y = y.tolist()
+    y = y.val.tolist()
     if y.count(-1) > 1:
         _raise_type_error(op, x, y)
     new_shape = []
@@ -60,7 +79,7 @@ def _reshape_prop_fn(op, x, y):
 
 
 def _pow_prop_fn(op, x, y):
-    if not isinstance(x, Tensor):
+    if not (isinstance(x, Tensor) and isinstance(y, ConcreteValue)):
         _raise_type_error(op, x, y)
     return x
 
@@ -68,12 +87,25 @@ def _pow_prop_fn(op, x, y):
 def _slice_prop_fn(op, x, starts, ends, axes, steps):
     if not (
         isinstance(x, Tensor)
-        and isinstance(starts, np.ndarray)
-        and isinstance(ends, np.ndarray)
-        and isinstance(axes, np.ndarray)
-        and (isinstance(steps, np.ndarray) or isinstance(steps, np.int64))
+        and isinstance(starts, ConcreteValue)
+        and isinstance(ends, ConcreteValue)
+        and isinstance(axes, ConcreteValue)
+        and isinstance(steps, ConcreteValue)
+        and isinstance(starts.val, np.ndarray)
+        and isinstance(ends.val, np.ndarray)
+        and isinstance(axes.val, np.ndarray)
+        and (isinstance(steps.val, np.ndarray) or isinstance(steps.val, np.int64))
+        and x.device == starts.device
+        and x.device == ends.device
+        and x.device == axes.device
+        and x.device == steps.device
     ):
         _raise_type_error(op, x, starts, ends, axes, steps)
+    starts = starts.val
+    ends = ends.val
+    axes = axes.val
+    steps = steps.val
+
     # TODO handle the other cases, e.g. negative indices
     assert -1 not in starts.tolist()
     assert -1 not in ends.tolist()
@@ -106,18 +138,20 @@ def _slice_prop_fn(op, x, starts, ends, axes, steps):
 def _shape_prop_fn(op, x):
     if not isinstance(x, Tensor):
         _raise_type_error(op, x)
-    return np.array(x.shape, dtype=np.int64)
+    return ConcreteValue(np.array(x.shape, dtype=np.int64), x.device)
 
 
-MixedImplementations = {
-    ("Add", (Tensor, np.float32)): _elementwise_numpy_op_prop_fn,
-    ("Div", (Tensor, np.float32)): _elementwise_numpy_op_prop_fn,
-    ("Gather", (Tensor, np.ndarray)): _gather_prop_fn,
-    ("Gather", (Tensor, np.int64)): _gather_prop_fn,
-    ("Mul", (Tensor, np.float32)): _elementwise_numpy_op_prop_fn,
-    ("Reshape", (Tensor, np.ndarray)): _reshape_prop_fn,
-    ("Pow", (Tensor, np.float32)): _pow_prop_fn,
-    ("Slice", (Tensor, np.ndarray, np.ndarray, np.ndarray, np.int64)): _slice_prop_fn,
+MixedRegister = {
+    ("Add", (Tensor, ConcreteValue)): _elementwise_numpy_op_prop_fn,
+    ("Div", (Tensor, ConcreteValue)): _elementwise_numpy_op_prop_fn,
+    ("Gather", (Tensor, ConcreteValue)): _gather_prop_fn,
+    ("Mul", (Tensor, ConcreteValue)): _elementwise_numpy_op_prop_fn,
+    ("Reshape", (Tensor, ConcreteValue)): _reshape_prop_fn,
+    ("Pow", (Tensor, ConcreteValue)): _pow_prop_fn,
+    (
+        "Slice",
+        (Tensor, ConcreteValue, ConcreteValue, ConcreteValue, ConcreteValue),
+    ): _slice_prop_fn,
     ("Shape", (Tensor,)): _shape_prop_fn,
-    ("Sub", (np.float32, Tensor)): _elementwise_numpy_op_prop_fn,
+    ("Sub", (ConcreteValue, Tensor)): _elementwise_numpy_op_prop_fn,
 }

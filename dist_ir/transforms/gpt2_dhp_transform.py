@@ -546,7 +546,7 @@ def gpt2_dhp_transform(
     init_function = init_function.finalize()
 
     # Infer types so that init_function.outputs have correct types
-    init_function = infer_types(init_function, init_function.inputs)
+    # init_function = infer_types(init_function, init_function.inputs)
 
     # Inputs of transformed_function are outputs of init_function.
     for v in init_function.outputs:

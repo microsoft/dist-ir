@@ -13,7 +13,7 @@ MODEL_PATH = (Path(__file__).parent.parent / "gpt2-10.onnx").absolute()
 np.random.seed(42)
 
 # TODO temporarily disabling these tests
-pytestmark = pytest.mark.skip
+# pytestmark = pytest.mark.skip
 
 
 def _run_gpt(
@@ -146,3 +146,8 @@ def test_dp_hp_pp(original_outputs, dp_degree, hp_degree, pp_degree):
         pp_degree=pp_degree,
         num_microbatches=2,
     )
+
+
+if __name__ == "__main__":
+    original_outputs = _run_gpt()
+    test_dp_only(original_outputs, 2)

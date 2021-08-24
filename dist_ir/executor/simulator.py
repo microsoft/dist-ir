@@ -44,6 +44,8 @@ class SimulatorState(AbstractState):
         self._function_inputs_set = set(function.inputs)
 
         for inp in function.inputs:
+            if inp.type is None or inp.type.device is None:
+                continue
             self.peak_memory[inp.type.device] += inp.type.size()
         for device in self.peak_memory:
             self.live_memory[device][0] = (0, self.peak_memory[device])
@@ -140,9 +142,10 @@ def _simulate_op(
             )
         state.consumers[in_edge] -= 1
         if state.consumers[in_edge] == 0:
-            input_devices = in_edge.type.get_all_devices()
-            for input_device in input_devices:
-                live_memory_deltas[input_device] -= in_edge.type.size()
+            if in_edge.type is not None:
+                input_devices = in_edge.type.get_all_devices()
+                for input_device in input_devices:
+                    live_memory_deltas[input_device] -= in_edge.type.size()
     state.update_live_memory(live_memory_deltas)
 
 
@@ -166,12 +169,20 @@ class Simulator:
         for op in function.ops:
             # Find the op's inputs & outputs in state's environment
             inputs = tuple(state.env[v] for v in op.inputs)
+            abstract_inputs = tuple(
+                state.env[v].to_abstract()
+                if isinstance(state.env[v], ConcreteValue)
+                else state.env[v]
+                for v in op.inputs
+            )
             outputs = tuple(state.env[v] for v in op.outputs)
 
             # Dispatch to find cost function for op
             try:
-                cost_function = dispatch(self.cost_functions, op.op_type, inputs)
-                costs = cost_function(op, *inputs)
+                cost_function = dispatch(
+                    self.cost_functions, op.op_type, abstract_inputs
+                )
+                costs = cost_function(op, *abstract_inputs)
             except ValueError:
                 # Use default cost function if signature not in cost_functions
                 devices = _get_all_devices(inputs + outputs)

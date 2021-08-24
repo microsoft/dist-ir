@@ -75,7 +75,7 @@ def _wrap_concrete_implementation(implementation):
             unwrapped_args.append(arg.val)
 
         # Special case for constant (TODO better way?)
-        if op.op_type == "Constant" or op.op_type == "Send":
+        if op.op_type == "Constant":
             device = op.attributes["device"]
         # assert device is not None
 

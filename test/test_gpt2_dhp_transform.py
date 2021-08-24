@@ -70,7 +70,7 @@ def _test(original_outputs, dp_degree=1, hp_degree=1, pp_degree=1, num_microbatc
     assert len(transformed_outputs) == dp_degree * hp_degree
     for i in range(len(transformed_outputs)):
         np.testing.assert_array_almost_equal(
-            original_outputs[0], transformed_outputs[i], decimal=2
+            original_outputs[0].val, transformed_outputs[i].val, decimal=2
         )
 
     # Test with mixed implementations

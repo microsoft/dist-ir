@@ -617,7 +617,7 @@ def simulate(function, input_data, topology):
             )
     """
     simulator = Simulator(CostModel(topology))
-    #simulation = simulator.simulate(function, tuple(wrapped_input_types))
+    # simulation = simulator.simulate(function, tuple(wrapped_input_types))
     simulation = simulator.simulate(function, input_data)
     return simulation
 

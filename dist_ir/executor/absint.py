@@ -33,6 +33,7 @@ from .numpy_register import NumPyRegister
 from .torch_register import TorchRegister
 from .type_register import TypePropRegister
 from .mixed_register import MixedRegister
+from .communication_register import CommunicationRegister
 
 # This is a graph of types supported by the AbstractInterpreter, with an edge
 # (t1, t2) indicating that type t2 abstracts type t1.
@@ -238,7 +239,10 @@ class AbstractInterpreter:
 
                 # Put the outputs back into the state's environment
                 if not isinstance(outputs, tuple):
-                    assert len(op.outputs) == 1
+                    if len(op.outputs) != 1:
+                        import pdb
+
+                        pdb.set_trace()
                     outputs = (outputs,)
                 assert len(outputs) == len(op.outputs)
                 for x, val in zip(op.outputs, outputs):
@@ -252,4 +256,5 @@ update_semantics_with_register(_semantics, TypePropRegister)
 update_semantics_with_register(_semantics, wrap_concrete_register(NumPyRegister))
 update_semantics_with_register(_semantics, wrap_concrete_register(TorchRegister))
 update_semantics_with_register(_semantics, MixedRegister)
+update_semantics_with_register(_semantics, CommunicationRegister)
 interpreter = AbstractInterpreter(AbstractState, _semantics)

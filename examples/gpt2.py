@@ -501,13 +501,6 @@ def transform(
         n_head,
     )
     ex = SequentialExecutor("numpy")
-    """
-    init_function = ex.infer_types(
-        init_function,
-        input_data,
-        input_devices=[topology.devices[0] for _ in range(len(input_data))],
-    )
-    """
     wrapped_input_data = []
     for v in input_data:
         if isinstance(v, Type):
@@ -515,13 +508,6 @@ def transform(
         else:
             wrapped_input_data.append(ConcreteValue(v, topology.devices[0]))
     initialized_input_data = ex.compute(init_function, wrapped_input_data)
-    """
-    transformed_function = ex.infer_types(
-        transformed_function,
-        initialized_input_data,
-        [output.type.device for output in init_function.outputs],
-    )
-    """
     return init_function, transformed_function, initialized_input_data
 
 
@@ -560,15 +546,6 @@ def get_transformed_function_and_input_data(
     input_data = [input_ids] + input_data
 
     if print_stats:
-        """
-        function = infer_types(
-            function,
-            function.inputs
-            #[ConcreteValue(v, topology.devices[0]) for v in input_data]
-            # input_data,
-            # input_devices=[topology.devices[0] for _ in range(len(input_data))],
-        )
-        """
         parameter_count, model_size, parameter_count_str, model_size_str = _get_stats(
             function
         )
@@ -592,32 +569,7 @@ def get_transformed_function_and_input_data(
 
 
 def simulate(function, input_data, topology):
-    input_types = (v.type for v in function.inputs)
-
-    def _resolve_dtype(dtype):
-        if dtype == np.int64:
-            return Int64()
-        elif dtype == np.float32:
-            return Float32()
-        else:
-            raise NotImplementedError(f"Unrecognized NumPy dtype {dtype}")
-
-    """
-    wrapped_input_types = []
-    for inp in input_data:
-        if isinstance(inp, Tensor):
-            wrapped_input_types.append(inp)
-        elif isinstance(inp, ConcreteValue):
-            wrapped_input_types.append(
-                Tensor(
-                    shape=inp.val.shape,
-                    dtype=_resolve_dtype(inp.val.dtype),
-                    device=inp.device,
-                )
-            )
-    """
     simulator = Simulator(CostModel(topology))
-    # simulation = simulator.simulate(function, tuple(wrapped_input_types))
     simulation = simulator.simulate(function, input_data)
     return simulation
 

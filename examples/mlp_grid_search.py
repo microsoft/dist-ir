@@ -128,9 +128,12 @@ def gen_configurations(all_model_sizes, all_world_sizes, all_batch_sizes):
             if pp_degree == 1:
                 all_num_microbatches = [1]
             else:
+                max_num_microbatches_exp = int(np.floor(np.log2(dp_batch_size) / 2))
                 all_num_microbatches = [
                     int(2 ** k)
-                    for k in range(1, int(np.floor(np.log2(dp_batch_size) / 2)))
+                    for k in range(
+                        max(1, max_num_microbatches_exp - 3), max_num_microbatches_exp
+                    )
                 ]
             for num_microbatches in all_num_microbatches:
                 if pp_degree == 1:
@@ -194,7 +197,8 @@ def grid_search(all_model_sizes, all_world_sizes, all_batch_sizes):
 
 if __name__ == "__main__":
     grid_search(
-        all_model_sizes=["mlp-small", "mlp-medium", "mlp-large"],
-        all_world_sizes=[1],
-        all_batch_sizes=[512, 1024, 2048, 4096, 8192],
+        all_model_sizes=["mlp-large"],  # ["mlp-small", "mlp-medium", "mlp-large"],
+        all_world_sizes=[1024],
+        all_batch_sizes=[2 ** 15]
+        # all_batch_sizes=[512, 1024, 2048, 4096, 8192],
     )

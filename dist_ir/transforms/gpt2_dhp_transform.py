@@ -415,8 +415,16 @@ def check_params(
 
 
 def update_attributes(
-    op_type, attributes, attribute_map, old_d_embd, new_d_embd, old_n_head, new_n_head
+    op_type,
+    attributes,
+    attribute_map,
+    old_d_embd,
+    new_d_embd,
+    old_n_head,
+    new_n_head,
+    new_device=None,
 ):
+    """Updates attributes for Split and Constant ops to reflect new model paramters."""
     if op_type == "Split":
         if "split" in attributes and attributes["split"] == (
             old_d_embd,
@@ -447,6 +455,12 @@ def update_attributes(
                 {"value": sanitized_value, "device": attributes["device"]}
             )
             attribute_map[("value", sanitized_value)] = value
+            new_device = new_device if new_device is not None else attributes["device"]
+            attributes = frozendict({"value": sanitized_value, "device": new_device})
+            attribute_map[("value", sanitized_value)] = value
+        elif new_device is not None:
+            sanitized_value = attributes["value"]
+            attributes = frozendict({"value": sanitized_value, "device": new_device})
     return attributes
 
 
@@ -610,6 +624,7 @@ def gpt2_dhp_transform(
                                 new_d_embd=d_embd // hp_degree,
                                 old_n_head=n_head,
                                 new_n_head=n_head // hp_degree,
+                                new_device=device,
                             )
                         else:
                             attributes = op.attributes

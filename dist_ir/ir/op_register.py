@@ -84,7 +84,9 @@ OpRegister = {
     "SoftmaxCrossEntropyGrad": OpRegisterEntry(num_inputs=3, num_outputs=1),
     "SoftmaxCrossEntropyLoss": OpRegisterEntry(num_inputs=2, num_outputs=2),
     "SoftmaxCrossEntropyLossGrad": OpRegisterEntry(num_inputs=3, num_outputs=1),
+    # Splits on explicitly specified, potentially non-uniform boundaries
     "Split": OpRegisterEntry(num_inputs=1, variadic_outputs=True),
+    # Splits uniformly
     "SplitUniform": OpRegisterEntry(num_inputs=1, variadic_outputs=True),
     "SplitUniformToTupleType": OpRegisterEntry(num_inputs=1, num_outputs=1),
     "Sqrt": OpRegisterEntry(num_inputs=1, num_outputs=1),

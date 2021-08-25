@@ -8,7 +8,7 @@ import os
 from tqdm.contrib.concurrent import process_map
 
 from . import gpt2
-from dist_ir.transforms import check_params
+from dist_ir.transforms.gpt2_dhp_transform import check_params
 
 MODEL_PARAMS = {
     "gpt2": (12, 12, 768),
@@ -117,7 +117,8 @@ def run(config):
         lock,
     ) = config
     n_layer, n_head, d_embd = MODEL_PARAMS[model_size]
-    input_data = copy.deepcopy(input_data)
+    if hp_degree > 1:
+        input_data = copy.deepcopy(input_data)
     try:
         init_function, transformed_function, initialized_input_data = gpt2.transform(
             function,
@@ -148,6 +149,12 @@ def run(config):
             # TODO: Measure peak memory?
             peak_memory = 0
     except Exception as e:
+        print(
+            f"Failed to run the configuration (model_size={model_size}, "
+            f"batch_size={batch_size}, dp_degree={dp_degree}, "
+            f"hp_degree={hp_degree}, pp_degree={pp_degree}, "
+            f"num_microbatches={num_microbatches}"
+        )
         latency = -1
         peak_memory = -1
     _write_row(config, latency, peak_memory)

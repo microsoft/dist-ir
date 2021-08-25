@@ -10,7 +10,6 @@ from ..ir.type import Type, Tensor
 from .absint import AbstractState, AbstractInterpreter
 from .numpy_register import NumPyRegister
 from .type_inference import TypePropRegister
-from .mixed_register import MixedImplementations
 
 SECONDS_TO_MICROSECONDS = 1e6
 
@@ -26,15 +25,14 @@ class SimulatorState(AbstractState):
         self.trace = []
         self._function_inputs_set = set(function.inputs)
 
-        for inp in inputs:
-            self.peak_memory[inp.device] += inp.size()
+        for inp in function.inputs:
+            self.peak_memory[inp.type.device] += inp.type.size()
         for device in self.peak_memory:
             self.live_memory[device][0] = (0, self.peak_memory[device])
 
     def add_trace_event(self, op_type, device, start_time, duration):
         if device is None:
             raise ValueError(f"No device specified for {op_type} op trace event")
-
         self.trace.append(
             {
                 "name": op_type,
@@ -88,7 +86,7 @@ def _simulate_op(
         for device in devices:
             state.timestamps[device] = max_timestamp
 
-    # Update the trace and timestamps.
+    # Update the trace and timestamps
     for device in costs:
         state.add_trace_event(
             op.op_type,
@@ -100,13 +98,11 @@ def _simulate_op(
 
     # Update the live memory with any new activations.
     live_memory_deltas = defaultdict(lambda: 0)
-    for function_output, output_type in zip(op.outputs, outputs):
-        state.consumers[function_output] = len(
-            state.function.consumers[function_output]
-        )
-        output_devices = output_type.get_all_devices()
+    for out_edge in op.outputs:
+        state.consumers[out_edge] = len(state.function.consumers[out_edge])
+        output_devices = out_edge.type.get_all_devices()
         for output_device in output_devices:
-            live_memory_deltas[output_device] += output_type.size()
+            live_memory_deltas[output_device] += out_edge.type.size()
     _update_live_memory(state, live_memory_deltas)
 
     # Update the peak memory.
@@ -117,21 +113,21 @@ def _simulate_op(
 
     # Update the live memory to reflect any freed activations.
     live_memory_deltas = defaultdict(lambda: 0)
-    for inp, input_type in zip(op.inputs, inputs):
+    for in_edge in op.inputs:
         # We don't free live memory for function inputs as these could be for weights
         # or input data buffers that are active for the entire duration of execution.
-        if inp in state._function_inputs_set:
+        if in_edge in state._function_inputs_set:
             continue
-        if state.consumers[inp] <= 0:
+        if state.consumers[in_edge] <= 0:
             raise RuntimeError(
                 f"Input {in_edge} for op {op} has "
                 f"{state.consumers[in_edge]} consumers"
             )
-        state.consumers[inp] -= 1
-        if state.consumers[inp] == 0:
-            input_devices = input_type.get_all_devices()
+        state.consumers[in_edge] -= 1
+        if state.consumers[in_edge] == 0:
+            input_devices = in_edge.type.get_all_devices()
             for input_device in input_devices:
-                live_memory_deltas[input_device] -= input_type.size()
+                live_memory_deltas[input_device] -= in_edge.type.size()
     _update_live_memory(state, live_memory_deltas)
 
 
@@ -170,6 +166,39 @@ def _create_semantics(cost_functions, implementations):
 # TODO instead of passing the op, should we pass the attributes as kwargs?
 
 
+# Some "mixed" abstract/concrete implementations of ops that are needed for
+# more precise simulation:
+# TODO what's the right place for these?
+
+
+def _shape_abstract_to_concrete(op, x: Tensor):
+    return np.array(x.shape, dtype=np.int64)
+
+
+def _matmul_abstract(op, x, y):
+    if not (x.dtype == y.dtype and x.device == y.device and x.shape[1] == y.shape[0]):
+        raise Exception
+        # _raise_type_error(op, x, y)
+    return Tensor(dtype=x.dtype, shape=(x.shape[0], y.shape[1]), device=x.device)
+
+
+def _slice_abstract_exact(op, x, starts, ends, axes):
+    """The case when we know the slice indices concretely but x is abstract."""
+    # TODO handle the other cases, e.g. negative indices
+    slices = {axis: slice(s, e) for (s, e, axis) in zip(starts, ends, axes)}
+    slices = tuple(slices.get(d, slice(None)) for d in range(len(x.shape)))
+    # Create a fake tensor and slice it because I'm lazy to work out the new shape
+    y = np.zeros(x.shape)
+    return Tensor(dtype=x.dtype, shape=y[slices].shape, device=x.device)
+
+
+MixedImplementations = {
+    ("MatMul", (Tensor, Tensor)): _matmul_abstract,
+    ("Shape", (Tensor,)): _shape_abstract_to_concrete,
+    ("Slice", (Tensor, np.ndarray, np.ndarray, np.ndarray)): _slice_abstract_exact,
+}
+
+
 def Simulator(cost_model):
     return AbstractInterpreter(
         SimulatorState,
@@ -177,41 +206,6 @@ def Simulator(cost_model):
             cost_model.cost_functions,
             {**NumPyRegister, **MixedImplementations, **TypePropRegister},
         ),
-    )
-
-
-# TODO: Remove once we have simulation with mixed types
-def _create_post_type_inference_semantics(cost_functions):
-    """Creates a semantics (dictionary mapping op signatures to abstract state
-    modifiers) given a dictionary of cost functions (input values -> costs) and
-    a dictionary of implementations (input values -> output values).
-    """
-
-    def convert_impl(cost_fn):
-        def semantics(op: Op, state: SimulatorState):
-            # Find the op's inputs in state's environment
-            inputs = tuple(state.env[v] for v in op.inputs)
-            outputs = tuple(x.type for x in op.outputs)
-
-            # Run the cost function
-            costs = cost_fn(op, *inputs)
-
-            for x in op.outputs:
-                state.env[x] = x.type
-
-            _simulate_op(state, op, costs, inputs, outputs)
-
-        return semantics
-
-    signatures = cost_functions.keys()
-
-    return {f: convert_impl(cost_functions[f]) for f in signatures}
-
-
-def PostTypeInferenceSimulator(cost_model):
-    return AbstractInterpreter(
-        SimulatorState,
-        _create_post_type_inference_semantics(cost_model.cost_functions),
     )
 
 

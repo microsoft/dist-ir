@@ -18,7 +18,7 @@ from ..ir.type import Int64, Float32
 
 # NOTE: The code currently suffers from this issue, more investigation needed:
 # https://github.com/pytorch/pytorch/issues/11201
-# torch.multiprocessing.set_sharing_strategy("file_system")
+torch.multiprocessing.set_sharing_strategy("file_system")
 
 DistributedContext = NamedTuple(
     "DistributedContext",
@@ -369,6 +369,7 @@ def run_function(
     ctx: DistributedContext,
     fn: Function,
     inputs: List[Any],
+    rank: int,
     debug_mock=False,
 ):
     """Runs DistIR Function `fn` on `inputs` in a distributed context `ctx` by
@@ -388,8 +389,11 @@ def run_function(
         a = torch.cuda.memory_allocated(0)
         print(f"Total: {t} Reserved: {r} Allocated: {a} Free: {r-a}")
 
+    print(f"Starting execution on device {rank}...")
+    sys.stdout.flush()
+
     # Run ops
-    for op in fn.ops:
+    for op_num, op in enumerate(fn.ops):
         inputs = tuple(value_map[v] for v in op.inputs)
         kwargs = {} if op.attributes is None else {**op.attributes}
         kwargs["ctx"] = ctx
@@ -408,8 +412,6 @@ def run_function(
             if v in value_map and fn.last_use(v) == op and not (v in fn.outputs):
                 del value_map[v]
 
-        # print(f"{rank}: {op_str}")
-        # sys.stdout.flush()
 
     # Return outputs
     return tuple(value_map[v] for v in fn.outputs)
@@ -452,14 +454,14 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
 
     if ctx.debug_stacktrace:
         try:
-            outputs = run_function(ctx, fn, inputs)
+            outputs = run_function(ctx, fn, inputs, rank)
             if ctx.world_size > 1:
                 torch.distributed.barrier()
         except Exception as e:
             print_exc()
-        print("PyTorch backend exiting after 1 run in debug mode.")
+        print("{rank}: PyTorch backend exiting after 1 run in debug mode.")
         dist.destroy_process_group()
-        sys.exit(1)
+        return None, None 
 
     # Time a bunch of executions, then execute once for output values
     with torch.profiler.profile(
@@ -476,11 +478,15 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
     ) as p:
         for i in range(num_warmup_steps + num_repetitions):
             add_event()
-            outputs = run_function(ctx, fn, inputs)
-            if ctx.world_size > 1:
-                torch.distributed.barrier()
+            try:
+                outputs = run_function(ctx, fn, inputs, rank)
+                if ctx.world_size > 1:
+                    torch.distributed.barrier()
+            except Exception as e:
+                print_exc()
             add_event()
             p.step()
+            print(f"---------> {rank}: Finished iteration {i}")
 
     if ctx.use_gpu:
         # Move outputs back to cpu
@@ -536,6 +542,9 @@ def run_multiprocesses(
     mp = torch.multiprocessing.get_context("spawn")
     with mp.Pool(ctx.world_size) as p:
         outputs = p.starmap(per_rank_runner, args)
+
+    if ctx.debug_stacktrace:
+        sys.exit(1)
 
     per_rank_outputs, runtimes = zip(*outputs)
     return per_rank_outputs, runtimes

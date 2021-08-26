@@ -16,7 +16,7 @@ from dist_ir.executor import (
 )
 from dist_ir.importer import import_from_onnx
 from dist_ir.ir import cpprint, Device, FunctionMaker, Op, Topology, Value
-from dist_ir.ir.type import Float32, Tensor
+from dist_ir.ir.type import Int32, Int64, Float32, Tensor
 from dist_ir.transforms import (
     gpt2_dhp_transform,
     check_params,
@@ -587,8 +587,17 @@ def simulate(function, input_data, topology):
     return simulation
 
 
-def run_pytorch(function, input_data, world_size, use_gpu=True):
-    pytorch_input_data = [torch.tensor(x) for x in input_data]
+def run_pytorch(function, input_data, world_size, use_gpu=True, debug_stacktrace=False):
+    def _resolve_dtype(dtype):
+        if dtype == np.float32:
+            return torch.float32
+        elif dtype == np.int64:
+            return torch.int64
+        elif dtype == np.int32:
+            return torch.int32
+        else:
+            raise NotImplementedError(dtype)
+    pytorch_input_data = [torch.tensor(x, dtype=_resolve_dtype(x.dtype)) for x in input_data]
     if use_gpu and world_size > torch.cuda.device_count():
         raise ValueError(
             f"Specified world size is {world_size}, but only "
@@ -599,6 +608,9 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
         pytorch_input_data,
         use_gpu=use_gpu,
         run_type_inference=False,
+        num_warmup=5,
+        num_repetitions=10,
+        debug_stacktrace=debug_stacktrace
     )
     return per_rank_outputs, runtimes
 
@@ -613,6 +625,9 @@ def main(args):
         args.n_head,
         args.d_embd,
     )
+
+    if args.backend == "pytorch":
+        args.use_real_weights = True
 
     (
         transformed_function,
@@ -650,7 +665,7 @@ def main(args):
     elif args.backend == "pytorch":
         world_size = args.dp_degree * args.hp_degree * args.pp_degree
         per_rank_outputs, runtimes = run_pytorch(
-            transformed_function, initialized_input_data, world_size, args.use_gpu
+            transformed_function, initialized_input_data, world_size, args.use_gpu, args.debug_stacktrace
         )
         print(f"Latency: {np.median(runtimes[-1])*1000:.2f} ms")
         print(
@@ -718,5 +733,6 @@ if __name__ == "__main__":
         "--dram_bandwidth", type=float, default=9e11, help="DRAM Bandwidth"
     )
     parser.add_argument("--trace_file", type=str, default=None, help="Trace file")
+    parser.add_argument("--debug_stacktrace", default=False, action="store_true", help="Debug stacktrace")
     args = parser.parse_args()
     main(args)

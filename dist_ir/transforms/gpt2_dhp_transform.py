@@ -613,9 +613,7 @@ def gpt2_dhp_transform(
                                 ][inp]
                                 input_values.append(output_value)
                         # Add the op once for each device to the transformed function.
-                        if hp_degree > 1 and (
-                            op.op_type == "Split" or op.op_type == "Constant"
-                        ):
+                        if (hp_degree > 1 and op.op_type == "Split") or op.op_type == "Constant":
                             attributes = update_attributes(
                                 op.op_type,
                                 op.attributes,

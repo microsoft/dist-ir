@@ -34,6 +34,7 @@ FIELDNAMES = [
     "pp_degree",
     "num_microbatches",
     "latency",
+    "throughput",
     "peak_memory",
 ]
 
@@ -81,6 +82,7 @@ def _write_row(config, latency, peak_memory):
         backend,
         lock,
     ) = config
+    throughput = batch_size / latency
     with lock:
         with open(output_file, "a+", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
@@ -94,6 +96,7 @@ def _write_row(config, latency, peak_memory):
                     "pp_degree": pp_degree,
                     "num_microbatches": num_microbatches,
                     "latency": latency,
+                    "throughput": throughput,
                     "peak_memory": peak_memory,
                 }
             )
@@ -172,17 +175,17 @@ def grid_search(args):
             != "y"
         ):
             return
-    all_world_sizes = [4, 8, 16]
-    all_batch_sizes = [64, 256]
+    all_world_sizes = [4]#[4, 8, 16]
+    all_batch_sizes = [32, 64, 128]
     # all_model_sizes = ["gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"]
     all_model_sizes = [
-        "gpt3",
-        "gpt3-medium",
-        "gpt3-large",
-        "gpt3-xl",
-        "gpt3-2.7B",
+        #"gpt3",
+        #"gpt3-medium",
+        #"gpt3-large",
+        #"gpt3-xl",
+        #"gpt3-2.7B",
         "gpt3-6.7B",
-        "gpt3-13B",
+        #"gpt3-13B",
     ]
 
     topology = gpt2.get_topology(

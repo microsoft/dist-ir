@@ -1,3 +1,9 @@
+"""
+This file defines a register of reference implementations for communication ops.
+They work explicitly on ConcreteValues and return ConcreteValues on the
+appropriate devices. (This is why they cannot be wrapped like the numpy register.)
+"""
+
 import numpy as np
 
 from .concrete_value import ConcreteValue

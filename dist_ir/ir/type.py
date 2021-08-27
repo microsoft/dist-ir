@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from functools import reduce
-from operator import add, mul
-from typing import Optional, Set, Tuple
+from operator import mul
+from typing import Any, Optional, Sequence, Set, Tuple
 
 import numpy as np
 
@@ -23,6 +23,10 @@ class Type:
         if self.device is not None:
             return set([self.device])
         return set()
+
+    @staticmethod
+    def from_concrete(concrete_value):
+        raise NotImplementedError("Each subclass of Type must implement from_concrete")
 
 
 class Int32(Type):
@@ -188,3 +192,16 @@ class TupleType(Type):
     @staticmethod
     def from_concrete(concrete_value):
         raise NotImplementedError
+
+
+def abstract_values(values: Sequence[Any], target_types: Sequence[type]):
+    """Abstracts `values` so that they have types `target_types`.
+
+    `values` are values allowed by the abstract interpreter, and `target_types`
+    are types allowed by the abstract interpreter (see
+    `absint._type_abstraction_graph`).
+    """
+    return tuple(
+        v if isinstance(v, t) else t.from_concrete(v)
+        for v, t in zip(values, target_types)
+    )

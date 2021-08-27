@@ -1,10 +1,10 @@
 from copy import deepcopy
 from collections import defaultdict
 import json
-from typing import Any, Callable, Dict, Sequence, Set, Tuple
+from typing import Any, Dict, Sequence, Set, Tuple
 
 from ..ir import Function, Device, Op
-from ..ir.type import Type
+from ..ir.type import Type, abstract_values
 from .absint import (
     AbstractState,
     interpreter,
@@ -169,20 +169,16 @@ class Simulator:
         for op in function.ops:
             # Find the op's inputs & outputs in state's environment
             inputs = tuple(state.env[v] for v in op.inputs)
-            abstract_inputs = tuple(
-                state.env[v].to_abstract()
-                if isinstance(state.env[v], ConcreteValue)
-                else state.env[v]
-                for v in op.inputs
-            )
             outputs = tuple(state.env[v] for v in op.outputs)
 
             # Dispatch to find cost function for op
             try:
-                cost_function = dispatch(
-                    self.cost_functions, op.op_type, abstract_inputs
+                signature, cost_function = dispatch(
+                    self.cost_functions, op.op_type, inputs
                 )
-                costs = cost_function(op, *abstract_inputs)
+                # Abstract inputs if necessary
+                abstracted_inputs = abstract_values(inputs, signature)
+                costs = cost_function(op, *abstracted_inputs)
             except ValueError:
                 # Use default cost function if signature not in cost_functions
                 devices = _get_all_devices(inputs + outputs)

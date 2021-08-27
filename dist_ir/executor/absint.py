@@ -77,18 +77,6 @@ def _abstractable_types(source_types: Sequence[type], target_types: Sequence[typ
     return True
 
 
-def _abstract_values(values: Sequence[Any], target_types: Sequence[type]):
-    """Abstracts `values` so that they have types `target_types`.
-
-    `values` are values allowed by the abstract interpreter, and `target_types`
-    are types allowed by the abstract interpreter (see `_type_abstraction_graph`).
-    """
-    return tuple(
-        v if isinstance(v, t) else t.from_concrete(v)
-        for v, t in zip(values, target_types)
-    )
-
-
 def _signature_key(signature):
     """A key function to sort lists of signatures. See module docstring for
     details and example.
@@ -222,6 +210,22 @@ class AbstractInterpreter:
         From this, the abstract values output by the function can be extracted,
         but the state can also be used to build, e.g., a trace.
         """
+        # Check that all concrete values are wrapped
+        allowed_types = (
+            ConcreteValue,
+            Bool,
+            Float32,
+            Float64,
+            Int32,
+            Int64,
+            Tensor,
+            TupleType,
+        )  # TODO use _type_abstraction_graph instead (needs ConcreteFloat etc?)
+        inputs = tuple(inputs)  # TODO
+        for v in inputs:
+            if not isinstance(v, allowed_types):
+                raise ValueError(f"interpret given value of type {type(v)}")
+
         if state is None:
             state = self.AbstractState(function, inputs)
         else:
@@ -238,7 +242,7 @@ class AbstractInterpreter:
                 # Execute this op's semantics on the state
                 signature, implementation = dispatch(self.semantics, op.op_type, inputs)
                 # Abstract inputs if necessary
-                abstracted_inputs = _abstract_values(inputs, signature)
+                abstracted_inputs = abstract_values(inputs, signature)
                 outputs = implementation(op, *abstracted_inputs)
 
                 # Put the outputs back into the state's environment

@@ -27,41 +27,10 @@ class ConcreteValue:
         return False
 
     def size(self):
-        if (
-            isinstance(self.val, np.ndarray)
-            or isinstance(self.val, np.int64)
-            or isinstance(self.val, np.float32)
-            or isinstance(self.val, np.float64)
-        ):
+        if isinstance(self.val, (np.ndarray, np.int64, np.float32, np.float64)):
             return self.val.size
         else:
             raise NotImplementedError()
-
-    def to_abstract(self):
-        def _resolve_dtype(dtype):
-            if dtype == np.int64:
-                return Int64()
-            elif dtype == np.float32:
-                return Float32()
-            elif dtype == np.float64:
-                return Float64()
-            else:
-                raise NotImplementedError(f"{dtype}")
-
-        if isinstance(self.val, np.ndarray):
-            return Tensor(
-                shape=self.val.shape,
-                dtype=_resolve_dtype(self.val.dtype),
-                device=self.device,
-            )
-        elif isinstance(self.val, np.int64):
-            return Int64(device=self.device)
-        elif isinstance(self.val, np.float32):
-            return Float32(device=self.device)
-        elif isinstance(self.val, np.float64):
-            return Float64(device=self.device)
-        else:
-            raise NotImplementedError(f"{type(self.val)}")
 
 
 def _wrap_concrete_implementation(implementation):

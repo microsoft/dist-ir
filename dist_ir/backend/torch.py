@@ -566,6 +566,10 @@ def run_pytorch(
     profiler and outputs logs to TensorBoard.
     """
 
+    # TODO: Accept ConcreteValues as inputs
+    # TODO: Convert concrete value inputs to abstract types to pass to rank projector
+    # TODO: Automatically abstract concrete values in interpreter if no matching function available
+
     device_to_fns, groups = project(fn, tuple(v.type for v in fn.inputs))
 
     # Map between DistIR devices and pytorch ranks:

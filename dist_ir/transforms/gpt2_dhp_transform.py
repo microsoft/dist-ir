@@ -451,6 +451,10 @@ def update_attributes(
         ):
             value = np.array([new_n_head])
             sanitized_value = value.tobytes()
+            attributes = frozendict(
+                {"value": sanitized_value, "device": attributes["device"]}
+            )
+            attribute_map[("value", sanitized_value)] = value
             new_device = new_device if new_device is not None else attributes["device"]
             attributes = frozendict({"value": sanitized_value, "device": new_device})
             attribute_map[("value", sanitized_value)] = value
@@ -613,7 +617,9 @@ def gpt2_dhp_transform(
                                 ][inp]
                                 input_values.append(output_value)
                         # Add the op once for each device to the transformed function.
-                        if op.op_type == "Split" or op.op_type == "Constant":
+                        if (
+                            hp_degree > 1 and op.op_type == "Split"
+                        ) or op.op_type == "Constant":
                             attributes = update_attributes(
                                 op.op_type,
                                 op.attributes,

@@ -575,7 +575,21 @@ def simulate(function, input_data, topology):
 
 
 def run_pytorch(function, input_data, world_size, use_gpu=True):
-    pytorch_input_data = [torch.tensor(x) for x in input_data]
+    # TODO: Move this to a utils file
+    def _resolve_dtype(dtype):
+        if dtype == np.int32:
+            return torch.int32
+        elif dtype == np.int64:
+            return torch.int64
+        elif dtype == np.float32:
+            return torch.float32
+        else:
+            raise NotImplementedError(dtype)
+
+    pytorch_input_data = [
+        torch.tensor(x.val, dtype=_resolve_dtype(x.val.dtype)) for x in input_data
+    ]
+
     if use_gpu and world_size > torch.cuda.device_count():
         raise ValueError(
             f"Specified world size is {world_size}, but only "
@@ -583,7 +597,7 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
         )
     per_rank_outputs, runtimes = torch_backend.run_pytorch(
         function,
-        pytorch_input_data,
+        input_data,
         use_gpu=use_gpu,
     )
     return per_rank_outputs, runtimes
@@ -599,6 +613,9 @@ def main(args):
         args.n_head,
         args.d_embd,
     )
+
+    if args.backend == "pytorch":
+        args.use_real_weights = True
 
     (
         transformed_function,

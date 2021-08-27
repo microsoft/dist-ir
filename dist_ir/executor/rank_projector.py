@@ -207,13 +207,13 @@ def project(
     """
     state = ProjectorState(fn, input_types)
 
-    devices = sorted(set(v.type.device for v in fn.inputs))
+    devices = sorted(set(typ.device for typ in input_types))
     for d in devices:
         state.per_rank_fns[d] = FunctionMaker(name=fn.name)
 
     # Project fn's inputs to each per-rank fn:
-    for v in fn.inputs:
-        state.per_rank_fns[v.type.device].inputs.append(v)
+    for v, typ in zip(fn.inputs, input_types):
+        state.per_rank_fns[typ.device].inputs.append(v)
 
     # First, interpret the function on inputs to get all values
     state = interpreter.interpret(fn, input_types, state)

@@ -239,10 +239,7 @@ class AbstractInterpreter:
 
                 # Put the outputs back into the state's environment
                 if not isinstance(outputs, tuple):
-                    if len(op.outputs) != 1:
-                        import pdb
-
-                        pdb.set_trace()
+                    assert len(op.outputs) == 1
                     outputs = (outputs,)
                 assert len(outputs) == len(op.outputs)
                 for x, val in zip(op.outputs, outputs):

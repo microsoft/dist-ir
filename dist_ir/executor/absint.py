@@ -22,8 +22,6 @@ TODO also assume there are no entries with duplicate signatures?
 """
 
 import networkx as nx
-import numpy as np
-import torch
 from typing import Any, Callable, Dict, List, Sequence, Tuple
 
 from .concrete_value import ConcreteValue, wrap_concrete_register
@@ -35,20 +33,13 @@ from .type_register import TypePropRegister
 from .mixed_register import MixedRegister
 from .communication_register import CommunicationRegister
 
+
 # This is a graph of types supported by the AbstractInterpreter, with an edge
 # (t1, t2) indicating that type t2 abstracts type t1.
 # All values allowed by the AbstractInterpreter should have their types here.
 _type_abstraction_graph: nx.DiGraph = nx.transitive_closure(
     nx.DiGraph(
         [
-            (bool, Bool),
-            (np.float32, Float32),
-            (np.float64, Float64),
-            (np.int32, Int32),
-            (np.int64, Int64),
-            (np.ndarray, Tensor),
-            (torch.Tensor, Tensor),
-            (tuple, TupleType),
             # TODO (if needed) have ConcreteBool, ConcreteFloat, etc
             (ConcreteValue, Bool),
             (ConcreteValue, Float32),
@@ -86,6 +77,18 @@ def _abstractable_types(source_types: Sequence[type], target_types: Sequence[typ
     return True
 
 
+def _abstract_values(values: Sequence[Any], target_types: Sequence[type]):
+    """Abstracts `values` so that they have types `target_types`.
+
+    `values` are values allowed by the abstract interpreter, and `target_types`
+    are types allowed by the abstract interpreter (see `_type_abstraction_graph`).
+    """
+    return tuple(
+        v if isinstance(v, t) else t.from_concrete(v)
+        for v, t in zip(values, target_types)
+    )
+
+
 def _signature_key(signature):
     """A key function to sort lists of signatures. See module docstring for
     details and example.
@@ -119,7 +122,7 @@ def update_semantics_with_register(
 def dispatch(
     semantics: Dict[str, List[Tuple[Tuple[type, ...], Callable]]],
     op_type: str,
-    inputs: Sequence[Any],
+    inputs: Tuple[Any],
 ) -> Callable:
     """Function dispatch. Looks at the types of `inputs` and finds the appropriate
     implementation function in `semantics`.
@@ -136,7 +139,7 @@ def dispatch(
     # TODO do binary search?
     for (signature, implementation) in implementations:
         if _abstractable_types(input_types, signature):
-            return implementation
+            return signature, implementation
 
     raise ValueError(f"Could not dispatch {op_type} with input types {input_types}")
 
@@ -233,9 +236,10 @@ class AbstractInterpreter:
                 inputs = tuple(state.env[v] for v in op.inputs)
 
                 # Execute this op's semantics on the state
-                implementation = dispatch(self.semantics, op.op_type, inputs)
-                # TODO abstract inputs as necessary
-                outputs = implementation(op, *inputs)
+                signature, implementation = dispatch(self.semantics, op.op_type, inputs)
+                # Abstract inputs if necessary
+                abstracted_inputs = _abstract_values(inputs, signature)
+                outputs = implementation(op, *abstracted_inputs)
 
                 # Put the outputs back into the state's environment
                 if not isinstance(outputs, tuple):

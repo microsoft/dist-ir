@@ -16,6 +16,16 @@ class ConcreteValue:
     val: Any
     device: Device
 
+    def __eq__(self, other):
+        # Use numpy's array equality checking if val is an np.ndarray
+        if isinstance(other, ConcreteValue):
+            if isinstance(self.val, np.ndarray) and isinstance(other.val, np.ndarray):
+                return self.device == other.device and (self.val == other.val).all()
+                # TODO is there a better way to check np equality?
+            else:
+                return self.device == other.device and self.val == other.val
+        return False
+
     def size(self):
         if (
             isinstance(self.val, np.ndarray)

@@ -3,6 +3,8 @@ from functools import reduce
 from operator import add, mul
 from typing import Optional, Set, Tuple
 
+import numpy as np
+
 from .device import Device
 
 
@@ -32,6 +34,10 @@ class Int32(Type):
     def size(self):
         return 4
 
+    @staticmethod
+    def from_concrete(concrete_value):
+        return Int32(concrete_value.device)
+
 
 class Int64(Type):
     """The 64-bit integer type."""
@@ -41,6 +47,10 @@ class Int64(Type):
 
     def size(self):
         return 8
+
+    @staticmethod
+    def from_concrete(concrete_value):
+        return Int64(concrete_value.device)
 
 
 class Float16(Type):
@@ -52,6 +62,10 @@ class Float16(Type):
     def size(self):
         return 2
 
+    @staticmethod
+    def from_concrete(concrete_value):
+        return Float16(concrete_value.device)
+
 
 class Float32(Type):
     """The 32-bit float type."""
@@ -61,6 +75,10 @@ class Float32(Type):
 
     def size(self):
         return 4
+
+    @staticmethod
+    def from_concrete(concrete_value):
+        return Float32(concrete_value.device)
 
 
 class Float64(Type):
@@ -72,6 +90,10 @@ class Float64(Type):
     def size(self):
         return 8
 
+    @staticmethod
+    def from_concrete(concrete_value):
+        return Float64(concrete_value.device)
+
 
 class Bool(Type):
     """The boolean type."""
@@ -81,6 +103,10 @@ class Bool(Type):
 
     def size(self):
         return 1
+
+    @staticmethod
+    def from_concrete(concrete_value):
+        return Bool(concrete_value.device)
 
 
 @dataclass(frozen=True)
@@ -109,6 +135,19 @@ class Tensor(Type):
         if not isinstance(self.shape, tuple):
             return 0
         return reduce(mul, self.shape) * self.dtype.size()
+
+    @staticmethod
+    def from_concrete(concrete_value):
+        dtype_to_type = {
+            np.int32: Int32,
+            np.int64: Int64,
+            np.float16: Float16,
+            np.float32: Float32,
+            np.float64: Float64,
+            np.bool: Bool,
+        }  # TODO does this map exist/belong somewhere else?
+        dtype = dtype_to_type[concrete_value.val.dtype.type](concrete_value.device)
+        return Tensor(dtype, concrete_value.val.shape, concrete_value.device)
 
 
 @dataclass(frozen=True)
@@ -145,3 +184,7 @@ class TupleType(Type):
         for typ in self.types:
             size_ += typ.size()
         return size_
+
+    @staticmethod
+    def from_concrete(concrete_value):
+        raise NotImplementedError

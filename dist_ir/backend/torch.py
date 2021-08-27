@@ -569,6 +569,7 @@ def run_pytorch(
     # TODO: Accept ConcreteValues as inputs
     # TODO: Convert concrete value inputs to abstract types to pass to rank projector
     # TODO: Automatically abstract concrete values in interpreter if no matching function available
+    # TODO: Convert concrete value inputs to PyTorch tensors to pass to multiprocess runner
 
     device_to_fns, groups = project(fn, tuple(v.type for v in fn.inputs))
 

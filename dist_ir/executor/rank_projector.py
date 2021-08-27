@@ -225,7 +225,7 @@ def project(
         outputs = tuple(state.env[v] for v in op.outputs)
 
         # Dispatch to find projector function for op
-        projector = dispatch(_ProjectorSemantics, op.op_type, inputs)
+        _, projector = dispatch(_ProjectorSemantics, op.op_type, inputs)
         # Project op and add to appropriate per-rank function
         projector(op, state)
 

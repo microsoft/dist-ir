@@ -201,6 +201,53 @@ def grid_search(all_model_sizes, all_world_sizes, all_batch_sizes):
             )
 
 
+def grid_search_pytorch(all_model_sizes, all_world_sizes, all_batch_sizes):
+    configs = gen_configurations(all_model_sizes, all_world_sizes, all_batch_sizes)
+
+    with open("mlp_pytorch.csv", "w", newline="") as f:
+        fieldnames = [
+            "model_size",
+            "world_size",
+            "batch_size",
+            "dp_degree",
+            "hp_degree",
+            "pp_degree",
+            "num_microbatches",
+            "latency_pt",
+            "throughput_pt",
+        ]
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for config in configs:
+            try:
+                latency, throughput = run_backend(config)
+            except RuntimeError as e:
+                print(e)
+                latency, throughput = -1.0, -1.0
+            (
+                model_size,
+                batch_size,
+                dp_degree,
+                hp_degree,
+                pp_degree,
+                num_microbatches,
+            ) = config
+            writer.writerow(
+                {
+                    "model_size": model_size,
+                    "world_size": dp_degree * hp_degree * pp_degree,
+                    "batch_size": batch_size,
+                    "dp_degree": dp_degree,
+                    "hp_degree": hp_degree,
+                    "pp_degree": pp_degree,
+                    "num_microbatches": num_microbatches,
+                    "latency_pt": latency,
+                    "throughput_pt": throughput,
+                }
+            )
+            f.flush()
+
+
 def get_inputs(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers):
     x = torch.randn(size=(batch_size, input_dim), dtype=torch.float32)
     z = torch.randn(size=(batch_size, output_dim), dtype=torch.float32)
@@ -325,10 +372,11 @@ def run_vanilla_baseline(model_size, batch_size):
 
 if __name__ == "__main__":
     torch.manual_seed(42)
+    model_size = "mlp-small"
 
     # # Grid search simulation to find best configuration:
     # grid_search(
-    #     all_model_sizes=["mlp-small"],  # ["mlp-small", "mlp-medium", "mlp-large"],
+    #     all_model_sizes=[model_size],  # ["mlp-small", "mlp-medium", "mlp-large"],
     #     all_world_sizes=[1, 2, 4],
     #     all_batch_sizes=[2 ** i for i in range(16)]
     #     # all_batch_sizes=[512, 1024, 2048, 4096, 8192],
@@ -336,20 +384,22 @@ if __name__ == "__main__":
 
     # # Run sequential baseline on pytorch backend
     # for i in range(10, 15):
-    #     run_backend(("mlp-small", 2 ** i, 1, 1, 1, 1))
+    #     run_backend((model_size, 2 ** i, 1, 1, 1, 1))
 
     # Try pure DP/HP/PP baselines on pytorch backend:
-    # DP goes OOM even with BS=4
+    # # DP goes OOM even with BS=4
     # for i in range(1, 15):
-    #     run_backend(("mlp-small", 2 ** i, 4, 1, 1, 1))
+    #     run_backend((model_size, 2 ** i, 4, 1, 1, 1))
+    # # HP:
     # try:
     #     for i in range(12, 20):
-    #         run_backend(("mlp-small", 2 ** i, 1, 4, 1, 1))
+    #         run_backend((model_size, 2 ** i, 1, 4, 1, 1))
     # except RuntimeError as e:
     #     print(e)
+    # # PP:
     # try:
-    #     for i in range(15, 20):
-    #         run_backend(("mlp-small", 2 ** i, 1, 1, 4, 8))
+    #     for i in [6]:  # range(1, 20):
+    #         run_backend((model_size, 16384, 1, 1, 4, 2 ** i))
     # except RuntimeError as e:
     #     print(e)
     #     # TODO does (2, 1, 1, 4, 2) have effective batch size 2 or 4?
@@ -357,10 +407,10 @@ if __name__ == "__main__":
     # # Run best configs on pytorch backend
     # df = pd.read_csv("mlp_grid_search_results.csv")
     # # Use a 8GB memory estimate cutoff to avoid OOMs as much as possible
-    # df = df[df["peak_memory"] < 8e9]
+    # # df = df[df["peak_memory"] < 14e9]
     # for _, row in df.sort_values(by="throughput", ascending=False).iterrows():
     #     config = (
-    #         "mlp-small",
+    #         model_size,
     #         row["batch_size"],
     #         row["dp_degree"],
     #         row["hp_degree"],
@@ -372,9 +422,16 @@ if __name__ == "__main__":
     #     except RuntimeError as e:
     #         print(e)
 
-    # Run sequential model on vanilla pytorch as baseline:
-    try:
-        for i in range(10, 20):
-            run_vanilla_baseline("mlp-small", 2 ** i)
-    except RuntimeError as e:
-        print(e)
+    # # Run sequential model on vanilla pytorch as baseline:
+    # try:
+    #     for i in range(10, 20):
+    #         run_vanilla_baseline(model_size, 2 ** i)
+    # except RuntimeError as e:
+    #     print(e)
+
+    # Grid search pytorch backend:
+    grid_search_pytorch(
+        all_model_sizes=[model_size],  # ["mlp-small", "mlp-medium", "mlp-large"],
+        all_world_sizes=[1, 2, 4],
+        all_batch_sizes=[2 ** i for i in range(16)],
+    )

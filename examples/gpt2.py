@@ -16,7 +16,7 @@ from dist_ir.executor import (
 )
 from dist_ir.importer import import_from_onnx
 from dist_ir.ir import cpprint, Device, FunctionMaker, Op, Topology, Value
-from dist_ir.ir.type import Int64, Float32, Tensor, Type
+from dist_ir.ir.type import Int64, Float32, Tensor, Type, abstract_values
 from dist_ir.transforms import (
     gpt2_dhp_transform,
     sanitize_unhashable_attributes,
@@ -586,6 +586,15 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
         else:
             raise NotImplementedError(dtype)
 
+    is_weight = lambda x: "weight" in x or "bias" in x
+
+    input_types = abstract_values(
+        input_data,
+        tuple(
+            Tensor if is_weight(function.inputs[i].name) else ConcreteValue
+            for i in range(len(input_data))
+        ),
+    )
     pytorch_input_data = [
         torch.tensor(x.val, dtype=_resolve_dtype(x.val.dtype)) for x in input_data
     ]
@@ -597,7 +606,8 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
         )
     per_rank_outputs, runtimes = torch_backend.run_pytorch(
         function,
-        input_data,
+        pytorch_input_data,
+        input_types=input_types,
         use_gpu=use_gpu,
     )
     return per_rank_outputs, runtimes

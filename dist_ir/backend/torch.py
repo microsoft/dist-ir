@@ -14,7 +14,7 @@ from torch import fx
 from ..executor.rank_projector import project
 from ..ir import Function, cpprint
 from ..ir.device import Device
-from ..ir.type import Int64, Float32
+from ..ir.type import Int64, Float32, Type
 
 # NOTE: The code currently suffers from this issue, more investigation needed:
 # https://github.com/pytorch/pytorch/issues/11201
@@ -544,6 +544,7 @@ def run_multiprocesses(
 def run_pytorch(
     fn: Function,
     inputs: Sequence[Any],
+    input_types: Sequence[Type] = None,
     use_gpu=False,
     num_repetitions=1,
     num_warmup=0,
@@ -566,12 +567,12 @@ def run_pytorch(
     profiler and outputs logs to TensorBoard.
     """
 
-    # TODO: Accept ConcreteValues as inputs
-    # TODO: Convert concrete value inputs to abstract types to pass to rank projector
-    # TODO: Automatically abstract concrete values in interpreter if no matching function available
-    # TODO: Convert concrete value inputs to PyTorch tensors to pass to multiprocess runner
+    if input_types is None:
+        input_types = tuple(v.type for v in fn.inputs)
+    else:
+        assert len(input_types) == len(fn.inputs)
 
-    device_to_fns, groups = project(fn, tuple(v.type for v in fn.inputs))
+    device_to_fns, groups = project(fn, input_types)
 
     # Map between DistIR devices and pytorch ranks:
     device_to_rank = {}
@@ -593,8 +594,8 @@ def run_pytorch(
     )
 
     per_rank_inputs = [[] for _ in range(world_size)]
-    for v, a in zip(fn.inputs, inputs):
-        per_rank_inputs[device_to_rank[v.type.device]].append(a)
+    for v, t, a in zip(fn.inputs, input_types, inputs):
+        per_rank_inputs[device_to_rank[t.device]].append(a)
     assert len(fn.inputs) == len(inputs)
 
     if debug_mock:

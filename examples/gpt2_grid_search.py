@@ -8,7 +8,7 @@ import os
 from tqdm.contrib.concurrent import process_map
 
 from . import gpt2
-from dist_ir.transforms import check_params
+from dist_ir.transforms.gpt2_dhp_transform import check_params
 
 MODEL_PARAMS = {
     "gpt2": (12, 12, 768),
@@ -34,6 +34,7 @@ FIELDNAMES = [
     "pp_degree",
     "num_microbatches",
     "latency",
+    "throughput",
     "peak_memory",
 ]
 
@@ -81,6 +82,7 @@ def _write_row(config, latency, peak_memory):
         backend,
         lock,
     ) = config
+    throughput = batch_size / latency
     with lock:
         with open(output_file, "a+", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
@@ -94,6 +96,7 @@ def _write_row(config, latency, peak_memory):
                     "pp_degree": pp_degree,
                     "num_microbatches": num_microbatches,
                     "latency": latency,
+                    "throughput": throughput,
                     "peak_memory": peak_memory,
                 }
             )
@@ -117,7 +120,8 @@ def run(config):
         lock,
     ) = config
     n_layer, n_head, d_embd = MODEL_PARAMS[model_size]
-    input_data = copy.deepcopy(input_data)
+    if hp_degree > 1:
+        input_data = copy.deepcopy(input_data)
     try:
         init_function, transformed_function, initialized_input_data = gpt2.transform(
             function,
@@ -148,6 +152,12 @@ def run(config):
             # TODO: Measure peak memory?
             peak_memory = 0
     except Exception as e:
+        print(
+            f"Failed to run the configuration (model_size={model_size}, "
+            f"batch_size={batch_size}, dp_degree={dp_degree}, "
+            f"hp_degree={hp_degree}, pp_degree={pp_degree}, "
+            f"num_microbatches={num_microbatches}"
+        )
         latency = -1
         peak_memory = -1
     _write_row(config, latency, peak_memory)
@@ -165,7 +175,7 @@ def grid_search(args):
             != "y"
         ):
             return
-    all_world_sizes = [4, 8, 16]
+    all_world_sizes = [1, 2, 4]
     all_batch_sizes = [64, 256]
     # all_model_sizes = ["gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"]
     all_model_sizes = [
@@ -225,12 +235,7 @@ def grid_search(args):
                 all_num_microbatches = [
                     int(2 ** k)
                     for k in range(
-                        1,
-                        int(
-                            np.floor(
-                                np.log2(batch_size // dp_degree) / 2,
-                            )
-                        ),
+                        1, int(np.floor(np.log2(batch_size // dp_degree) / 2))
                     )
                 ]
             for num_microbatches in all_num_microbatches:

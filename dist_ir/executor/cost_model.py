@@ -241,8 +241,9 @@ class CostModel:
         input_size = xs[0].size()
         devices = [x.device for x in xs]
         num_devices = len(devices)
-        per_device_data = 2 * input_size * (num_devices - 1)
-        per_device_data_gb = per_device_data / BYTES_IN_Gb
+        per_device_data_gb = (2 * input_size / BYTES_IN_Gb / num_devices) * (
+            num_devices - 1
+        )
         all_bandwidths = []
         for i in range(len(devices)):
             for j in range(i + 1, len(devices)):

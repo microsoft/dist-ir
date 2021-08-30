@@ -128,12 +128,3 @@ def test_hp_pp():
 
 def test_dp_hp_pp():
     _test_helper(dp_degree=2, hp_degree=2, pp_degree=2, num_microbatches=2)
-
-
-if __name__ == "__main__":
-    test_dp_only()
-    test_hp_only()
-    test_pp_only()
-    test_dp_hp()
-    test_hp_pp()
-    test_dp_hp_pp()

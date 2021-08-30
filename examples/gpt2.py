@@ -16,7 +16,7 @@ from dist_ir.executor import (
 )
 from dist_ir.importer import import_from_onnx
 from dist_ir.ir import cpprint, Device, FunctionMaker, Op, Topology, Value
-from dist_ir.ir.type import Float32, Tensor
+from dist_ir.ir.type import Int32, Int64, Float32, Tensor
 from dist_ir.transforms import (
     gpt2_dhp_transform,
     check_params,
@@ -24,6 +24,7 @@ from dist_ir.transforms import (
     sanitize_unhashable_attributes,
     restore_unhashable_attributes,
 )
+from dist_ir.transforms.gpt2_dhp_transform import check_params, update_attributes
 
 
 def _to_numpy(x):
@@ -317,28 +318,7 @@ def _set_model_size(function, n_layer, n_head, d_embd):
     return transformed_function.finalize(), inputs_to_remove
 
 
-def _update_input_data_for_hp(
-    input_data, function, d_embd, n_head, hp_degree, use_real_weights
-):
-    for i, inp in enumerate(function.inputs):
-        if input_data[i].shape == (1,):
-            if input_data[i][0] == d_embd * 3:
-                input_data[i] = np.array(
-                    [d_embd * 3 // hp_degree], dtype=input_data[i].dtype
-                )
-            elif input_data[i][0] == d_embd * 4:
-                input_data[i] = np.array(
-                    [d_embd * 4 // hp_degree], dtype=input_data[i].dtype
-                )
-            elif input_data[i][0] == n_head:
-                input_data[i] = np.array(
-                    [n_head // hp_degree], dtype=input_data[i].dtype
-                )
-        elif use_real_weights and "c_proj.bias" in inp.name:
-            input_data[i] = np.copy(input_data[i]) / hp_degree
-
-
-def get_stats(function):
+def _get_stats(function):
     parameter_count = 0
     model_size = 0
     for inp in function.inputs:
@@ -367,6 +347,7 @@ def get_stats(function):
     return parameter_count, model_size, parameter_count_str, model_size_str
 
 
+# TODO: Move this to dist_ir/ir/topology (perhaps as uniform_topology)
 def get_topology(world_size, device_throughput, dram_bandwidth, network_bandwidth):
     topology = Topology()
     d0 = topology.add_device("gpu")
@@ -387,7 +368,9 @@ def get_topology(world_size, device_throughput, dram_bandwidth, network_bandwidt
 
 
 def import_function_and_get_input_data(
-    model_path, default_device, use_real_weights=False
+    model_path,
+    default_device,
+    use_real_weights=False,
 ):
     function, input_data_map = import_from_onnx(
         model_path,
@@ -395,6 +378,11 @@ def import_function_and_get_input_data(
         default_device=default_device,
         parse_input_data=True,
     )
+
+    if not use_real_weights:
+        for inp in input_data_map:
+            if "weight" in inp.name or "bias" in inp.name:
+                input_data_map[inp] = inp.type
 
     function = _filter_extra_outputs(function)
 
@@ -410,11 +398,9 @@ def import_function_and_get_input_data(
 def resize_function_and_input_data(function, input_data, n_layer, n_head, d_embd):
     function, inputs_to_remove = _set_model_size(function, n_layer, n_head, d_embd)
 
-    input_data = input_data
-
     # If we shrunk the model, remove any unnecessary inputs.
     for i in inputs_to_remove[::-1]:
-        input_data.pop(i)
+        input_data.pop(i - 1)
 
     # Update the input data if any weight shapes were changed.
     for i in range(len(input_data)):
@@ -468,6 +454,27 @@ def create_input_ids(batch_size):
     return _to_numpy(input_ids)
 
 
+def _update_input_data_for_hp(
+    input_data, function, d_embd, n_head, hp_degree, use_real_weights
+):
+    for i, inp in enumerate(function.inputs):
+        if input_data[i].shape == (1,):
+            if input_data[i][0] == d_embd * 3:
+                input_data[i] = np.array(
+                    [d_embd * 3 // hp_degree], dtype=input_data[i].dtype
+                )
+            elif input_data[i][0] == d_embd * 4:
+                input_data[i] = np.array(
+                    [d_embd * 4 // hp_degree], dtype=input_data[i].dtype
+                )
+            elif input_data[i][0] == n_head:
+                input_data[i] = np.array(
+                    [n_head // hp_degree], dtype=input_data[i].dtype
+                )
+        elif use_real_weights and "c_proj.bias" in inp.name:
+            input_data[i] = np.copy(input_data[i]) / hp_degree
+
+
 def transform(
     function,
     input_data,
@@ -480,11 +487,11 @@ def transform(
     n_head,
     use_real_weights=False,
 ):
-    world_size = dp_degree * hp_degree * pp_degree
     if hp_degree > 1:
         _update_input_data_for_hp(
             input_data, function, d_embd, n_head, hp_degree, use_real_weights
         )
+    world_size = dp_degree * hp_degree * pp_degree
     init_function, transformed_function = gpt2_dhp_transform(
         function,
         dp_degree,
@@ -551,7 +558,7 @@ def get_transformed_function_and_input_data(
             input_data,
             input_devices=[topology.devices[0] for _ in range(len(input_data))],
         )
-        parameter_count, model_size, parameter_count_str, model_size_str = get_stats(
+        parameter_count, model_size, parameter_count_str, model_size_str = _get_stats(
             function
         )
         print("Parameter count:", parameter_count_str)
@@ -580,8 +587,20 @@ def simulate(function, input_data, topology):
     return simulation
 
 
-def run_pytorch(function, input_data, world_size, use_gpu=True):
-    pytorch_input_data = [torch.tensor(x) for x in input_data]
+def run_pytorch(function, input_data, world_size, use_gpu=True, debug_stacktrace=False):
+    def _resolve_dtype(dtype):
+        if dtype == np.float32:
+            return torch.float32
+        elif dtype == np.int64:
+            return torch.int64
+        elif dtype == np.int32:
+            return torch.int32
+        else:
+            raise NotImplementedError(dtype)
+
+    pytorch_input_data = [
+        torch.tensor(x, dtype=_resolve_dtype(x.dtype)) for x in input_data
+    ]
     if use_gpu and world_size > torch.cuda.device_count():
         raise ValueError(
             f"Specified world size is {world_size}, but only "
@@ -592,6 +611,9 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
         pytorch_input_data,
         use_gpu=use_gpu,
         run_type_inference=False,
+        num_warmup=5,
+        num_repetitions=10,
+        debug_stacktrace=debug_stacktrace,
     )
     return per_rank_outputs, runtimes
 
@@ -606,6 +628,9 @@ def main(args):
         args.n_head,
         args.d_embd,
     )
+
+    if args.backend == "pytorch":
+        args.use_real_weights = True
 
     (
         transformed_function,
@@ -643,7 +668,11 @@ def main(args):
     elif args.backend == "pytorch":
         world_size = args.dp_degree * args.hp_degree * args.pp_degree
         per_rank_outputs, runtimes = run_pytorch(
-            transformed_function, initialized_input_data, world_size, args.use_gpu
+            transformed_function,
+            initialized_input_data,
+            world_size,
+            args.use_gpu,
+            args.debug_stacktrace,
         )
         print(f"Latency: {np.median(runtimes[-1])*1000:.2f} ms")
         print(
@@ -711,5 +740,11 @@ if __name__ == "__main__":
         "--dram_bandwidth", type=float, default=9e11, help="DRAM Bandwidth"
     )
     parser.add_argument("--trace_file", type=str, default=None, help="Trace file")
+    parser.add_argument(
+        "--debug_stacktrace",
+        default=False,
+        action="store_true",
+        help="Debug stacktrace",
+    )
     args = parser.parse_args()
     main(args)

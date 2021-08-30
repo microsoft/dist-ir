@@ -213,7 +213,7 @@ def test_mlp_grid_search(use_gpu):
     # hidden_dims = [2 ** i for i in range(8, 13)]
     batch_sizes = [64]
     model_sizes = ["mlp-xs"]
-    world_sizes = [1, 2, 4, 8]
+    world_sizes = [1, 2, 4]
 
     results = []
     for (model_size, batch_size, d, h, p, m) in gen_configurations(
@@ -377,9 +377,9 @@ def test_dp_mlp(use_gpu):
 
 
 if __name__ == "__main__":
-    # test_owt(2, 4)
-    # test_dp_mlp()
-    # test_send_recv()
-    # test_single_device()
+    # test_owt(2, 4, use_gpu=False)
+    # test_dp_mlp(use_gpu=False)
+    # test_send_recv(use_gpu=False)
+    # test_single_device(use_gpu=False)
     test_dp_mp_matmuls()
-    test_mlp_grid_search()
+    test_mlp_grid_search(use_gpu=False)

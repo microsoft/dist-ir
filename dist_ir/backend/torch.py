@@ -412,7 +412,6 @@ def run_function(
             if v in value_map and fn.last_use(v) == op and not (v in fn.outputs):
                 del value_map[v]
 
-
     # Return outputs
     return tuple(value_map[v] for v in fn.outputs)
 
@@ -461,7 +460,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
             print_exc()
         print("{rank}: PyTorch backend exiting after 1 run in debug mode.")
         dist.destroy_process_group()
-        return None, None 
+        return None, None
 
     # Time a bunch of executions, then execute once for output values
     with torch.profiler.profile(

@@ -3,6 +3,7 @@ import pandas as pd
 
 from examples import gpt2
 
+
 def main():
     df = pd.read_csv("gpt2_grid_search_results.csv")
     df = df.sort_values(by=["throughput", "latency"], ascending=[False, True])
@@ -17,8 +18,12 @@ def main():
     n_head = 32
     d_embd = 4096
     results = []
-    for (batch_size, dp_degree, hp_degree, pp_degree, num_microbatches) in df[keys].values[:10]:
-        print(f"Running {batch_size}/{dp_degree}/{hp_degree}/{pp_degree}/{num_microbatches}...")
+    for (batch_size, dp_degree, hp_degree, pp_degree, num_microbatches) in df[
+        keys
+    ].values[:10]:
+        print(
+            f"Running {batch_size}/{dp_degree}/{hp_degree}/{pp_degree}/{num_microbatches}..."
+        )
         (
             transformed_function,
             initialized_input_data,
@@ -42,19 +47,33 @@ def main():
         world_size = dp_degree * hp_degree * pp_degree
         try:
             _, runtimes = gpt2.run_pytorch(
-                transformed_function, initialized_input_data, world_size, use_gpu=True, debug_stacktrace=False
+                transformed_function,
+                initialized_input_data,
+                world_size,
+                use_gpu=True,
+                debug_stacktrace=False,
             )
             latency = np.median(runtimes[-1])
             throughput = batch_size / latency
-            print(f"latency={latency*1000:.2f}, throughput={throughput:.2f}") 
+            print(f"latency={latency*1000:.2f}, throughput={throughput:.2f}")
         except RuntimeError as e:
             latency = np.inf
             throughput = -1
-        results.append((batch_size, dp_degree, hp_degree, pp_degree, num_microbatches, latency, throughput))
+        results.append(
+            (
+                batch_size,
+                dp_degree,
+                hp_degree,
+                pp_degree,
+                num_microbatches,
+                latency,
+                throughput,
+            )
+        )
 
     df = pd.DataFrame(results, columns=keys + ["latency", "throughput"])
     df.to_csv("gpt2_grid_search_results_pytorch.csv")
 
 
-if __name__=='__main__':
+if __name__ == "__main__":
     main()

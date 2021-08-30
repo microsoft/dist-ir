@@ -5,7 +5,7 @@ import pytest
 
 from dist_ir.executor import SequentialExecutor
 from dist_ir.ir import cpprint
-from examples.gpt2 import get_transformed_function_and_input_data
+from examples.gpt2 import get_transformed_function_and_input_data, run_pytorch
 
 # Assume the onnx file is stored in the repository root
 MODEL_PATH = (Path(__file__).parent.parent / "gpt2-10.onnx").absolute()
@@ -29,6 +29,7 @@ def _run_gpt(
     n_head=12,
     n_embd=768,
     use_real_weights=True,
+    use_pytorch_backend=False,
     verbose=False,
 ):
     (
@@ -53,9 +54,15 @@ def _run_gpt(
     if verbose:
         cpprint(transformed_function)
     if use_real_weights:
-        ex = SequentialExecutor("numpy")
-        outputs = ex.compute(transformed_function, initialized_input_data)
-        return outputs
+        if use_pytorch_backend:
+            world_size = dp_degree * hp_degree * pp_degree
+            run_pytorch(
+                transformed_function, initialized_input_data, world_size, use_gpu=False
+            )
+        else:
+            ex = SequentialExecutor("numpy")
+            outputs = ex.compute(transformed_function, initialized_input_data)
+            return outputs
 
 
 def _test(original_outputs, dp_degree=1, hp_degree=1, pp_degree=1, num_microbatches=1):
@@ -148,6 +155,15 @@ def test_dp_hp_pp(original_outputs, dp_degree, hp_degree, pp_degree):
     )
 
 
-if __name__ == "__main__":
-    original_outputs = _run_gpt()
-    test_dp_only(original_outputs, 2)
+@pytest.mark.parametrize(
+    ("dp_degree", "hp_degree", "pp_degree"),
+    list(itertools.product([1, 2], [1, 2], [1, 2])),
+)
+def test_pytorch_backend(dp_degree, hp_degree, pp_degree):
+    _run_gpt(
+        dp_degree=dp_degree,
+        hp_degree=hp_degree,
+        pp_degree=pp_degree,
+        num_microbatches=pp_degree,
+        use_pytorch_backend=True,
+    )

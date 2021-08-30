@@ -2,14 +2,14 @@ from collections import defaultdict
 from typing import Any, Dict, Sequence, Set, Tuple
 
 from ..ir import Function, FunctionMaker, Device, Op
-from ..ir.type import Type, Float32, Float64, Int64, Tensor
+from ..ir.type import Type, Float32, Float64, Int64, Tensor, abstract_values
 from .absint import (
     AbstractState,
     dispatch,
     interpreter,
     update_semantics_with_register,
 )
-
+from .concrete_value import ConcreteValue
 
 # TODO merge this with torch backend -- it breaks semantics to have P2P send/recv
 
@@ -113,18 +113,20 @@ def _identity_projector(op: Op, state: ProjectorState, inputs, outputs):
 
 
 def _send_projector(op: Op, state: ProjectorState, inputs, outputs):
-    from_d = inputs[0].device
+    inp = inputs[0]
+    from_d = inp.device
     to_d = op.attributes["device"]
     assert from_d != to_d
     group = _make_group((from_d, to_d))
-    if not isinstance(inputs[0], Tensor):
-        # TODO why is this case needed?
-        assert False
+    if not isinstance(inp, Tensor) and not isinstance(inp, ConcreteValue):
+        # Input could be a primitive type
         output_shape = tuple()
-        output_type = inputs[0]
+        output_type = inp
     else:
-        output_shape = inputs[0].shape
-        output_type = inputs[0].dtype
+        if isinstance(inp, ConcreteValue):
+            inp = abstract_values((inp,), (Tensor,))[0]
+        output_shape = inp.shape
+        output_type = inp.dtype
     state.per_rank_fns[from_d].ops.append(
         Op(
             "SendP2P",
@@ -161,6 +163,7 @@ _ProjectorRegister = {
     "MatMul": _identity_projector,
     "MatMulGrad": _identity_projector,
     "MPIAllgather": _collective_projector,
+    "MPIAllreduce": _collective_projector,
     "MPIGather": _gather_projector,
     "Mul": _identity_projector,
     "NonZero": _identity_projector,

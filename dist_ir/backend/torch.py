@@ -14,11 +14,11 @@ from torch import fx
 from ..executor.rank_projector import project
 from ..ir import Function, cpprint
 from ..ir.device import Device
-from ..ir.type import Int64, Float32, Type
+from ..ir.type import Int32, Int64, Float32, Type
 
 # NOTE: The code currently suffers from this issue, more investigation needed:
 # https://github.com/pytorch/pytorch/issues/11201
-# torch.multiprocessing.set_sharing_strategy("file_system")
+torch.multiprocessing.set_sharing_strategy("file_system")
 
 DistributedContext = NamedTuple(
     "DistributedContext",
@@ -162,10 +162,14 @@ def _reshape(x, y, ctx=None):
 
 
 def _recv(shape=None, from_d=None, group=None, dtype=None, ctx=None):
-    if isinstance(dtype, Int64):
+    if isinstance(dtype, Int32):
+        x = torch.zeros(shape).int()
+    elif isinstance(dtype, Int64):
         x = torch.zeros(shape).long()
     elif isinstance(dtype, Float32):
         x = torch.zeros(shape).float()
+    else:
+        raise NotImplementedError(dtype)
 
     src_rank = ctx.device_to_rank[from_d]
     if ctx.use_gpu:
@@ -459,7 +463,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
             print_exc()
         print("PyTorch backend exiting after 1 run in debug mode.")
         dist.destroy_process_group()
-        sys.exit(1)
+        return None, None
 
     # Time a bunch of executions, then execute once for output values
     with torch.profiler.profile(
@@ -536,7 +540,8 @@ def run_multiprocesses(
     mp = torch.multiprocessing.get_context("spawn")
     with mp.Pool(ctx.world_size) as p:
         outputs = p.starmap(per_rank_runner, args)
-
+    if ctx.debug_stacktrace:
+        sys.exit(1)
     per_rank_outputs, runtimes = zip(*outputs)
     return per_rank_outputs, runtimes
 

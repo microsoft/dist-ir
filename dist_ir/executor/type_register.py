@@ -223,7 +223,6 @@ def _mpi_allgather_prop_fn(op, *xs):
     if not (
         all(isinstance(x, Tensor) for x in xs)
         and len(xs) > 0
-        and len(set(dtypes)) == 1
         and len(set(devices)) == len(devices)
     ):
         _raise_type_error(op, xs)
@@ -241,7 +240,6 @@ def _mpi_allreduce_prop_fn(op, *xs):
         all(isinstance(x, Tensor) for x in xs)
         and len(xs) > 0
         and all(x.shape == xs[0].shape for x in xs)
-        and len(set(dtypes)) == 1
         and len(set(devices)) == len(devices)
     ):
         _raise_type_error(op, *xs)
@@ -454,7 +452,11 @@ def _send_prop_fn(op, x):
     device = op.attributes["device"]
     if not isinstance(x, Tensor) or device == x.device:
         _raise_type_error(op, x)
-    return Tensor(dtype=x.dtype, shape=x.shape, device=device)
+    if x.dtype is not None and x.dtype.device is not None:
+        dtype = type(x.dtype)(device=device)
+    else:
+        dtype = x.dtype
+    return Tensor(dtype=dtype, shape=x.shape, device=device)
 
 
 def _split_prop_fn(op, x):

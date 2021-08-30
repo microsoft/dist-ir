@@ -19,13 +19,13 @@ def _elementwise_numpy_op_prop_fn(op, x, y):
     if (
         isinstance(x, Tensor)
         and isinstance(y, ConcreteValue)
-        and isinstance(y.val, np.float32)
+        and y.val.dtype == np.float32
     ):
         return x
     elif (
         isinstance(x, ConcreteValue)
-        and isinstance(x.val, np.float32)
         and isinstance(y, Tensor)
+        and x.val.dtype == np.float32
     ):
         return y
     else:

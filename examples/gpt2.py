@@ -609,6 +609,8 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
         pytorch_input_data,
         input_types=input_types,
         use_gpu=use_gpu,
+        num_warmup=5,
+        num_repetitions=10,
     )
     return per_rank_outputs, runtimes
 

@@ -175,17 +175,17 @@ def grid_search(args):
             != "y"
         ):
             return
-    all_world_sizes = [1, 2, 4]  # [4, 8, 16]
-    all_batch_sizes = [2 ** i for i in range(1, 11)]
+    all_world_sizes = [1, 2, 4]
+    all_batch_sizes = [64, 256]
     # all_model_sizes = ["gpt2", "gpt2-medium", "gpt2-large", "gpt2-xl"]
     all_model_sizes = [
-        # "gpt3",
-        # "gpt3-medium",
-        # "gpt3-large",
-        # "gpt3-xl",
-        # "gpt3-2.7B",
+        "gpt3",
+        "gpt3-medium",
+        "gpt3-large",
+        "gpt3-xl",
+        "gpt3-2.7B",
         "gpt3-6.7B",
-        # "gpt3-13B",
+        "gpt3-13B",
     ]
 
     topology = gpt2.get_topology(
@@ -234,8 +234,9 @@ def grid_search(args):
             else:
                 all_num_microbatches = [
                     int(2 ** k)
-                    for k in range(1, int(np.floor(np.log2(batch_size // dp_degree))))
-                    if k <= 7  # TODO this is to keep simulation times manageable
+                    for k in range(
+                        1, int(np.floor(np.log2(batch_size // dp_degree) / 2))
+                    )
                 ]
             for num_microbatches in all_num_microbatches:
                 try:

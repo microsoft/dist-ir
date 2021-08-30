@@ -477,20 +477,12 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
     ) as p:
         for i in range(num_warmup_steps + num_repetitions):
             add_event()
-            failed = False
-            try:
-                outputs = run_function(ctx, fn, inputs, rank)
-                if ctx.world_size > 1:
-                    torch.distributed.barrier()
-            except Exception as e:
-                print_exc()
-                failed = True
-            if failed:
-                dist.destroy_process_group()
-                return None, [np.inf] * (num_repetitions)
+            # TODO: Handle failures here?
+            outputs = run_function(ctx, fn, inputs, rank)
+            if ctx.world_size > 1:
+                torch.distributed.barrier()
             add_event()
             p.step()
-            print(f"---------> {rank}: Finished iteration {i}")
 
     if ctx.use_gpu:
         # Move outputs back to cpu

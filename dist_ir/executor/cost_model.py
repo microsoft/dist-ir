@@ -138,9 +138,6 @@ class CostModel:
             ("SGDOptimizer", tuple(Tensor for i in range(8192))): self._sgd_cost_fn,
             ("SGDOptimizer", tuple(Tensor for i in range(16384))): self._sgd_cost_fn,
             ("SGDOptimizer", tuple(Tensor for i in range(32768))): self._sgd_cost_fn,
-            ("Split", (Tensor,)): self._split_cost_fn,
-            ("SplitUniform", (Tensor,)): self._split_cost_fn,
-            ("SplitUniformToTupleType", (Tensor,)): self._split_cost_fn,
             ("Shape", (Tensor,)): self._shape_cost_fn,
             ("Slice", (Tensor, Tensor, Tensor, Tensor)): self._slice_cost_fn,
             (

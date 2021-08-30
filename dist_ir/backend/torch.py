@@ -458,7 +458,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
                 torch.distributed.barrier()
         except Exception as e:
             print_exc()
-        print("{rank}: PyTorch backend exiting after 1 run in debug mode.")
+        print(f"{rank}: PyTorch backend exiting after 1 run in debug mode.")
         dist.destroy_process_group()
         return None, None
 

@@ -10,6 +10,7 @@ from ..ir.type import Type, Tensor
 from .absint import AbstractState, AbstractInterpreter
 from .numpy_register import NumPyRegister
 from .type_inference import TypePropRegister
+from .mixed_register import MixedImplementations
 
 SECONDS_TO_MICROSECONDS = 1e6
 

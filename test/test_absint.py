@@ -2,7 +2,7 @@ import numpy as np
 
 from dist_ir.executor import absint
 from dist_ir.executor.numpy_register import NumPyRegister
-from dist_ir.executor.simulator import MixedImplementations
+from dist_ir.executor.mixed_register import MixedImplementations
 
 # NOTE: Disabling mlir_parser tests to pass GitHub automated test
 # from dist_ir.importer import mlir_parser

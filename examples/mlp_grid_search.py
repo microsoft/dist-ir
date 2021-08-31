@@ -15,6 +15,7 @@ from dist_ir.executor import (
     Simulator,
     calibrate_device_parameters,
     calibrate_network_bandwidth,
+    calibrate_allreduce_parameters,
 )
 from dist_ir.executor.cost_model import CostModel
 from dist_ir.transforms import mlp_dhp_transform
@@ -66,6 +67,7 @@ def run_experiment(config):
         num_microbatches,
         backend,
         topology,
+        allreduce_parameters,
     ) = config
     num_hidden_layers, input_dim = MODEL_PARAMS[model_size]
     hidden_dim = input_dim
@@ -83,7 +85,9 @@ def run_experiment(config):
     )
     input_types = tuple(inp.type for inp in transformed_function.inputs)
     if backend == "simulate":
-        latency, peak_memory = simulate(transformed_function, input_types, topology)
+        latency, peak_memory = simulate(
+            transformed_function, input_types, topology, allreduce_parameters
+        )
         throughput = batch_size / latency
     elif backend == "pytorch":
         try:
@@ -128,6 +132,7 @@ def gen_configurations(
     all_batch_sizes,
     backend,
     topology,
+    allreduce_parameters,
 ):
     for (
         model_size,
@@ -149,7 +154,7 @@ def gen_configurations(
                 all_num_microbatches = [
                     int(2 ** k)
                     for k in range(
-                        max(1, max_num_microbatches_exp - 3), max_num_microbatches_exp
+                        max(1, max_num_microbatches_exp - 5), max_num_microbatches_exp
                     )
                 ]
             for num_microbatches in all_num_microbatches:
@@ -164,6 +169,7 @@ def gen_configurations(
                     num_microbatches,
                     backend,
                     topology,
+                    allreduce_parameters,
                 )
 
 
@@ -173,6 +179,7 @@ def grid_search(
     all_batch_sizes,
     backend,
     topology,
+    allreduce_parameters,
 ):
     configs = list(
         gen_configurations(
@@ -181,6 +188,7 @@ def grid_search(
             all_batch_sizes,
             backend,
             topology,
+            allreduce_parameters,
         )
     )
 
@@ -214,6 +222,7 @@ def grid_search(
                 num_microbatches,
                 backend,
                 topology,
+                allreduce_parameters,
             ) = config
             writer.writerow(
                 {
@@ -244,6 +253,10 @@ def calibrate_parameters(args):
         args.dram_bandwidth = simulation_parameters["dram_bandwidth"]
         args.kernel_launch_overhead = simulation_parameters["kernel_launch_overhead"]
         args.network_bandwidth = simulation_parameters["network_bandwidth"]
+        if "allreduce_parameters" in simulation_parameters:
+            args.allreduce_parameters = simulation_parameters["allreduce_parameters"]
+        else:
+            assert args.calibrate_allreduce_parameters
     else:
         simulation_parameters = {}
     update_simulation_parameters = False
@@ -262,11 +275,16 @@ def calibrate_parameters(args):
         args.network_bandwidth = calibrate_network_bandwidth()
         update_simulation_parameters = True
         print(f"Network bandwidth: {args.network_bandwidth}")
+    if args.calibrate_allreduce_parameters and args.backend == "simulate":
+        args.allreduce_parameters = calibrate_allreduce_parameters()
+        update_simulation_parameters = True
+        print(f"Allreduce parameters: {args.allreduce_parameters}")
     if update_simulation_parameters and args.simulation_parameters_file is not None:
         simulation_parameters["dram_bandwidth"] = args.dram_bandwidth
         simulation_parameters["device_throughput"] = args.device_throughput
         simulation_parameters["kernel_launch_overhead"] = args.kernel_launch_overhead
         simulation_parameters["network_bandwidth"] = args.network_bandwidth
+        simulation_parameters["allreduce_parameters"] = args.allreduce_parameters
         with open(args.simulation_parameters_file, "wb") as f:
             pickle.dump(simulation_parameters, f)
 
@@ -274,7 +292,7 @@ def calibrate_parameters(args):
 def main(args):
     model_size = "mlp-xs"
     all_world_sizes = [1, 2, 4]
-    all_batch_sizes = [2048, 4096, 8192]
+    all_batch_sizes = [1024, 2048, 4096, 8192]
     calibrate_parameters(args)
     topology = get_topology(
         max(all_world_sizes),
@@ -289,6 +307,7 @@ def main(args):
         all_batch_sizes=all_batch_sizes,
         backend=args.backend,
         topology=topology,
+        allreduce_parameters=args.allreduce_parameters,
     )
 
 
@@ -310,6 +329,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--network_bandwidth", type=float, default=64, help="Network bandwidth in Gbps"
     )
+    parser.add_argument("--allreduce_parameters", default=None)
     parser.add_argument(
         "--calibrate_device_parameters", action="store_true", default=False
     )
@@ -318,6 +338,9 @@ if __name__ == "__main__":
         action="store_true",
         default=False,
         help="Calibrate network bandwidth",
+    )
+    parser.add_argument(
+        "--calibrate_allreduce_parameters", action="store_true", default=False
     )
     parser.add_argument(
         "--simulation_parameters_file",

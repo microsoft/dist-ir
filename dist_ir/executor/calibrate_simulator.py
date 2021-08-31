@@ -48,40 +48,11 @@ def _allreduce(devices, m=1024, n=1024):
         )
         for i in range(len(devices))
     ]
-    """
-    xs_contention = [
-        fn.add_input_value(
-            f"x2", Tensor(shape=(8192, 8192), dtype=Float32(), device=devices[2])
-        ),
-        fn.add_input_value(
-            f"x3", Tensor(shape=(8192, 8192), dtype=Float32(), device=devices[2])
-        ),
-        fn.add_input_value(
-            f"x4", Tensor(shape=(8192, 8192), dtype=Float32(), device=devices[3])
-        ),
-        fn.add_input_value(
-            f"x5", Tensor(shape=(8192, 8192), dtype=Float32(), device=devices[3])
-        ),
-    ]
-    """
     ys = fn.add_op(
         op_type="MPIAllreduce",
         inputs=xs,
         output_names=[f"y{i}" for i in range(len(xs))],
     )
-    """
-    ys_contention = [
-        fn.add_op(op_type="MatMul", inputs=xs_contention[:2], output_names=["y2"]),
-        fn.add_op(op_type="MatMul", inputs=xs_contention[2:], output_names=["y3"]),
-    ]
-    """
-    """
-    ys_contention = fn.add_op(
-        op_type="MPIAllreduce",
-        inputs=xs_contention,
-        output_names=[f"y{i}" for i in range(2, 4)],
-    )
-    """
     return fn.finalize()
 
 
@@ -160,31 +131,47 @@ def network_bandwidth_debug():
 
 
 def calibrate_network_bandwidth():
-    def _get_bandwidth(src, dst, size):
-        fn = _send(src, dst, m=size, n=size)
-        _, runtimes = run_pytorch(
-            fn=fn,
-            inputs=[
-                torch.randn(size=fn.inputs[0].type.shape, dtype=torch.float32),
-            ],
-            use_gpu=True,
-            num_repetitions=10,
-            num_warmup=5,
-        )
-        pytorch_latency = np.median(runtimes[0])
-        bandwidth = fn.inputs[0].type.size() / BYTES_IN_Gb / pytorch_latency
+    def _get_bandwidth(src, dst):
+        all_sizes = [1024, 2048, 4096, 8192]
+        n = len(all_sizes)
+        X = np.zeros(shape=(n, 2))
+        Y = np.zeros(shape=(n,))
+        params = {}
+        devices = [Device(0, "cpu")] + [
+            Device(i + 1, "gpu") for i in range(torch.cuda.device_count())
+        ]
+        for i, size in enumerate(tqdm(all_sizes)):
+            fn = _send(src, dst, m=size, n=size)
+            fn = infer_types(fn, fn.inputs)
+            X[i][0] = fn.inputs[0].type.size() / BYTES_IN_Gb
+            X[i][1] = 1
+
+            _, runtimes = run_pytorch(
+                fn=fn,
+                inputs=[
+                    torch.randn(size=fn.inputs[i].type.shape, dtype=torch.float32)
+                    for i in range(len(fn.inputs))
+                ],
+                use_gpu=True,
+                num_repetitions=10,
+                num_warmup=5,
+            )
+            pytorch_latency = np.median(runtimes[0])
+            Y[i] = pytorch_latency
+
+        reg = LinearRegression(positive=True, fit_intercept=False).fit(X, Y)
+        bandwidth = 1.0 / reg.coef_[0]
         return bandwidth
 
     devices = [Device(0, "cpu")] + [
         Device(i + 1, "gpu") for i in range(torch.cuda.device_count())
     ]
     bandwidths = {}
-    size = 8192
     for i in range(1, len(devices)):
-        bandwidths[(0, i)] = _get_bandwidth(devices[0], devices[i], size)
+        bandwidths[(0, i)] = _get_bandwidth(devices[0], devices[i])
         print(f"bandwidth[(0, {i})] = {bandwidths[(0, i)]} Gbps")
         for j in range(i + 1, len(devices)):
-            bandwidth = _get_bandwidth(devices[i], devices[j], size)
+            bandwidth = _get_bandwidth(devices[i], devices[j])
             print(f"bandwidth[({i}, {j})] = {bandwidth} Gbps")
             bandwidths[(i, j)] = bandwidth
     return bandwidths
@@ -225,6 +212,45 @@ def calibrate_device_parameters():
 
     reg = LinearRegression(positive=True, fit_intercept=False).fit(X, Y)
     return 1.0 / reg.coef_[0], 1.0 / reg.coef_[1], reg.coef_[2]
+
+
+def calibrate_allreduce_parameters():
+    all_input_dims = [2048, 4096, 8192]
+    all_output_dims = [2048, 4096, 8192]
+    n = len(all_input_dims) * len(all_output_dims)
+    X = np.zeros(shape=(n, 3))
+    Y = np.zeros(shape=(n,))
+    params = {}
+    devices = [Device(0, "cpu")] + [
+        Device(i + 1, "gpu") for i in range(torch.cuda.device_count())
+    ]
+    all_num_devices = [2 ** i for i in range(1, int(np.log2(len(devices))) + 1)]
+    for num_devices in all_num_devices:
+        for i, (input_dim, output_dim) in enumerate(
+            tqdm(list(itertools.product(all_input_dims, all_output_dims)))
+        ):
+            fn = _allreduce(devices[1 : num_devices + 1], input_dim, output_dim)
+            fn = infer_types(fn, fn.inputs)
+            X[i][0] = fn.inputs[0].type.size() / BYTES_IN_Gb
+            X[i][1] = num_devices
+            X[i][2] = 1
+
+            _, runtimes = run_pytorch(
+                fn=fn,
+                inputs=[
+                    torch.randn(size=fn.inputs[i].type.shape, dtype=torch.float32)
+                    for i in range(len(fn.inputs))
+                ],
+                use_gpu=True,
+                num_repetitions=10,
+                num_warmup=5,
+            )
+            pytorch_latency = np.median(runtimes[0])
+            Y[i] = pytorch_latency
+
+        reg = LinearRegression(positive=True, fit_intercept=False).fit(X, Y)
+        params[num_devices] = (reg.coef_[0], reg.coef_[1], reg.coef_[2])
+    return params
 
 
 def calibrate_simulator():

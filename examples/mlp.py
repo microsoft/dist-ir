@@ -4,7 +4,7 @@ import numpy as np
 import re
 import torch
 
-from dist_ir.ir import FunctionMaker, Topology
+from dist_ir.ir import FunctionMaker, Topology, cpprint
 from dist_ir.ir.type import Float32, Tensor
 from dist_ir.executor import CostModel, Simulator, infer_types
 from dist_ir.transforms import mlp_dhp_transform
@@ -297,20 +297,35 @@ def get_topology(
     return topology
 
 
-def simulate(function, input_types, topology):
-    simulator = Simulator(CostModel(topology))
+def simulate(
+    function, input_types, topology, allreduce_parameters=None, trace_file=None
+):
+    simulator = Simulator(CostModel(topology, allreduce_parameters))
     simulation = simulator.interpret(function, input_types)
     latency = max([simulation.timestamps[d] for d in simulation.timestamps])
     peak_memory = max([simulation.peak_memory[d] for d in simulation.peak_memory])
+    if trace_file is not None:
+        simulation.dump_chrome_trace(trace_file)
     return latency, peak_memory
 
 
-def run_pytorch(function, input_types, use_gpu):
+def run_pytorch(function, input_types, use_gpu, profile=False):
     inputs = tuple(
         torch.randn(size=typ.shape, dtype=torch.float32) for typ in input_types
     )
+    if profile:
+        num_warmup = 10
+        num_repetitions = 1
+    else:
+        num_warmup = 5
+        num_repetitions = 10
     _, runtimes = torch_backend.run_pytorch(
-        function, inputs, use_gpu, num_warmup=5, num_repetitions=10
+        function,
+        inputs,
+        use_gpu=use_gpu,
+        num_warmup=num_warmup,
+        num_repetitions=num_repetitions,
+        profile=profile,
     )
     latency = np.max(np.median(list(runtimes[i] for i in range(len(runtimes)))))
     return latency
@@ -366,17 +381,19 @@ def main(args):
     else:
         transformed_function = infer_types(function, function.inputs)
         input_types = tuple(inp.type for inp in function.inputs)
-    transformed_function = add_optimizer_ops(transformed_function)
+    # transformed_function = add_optimizer_ops(transformed_function)
     if args.backend == "simulate":
-        latency, peak_memory = simulate(transformed_function, input_types, topology)
+        latency, peak_memory = simulate(
+            transformed_function, input_types, topology, trace_file=args.trace_file
+        )
         print(f"Latency: {latency} seconds")
         print(f"Throughput: {args.batch_size / latency:.2f} samples / second")
         print(f"Peak memory: {peak_memory / 1e9:.2f} GB")
-        if args.trace_file is not None:
-            simulation.dump_chrome_trace(args.trace_file)
 
     elif args.backend == "pytorch":
-        latency = run_pytorch(transformed_function, input_types, args.use_gpu)
+        latency = run_pytorch(
+            transformed_function, input_types, args.use_gpu, args.profile
+        )
         print(f"Latency: {latency} seconds")
         print(f"Throughput: {args.batch_size / latency:.2f} samples / second")
 
@@ -436,5 +453,6 @@ if __name__ == "__main__":
         help="Use GPU with PyTorch backend",
     )
     parser.add_argument("--trace_file", type=str, default=None, help="Trace file")
+    parser.add_argument("--profile", action="store_true")
     args = parser.parse_args()
     main(args)

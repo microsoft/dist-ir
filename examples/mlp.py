@@ -2,11 +2,13 @@ import argparse
 from collections import defaultdict
 import numpy as np
 import re
+import torch
 
 from dist_ir.ir import FunctionMaker, Topology
 from dist_ir.ir.type import Float32, Tensor
 from dist_ir.executor import CostModel, Simulator, infer_types
 from dist_ir.transforms import mlp_dhp_transform
+import dist_ir.backend.torch as torch_backend
 
 
 def mlp(
@@ -211,9 +213,6 @@ def add_optimizer_ops(function):
         gradient_map[(dp, hp)][name] = dw
 
     if sorted(weight_map.keys()) != sorted(gradient_map.keys()):
-        import pdb
-
-        pdb.set_trace()
         raise ValueError(f"Devices do not match for weights and gradients")
 
     for device in weight_map:
@@ -301,7 +300,20 @@ def get_topology(
 def simulate(function, input_types, topology):
     simulator = Simulator(CostModel(topology))
     simulation = simulator.interpret(function, input_types)
-    return simulation
+    latency = max([simulation.timestamps[d] for d in simulation.timestamps])
+    peak_memory = max([simulation.peak_memory[d] for d in simulation.peak_memory])
+    return latency, peak_memory
+
+
+def run_pytorch(function, input_types, use_gpu):
+    inputs = tuple(
+        torch.randn(size=typ.shape, dtype=torch.float32) for typ in input_types
+    )
+    _, runtimes = torch_backend.run_pytorch(
+        function, inputs, use_gpu, num_warmup=5, num_repetitions=10
+    )
+    latency = np.max(np.median(list(runtimes[i] for i in range(len(runtimes)))))
+    return latency
 
 
 def main(args):
@@ -350,18 +362,23 @@ def main(args):
         )
         init_function = infer_types(init_function, init_function.inputs)
         input_types = tuple(output.type for output in init_function.outputs)
+        transformed_function = infer_types(transformed_function, init_function.outputs)
     else:
-        transformed_function = function
+        transformed_function = infer_types(function, function.inputs)
         input_types = tuple(inp.type for inp in function.inputs)
     transformed_function = add_optimizer_ops(transformed_function)
-    simulation = simulate(transformed_function, input_types, topology)
-    latency = max([simulation.timestamps[d] for d in simulation.timestamps])
-    peak_memory = max([simulation.peak_memory[d] for d in simulation.peak_memory])
-    print(f"Latency: {latency} seconds")
-    print(f"Throughput: {args.batch_size / latency:.2f} samples / second")
-    print(f"Peak memory: {peak_memory / 1e9:.2f} GB")
-    if args.trace_file is not None:
-        simulation.dump_chrome_trace(args.trace_file)
+    if args.backend == "simulate":
+        latency, peak_memory = simulate(transformed_function, input_types, topology)
+        print(f"Latency: {latency} seconds")
+        print(f"Throughput: {args.batch_size / latency:.2f} samples / second")
+        print(f"Peak memory: {peak_memory / 1e9:.2f} GB")
+        if args.trace_file is not None:
+            simulation.dump_chrome_trace(args.trace_file)
+
+    elif args.backend == "pytorch":
+        latency = run_pytorch(transformed_function, input_types, args.use_gpu)
+        print(f"Latency: {latency} seconds")
+        print(f"Throughput: {args.batch_size / latency:.2f} samples / second")
 
 
 if __name__ == "__main__":
@@ -405,6 +422,18 @@ if __name__ == "__main__":
         choices=["training", "inference"],
         default="training",
         help="Execution mode",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=["simulate", "pytorch"],
+        default="simulate",
+        help="Operation to run",
+    )
+    parser.add_argument(
+        "--use-gpu",
+        action="store_true",
+        default=False,
+        help="Use GPU with PyTorch backend",
     )
     parser.add_argument("--trace_file", type=str, default=None, help="Trace file")
     args = parser.parse_args()

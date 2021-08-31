@@ -309,7 +309,7 @@ class CostModel:
         costs = {}
         input_device = x.device
         # TODO send is synchronous; input device should do same work too
-        input_size = x.size() * x.dtype.size()
+        input_size = x.size()
         input_size_gb = input_size / BYTES_IN_Gb
         output_device = op.attributes["device"]
         bandwidth = self._topology.get_bandwidth(input_device, output_device)

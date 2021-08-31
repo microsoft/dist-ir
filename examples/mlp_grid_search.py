@@ -1,34 +1,33 @@
+import argparse
 import csv
 from itertools import product
 import numpy as np
 import pandas as pd
 import torch
 from tqdm.contrib.concurrent import process_map
+import os
+import pickle
 
-from dist_ir.backend.torch import run_pytorch
 from dist_ir.ir import Topology
-from dist_ir.executor import infer_types, SequentialExecutor, Simulator
+from dist_ir.executor import (
+    infer_types,
+    SequentialExecutor,
+    Simulator,
+    calibrate_device_parameters,
+    calibrate_network_bandwidth,
+)
 from dist_ir.executor.cost_model import CostModel
 from dist_ir.transforms import mlp_dhp_transform
-from .mlp import mlp
+from .mlp import mlp, get_topology, simulate, run_pytorch
 
-DGX_BANDWIDTH_GBPS = 200
 
 MODEL_PARAMS = {
-    "mlp-xs": (8, 512),
+    "mlp-tiny": (8, 512),
+    "mlp-xs": (8, 4096),
     "mlp-small": (16, 8192),
     "mlp-medium": (64, 16384),
     "mlp-large": (128, 32768),
 }
-
-
-def add_devices_to_topology(topology, num_devices):
-    for i in range(num_devices):
-        topology.add_device("gpu")
-    devices = topology.devices
-    for i in range(0, len(devices)):
-        for j in range(i + 1, len(devices)):
-            topology.set_bandwidth(devices[i], devices[j], DGX_BANDWIDTH_GBPS)
 
 
 def get_all_degrees(n):
@@ -65,17 +64,15 @@ def run_experiment(config):
         hp_degree,
         pp_degree,
         num_microbatches,
+        backend,
+        topology,
     ) = config
     num_hidden_layers, input_dim = MODEL_PARAMS[model_size]
     hidden_dim = input_dim
     output_dim = hidden_dim
-    # TODO topology can be created once and shared for all configs
-    topology = Topology()
-    d0 = topology.add_device("gpu")
+    d0 = topology.devices[0]
     function = mlp(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, d0)
     function = infer_types(function, function.inputs)
-    world_size = dp_degree * hp_degree * pp_degree
-    add_devices_to_topology(topology, world_size)
     init_function, transformed_function = mlp_dist(
         function,
         dp_degree,
@@ -84,14 +81,22 @@ def run_experiment(config):
         num_microbatches,
         topology,
     )
-    simulator = Simulator(CostModel(topology))
-    simulation = simulator.interpret(
-        transformed_function,
-        (v.type for v in transformed_function.inputs),
-    )
-    latency = max([simulation.timestamps[d] for d in simulation.timestamps])
-    throughput = batch_size / latency
-    peak_memory = max([simulation.peak_memory[d] for d in simulation.timestamps])
+    input_types = tuple(inp.type for inp in transformed_function.inputs)
+    if backend == "simulate":
+        latency, peak_memory = simulate(transformed_function, input_types, topology)
+        throughput = batch_size / latency
+    elif backend == "pytorch":
+        try:
+            latency = run_pytorch(transformed_function, input_types, use_gpu=True)
+            throughput = batch_size / latency
+            peak_memory = 0
+        except Exception as e:
+            import traceback
+
+            traceback.print_exc()
+            latency = -1
+            peak_memory = -1
+            throughput = -1
     return latency, throughput, peak_memory
 
 
@@ -117,7 +122,13 @@ def mlp_dist(
     return init_function, transformed_function
 
 
-def gen_configurations(all_model_sizes, all_world_sizes, all_batch_sizes):
+def gen_configurations(
+    all_model_sizes,
+    all_world_sizes,
+    all_batch_sizes,
+    backend,
+    topology,
+):
     for (
         model_size,
         world_size,
@@ -151,15 +162,32 @@ def gen_configurations(all_model_sizes, all_world_sizes, all_batch_sizes):
                     hp_degree,
                     pp_degree,
                     num_microbatches,
+                    backend,
+                    topology,
                 )
 
 
-def grid_search(all_model_sizes, all_world_sizes, all_batch_sizes):
+def grid_search(
+    all_model_sizes,
+    all_world_sizes,
+    all_batch_sizes,
+    backend,
+    topology,
+):
     configs = list(
-        gen_configurations(all_model_sizes, all_world_sizes, all_batch_sizes)
+        gen_configurations(
+            all_model_sizes,
+            all_world_sizes,
+            all_batch_sizes,
+            backend,
+            topology,
+        )
     )
 
-    results = process_map(run_experiment, configs, chunksize=1)
+    if backend == "pytorch":
+        results = process_map(run_experiment, configs, chunksize=1, max_workers=1)
+    else:
+        results = process_map(run_experiment, configs, chunksize=1)
 
     with open("mlp_grid_search_results.csv", "w", newline="") as f:
         fieldnames = [
@@ -184,6 +212,8 @@ def grid_search(all_model_sizes, all_world_sizes, all_batch_sizes):
                 hp_degree,
                 pp_degree,
                 num_microbatches,
+                backend,
+                topology,
             ) = config
             writer.writerow(
                 {
@@ -201,237 +231,99 @@ def grid_search(all_model_sizes, all_world_sizes, all_batch_sizes):
             )
 
 
-def grid_search_pytorch(all_model_sizes, all_world_sizes, all_batch_sizes):
-    configs = gen_configurations(all_model_sizes, all_world_sizes, all_batch_sizes)
-
-    with open("mlp_pytorch.csv", "w", newline="") as f:
-        fieldnames = [
-            "model_size",
-            "world_size",
-            "batch_size",
-            "dp_degree",
-            "hp_degree",
-            "pp_degree",
-            "num_microbatches",
-            "latency_pt",
-            "throughput_pt",
-        ]
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for config in configs:
-            try:
-                latency, throughput = run_backend(config)
-            except RuntimeError as e:
-                print(e)
-                latency, throughput = -1.0, -1.0
-            (
-                model_size,
-                batch_size,
-                dp_degree,
-                hp_degree,
-                pp_degree,
-                num_microbatches,
-            ) = config
-            writer.writerow(
-                {
-                    "model_size": model_size,
-                    "world_size": dp_degree * hp_degree * pp_degree,
-                    "batch_size": batch_size,
-                    "dp_degree": dp_degree,
-                    "hp_degree": hp_degree,
-                    "pp_degree": pp_degree,
-                    "num_microbatches": num_microbatches,
-                    "latency_pt": latency,
-                    "throughput_pt": throughput,
-                }
-            )
-            f.flush()
+def calibrate_parameters(args):
+    if args.simulation_parameters_file is not None and os.path.exists(
+        args.simulation_parameters_file
+    ):
+        with open(args.simulation_parameters_file, "rb") as f:
+            simulation_parameters = pickle.load(f)
+        print(
+            f"Reading simulation parameters from {args.simulation_parameters_file}..."
+        )
+        args.device_throughput = simulation_parameters["device_throughput"]
+        args.dram_bandwidth = simulation_parameters["dram_bandwidth"]
+        args.kernel_launch_overhead = simulation_parameters["kernel_launch_overhead"]
+        args.network_bandwidth = simulation_parameters["network_bandwidth"]
+    else:
+        simulation_parameters = {}
+    update_simulation_parameters = False
+    if args.calibrate_device_parameters and args.backend == "simulate":
+        print("Calibrating device parameters...")
+        (
+            args.dram_bandwidth,
+            args.device_throughput,
+            args.kernel_launch_overhead,
+        ) = calibrate_device_parameters()
+        update_simulation_parameters = True
+        print(f"DRAM bandwidth: {args.dram_bandwidth:.2e}")
+        print(f"Device throughput: {args.device_throughput:.2e}")
+        print(f"Kernel launch overhead: {args.kernel_launch_overhead:.2e}")
+    if args.calibrate_network_bandwidth and args.backend == "simulate":
+        args.network_bandwidth = calibrate_network_bandwidth()
+        update_simulation_parameters = True
+        print(f"Network bandwidth: {args.network_bandwidth}")
+    if update_simulation_parameters and args.simulation_parameters_file is not None:
+        simulation_parameters["dram_bandwidth"] = args.dram_bandwidth
+        simulation_parameters["device_throughput"] = args.device_throughput
+        simulation_parameters["kernel_launch_overhead"] = args.kernel_launch_overhead
+        simulation_parameters["network_bandwidth"] = args.network_bandwidth
+        with open(args.simulation_parameters_file, "wb") as f:
+            pickle.dump(simulation_parameters, f)
 
 
-def get_inputs(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers):
-    x = torch.randn(size=(batch_size, input_dim), dtype=torch.float32)
-    z = torch.randn(size=(batch_size, output_dim), dtype=torch.float32)
-    weights = [torch.randn(size=(input_dim, hidden_dim), dtype=torch.float32)]
-    for i in range(1, num_hidden_layers - 1):
-        weights.append(torch.randn(size=(hidden_dim, hidden_dim), dtype=torch.float32))
-    weights.append(torch.randn(size=(hidden_dim, output_dim), dtype=torch.float32))
-    return x, z, weights
-
-
-def run_backend(config):
-    """Run given config on pytorch backend."""
-    print(f"Config: {config}")
-    (
-        model_size,
-        batch_size,
-        dp_degree,
-        hp_degree,
-        pp_degree,
-        num_microbatches,
-    ) = config
-    num_hidden_layers, input_dim = MODEL_PARAMS[model_size]
-    hidden_dim = input_dim
-    output_dim = hidden_dim
-    topology = Topology()
-    d0 = topology.add_device("gpu")
-    function = mlp(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, d0)
-    function = infer_types(function, function.inputs)
-    world_size = dp_degree * hp_degree * pp_degree
-    add_devices_to_topology(topology, world_size)
-    init_function, transformed_function = mlp_dist(
-        function,
-        dp_degree,
-        hp_degree,
-        pp_degree,
-        num_microbatches,
-        topology,
+def main(args):
+    model_size = "mlp-xs"
+    all_world_sizes = [1, 2, 4]
+    all_batch_sizes = [2048, 4096, 8192]
+    calibrate_parameters(args)
+    topology = get_topology(
+        max(all_world_sizes),
+        device_throughput=args.device_throughput,
+        dram_bandwidth=args.dram_bandwidth,
+        kernel_launch_overhead=args.kernel_launch_overhead,
+        network_bandwidth=args.network_bandwidth,
     )
-    x, z, weights = get_inputs(
-        batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers
+    grid_search(
+        all_model_sizes=[model_size],  # ["mlp-small", "mlp-medium", "mlp-large"],
+        all_world_sizes=all_world_sizes,
+        all_batch_sizes=all_batch_sizes,
+        backend=args.backend,
+        topology=topology,
     )
-    input_data = [x, z] + weights
-    if world_size > 1:
-        ex = SequentialExecutor("numpy")
-        input_data = [
-            torch.from_numpy(v).to(torch.float32)
-            for v in ex.compute(init_function, [v.numpy() for v in input_data])
-        ]
-
-    # Measure actual execution time
-    _, runtimes = run_pytorch(
-        transformed_function,
-        input_data,
-        use_gpu=True,
-        num_repetitions=10,
-        num_warmup=5,
-        profile=False,
-    )
-    # TODO or median of max?
-    actual_time = max(np.median(times) for times in runtimes)
-    throughput = batch_size / actual_time
-    print(f"Runtime: {actual_time}\nThroughput: {throughput}")
-    return actual_time, throughput
-
-
-class MLP(torch.nn.Module):
-    def __init__(self, weights):
-        super(MLP, self).__init__()
-        self.weights = [torch.nn.parameter.Parameter(w) for w in weights]
-
-    def forward(self, x):
-        for w in self.weights:
-            # TODO add bias to our mlp and use nn.Linear here
-            x = torch.matmul(x, w)
-            x = torch.relu(x)
-        return x
-        # TODO confirm this gives same output as the equivalent DistIR mlp fn
-
-
-def run_vanilla_baseline(model_size, batch_size):
-    """Run sequential model on vanilla pytorch"""
-    print(f"Config: {(batch_size, 1, 1, 1, 1)}")
-    num_hidden_layers, input_dim = MODEL_PARAMS[model_size]
-    hidden_dim = input_dim
-    output_dim = hidden_dim
-    events = []
-    warmup_steps = 5
-    active_steps = 10
-
-    x, z, weights = get_inputs(
-        batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers
-    )
-    x = x.cuda(0)
-    z = z.cuda(0)  # loss needs integer z. Why is it float32 in DistIR?
-    weights = [w.cuda(0) for w in weights]
-
-    model = MLP(weights).cuda(0)
-    loss = torch.nn.MSELoss()
-
-    def add_event():
-        events.append(torch.cuda.Event(enable_timing=True))
-        events[-1].record()
-
-    for _ in range(warmup_steps + active_steps):
-        # TODO do I need to zero gradients here?
-        add_event()
-        y = model(x)
-        l = loss(y, z)
-        l.backward()
-        # TODO we should add optimizer to DistIR model and here
-        add_event()
-
-    torch.cuda.synchronize()
-    runtimes = [
-        events[i].elapsed_time(events[i + 1]) / 1e3 for i in range(len(events) - 1)
-    ]
-    latency = np.median(runtimes[warmup_steps:])
-    throughput = batch_size / latency
-    print(f"Runtime: {latency}\nThroughput: {throughput}")
-    return latency, throughput
 
 
 if __name__ == "__main__":
-    torch.manual_seed(42)
-    model_size = "mlp-small"
-
-    # # Grid search simulation to find best configuration:
-    # grid_search(
-    #     all_model_sizes=[model_size],  # ["mlp-small", "mlp-medium", "mlp-large"],
-    #     all_world_sizes=[1, 2, 4],
-    #     all_batch_sizes=[2 ** i for i in range(16)]
-    #     # all_batch_sizes=[512, 1024, 2048, 4096, 8192],
-    # )
-
-    # # Run sequential baseline on pytorch backend
-    # for i in range(10, 15):
-    #     run_backend((model_size, 2 ** i, 1, 1, 1, 1))
-
-    # Try pure DP/HP/PP baselines on pytorch backend:
-    # # DP goes OOM even with BS=4
-    # for i in range(1, 15):
-    #     run_backend((model_size, 2 ** i, 4, 1, 1, 1))
-    # # HP:
-    # try:
-    #     for i in range(12, 20):
-    #         run_backend((model_size, 2 ** i, 1, 4, 1, 1))
-    # except RuntimeError as e:
-    #     print(e)
-    # # PP:
-    # try:
-    #     for i in [6]:  # range(1, 20):
-    #         run_backend((model_size, 16384, 1, 1, 4, 2 ** i))
-    # except RuntimeError as e:
-    #     print(e)
-    #     # TODO does (2, 1, 1, 4, 2) have effective batch size 2 or 4?
-
-    # # Run best configs on pytorch backend
-    # df = pd.read_csv("mlp_grid_search_results.csv")
-    # # Use a 8GB memory estimate cutoff to avoid OOMs as much as possible
-    # # df = df[df["peak_memory"] < 14e9]
-    # for _, row in df.sort_values(by="throughput", ascending=False).iterrows():
-    #     config = (
-    #         model_size,
-    #         row["batch_size"],
-    #         row["dp_degree"],
-    #         row["hp_degree"],
-    #         row["pp_degree"],
-    #         row["num_microbatches"],
-    #     )
-    #     try:
-    #         run_backend(config)
-    #     except RuntimeError as e:
-    #         print(e)
-
-    # # Run sequential model on vanilla pytorch as baseline:
-    # try:
-    #     for i in range(10, 20):
-    #         run_vanilla_baseline(model_size, 2 ** i)
-    # except RuntimeError as e:
-    #     print(e)
-
-    # Grid search pytorch backend:
-    grid_search_pytorch(
-        all_model_sizes=[model_size],  # ["mlp-small", "mlp-medium", "mlp-large"],
-        all_world_sizes=[1, 2, 4],
-        all_batch_sizes=[2 ** i for i in range(16)],
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--backend", choices=["simulate", "pytorch"], required=True)
+    parser.add_argument(
+        "--device_throughput", type=float, default=1.4e13, help="Device throughput"
     )
+    parser.add_argument(
+        "--dram_bandwidth", type=float, default=9e11, help="DRAM Bandwidth"
+    )
+    parser.add_argument(
+        "--kernel_launch_overhead",
+        type=float,
+        default=1e-5,
+        help="Kernel launch overhead",
+    )
+    parser.add_argument(
+        "--network_bandwidth", type=float, default=64, help="Network bandwidth in Gbps"
+    )
+    parser.add_argument(
+        "--calibrate_device_parameters", action="store_true", default=False
+    )
+    parser.add_argument(
+        "--calibrate_network_bandwidth",
+        action="store_true",
+        default=False,
+        help="Calibrate network bandwidth",
+    )
+    parser.add_argument(
+        "--simulation_parameters_file",
+        type=str,
+        default=None,
+        help="File to load/save simulation parameters from/to",
+    )
+    args = parser.parse_args()
+    main(args)

@@ -40,7 +40,7 @@ def _collective_projector(op: Op, state: ProjectorState):
     """Projects a collective op over D devices that has D inputs and D outputs,
     one on each device."""
     assert len(op.inputs) == len(op.outputs)
-    group = _make_group(v.type.device for v in op.inputs + op.outputs)
+    group = _make_group(v.type.device for v in tuple(op.inputs) + tuple(op.outputs))
     attributes = {
         **(op.attributes if op.attributes is not None else {}),
         "group": group,
@@ -174,6 +174,18 @@ ProjectorRegister = {
     ("Shape", (Tensor,)): _identity_projector,
     ("Send", (Tensor,)): _send_projector,
     ("Send", (Int64,)): _send_projector,
+    ("SGDOptimizer", (tuple(Tensor for i in range(16)))): _identity_projector,
+    ("SGDOptimizer", (tuple(Tensor for i in range(32)))): _identity_projector,
+    ("SGDOptimizer", (tuple(Tensor for i in range(64)))): _identity_projector,
+    ("SGDOptimizer", (tuple(Tensor for i in range(128)))): _identity_projector,
+    ("SGDOptimizer", (tuple(Tensor for i in range(256)))): _identity_projector,
+    ("SGDOptimizer", (tuple(Tensor for i in range(512)))): _identity_projector,
+    ("SGDOptimizer", (tuple(Tensor for i in range(1024)))): _identity_projector,
+    ("SGDOptimizer", (tuple(Tensor for i in range(2048)))): _identity_projector,
+    ("SGDOptimizer", (tuple(Tensor for i in range(4096)))): _identity_projector,
+    ("SGDOptimizer", (tuple(Tensor for i in range(8192)))): _identity_projector,
+    ("SGDOptimizer", (tuple(Tensor for i in range(16384)))): _identity_projector,
+    ("SGDOptimizer", (tuple(Tensor for i in range(32768)))): _identity_projector,
     ("Slice", (Tensor, Tensor, Tensor, Tensor, Int64)): _identity_projector,
     ("Softmax", (Tensor,)): _identity_projector,
     ("Split", (Tensor,)): _identity_projector,

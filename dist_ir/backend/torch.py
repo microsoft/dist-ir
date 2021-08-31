@@ -75,7 +75,7 @@ def _cast(x, to, ctx=None):
         raise NotImplementedError()
 
 
-def _concat2(*args, axis=None, ctx=None):
+def _concat(*args, axis=None, ctx=None):
     return torch.cat(args, dim=axis)
 
 
@@ -199,6 +199,15 @@ def _send(x, to_d=None, group=None, ctx=None):
     # a single buffer and call a single send op
 
 
+def _sgd(*xs, lr=None, ctx=None):
+    weights = xs[: (len(xs) // 2)]
+    gradients = xs[(len(xs) // 2) :]
+    updated_weights = []
+    for w, dw in zip(weights, gradients):
+        updated_weights.append(w - lr * dw)
+    return tuple(updated_weights)
+
+
 def _shape(x, ctx=None):
     output = torch.tensor(x.shape)
     if ctx.use_gpu:
@@ -266,7 +275,7 @@ _op_to_torch = {
     "Add": torch.add,
     "Cast": _cast,
     "Add": _add,
-    "Concat": _concat2,
+    "Concat": _concat,
     "Constant": _constant,
     "ConstantOfShape": _constant_of_shape,
     "Div": _div,
@@ -288,6 +297,7 @@ _op_to_torch = {
     "ReluGrad": _relu_grad,
     "Reshape": _reshape,
     "SendP2P": _send,
+    "SGDOptimizer": _sgd,
     "Shape": _shape,
     "Slice": _slice,
     "Softmax": _softmax,
@@ -435,7 +445,8 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
         ranks = [ctx.device_to_rank[d] for d in group]
         # ctx is a curried arg, hence is thread-local and can be modified:
         ctx.groups[group] = dist.new_group(ranks)
-    global_group = dist.new_group([ctx.device_to_rank[d] for d in ctx.global_group])
+    global_group_ranks = sorted([ctx.device_to_rank[d] for d in ctx.global_group])
+    global_group = dist.new_group(global_group_ranks)
 
     if ctx.use_gpu:
         # Move inputs to GPU

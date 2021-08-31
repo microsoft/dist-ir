@@ -2,7 +2,7 @@ from .absint import AbstractInterpreter, AbstractState
 from .calibrate_simulator import (
     calibrate_device_parameters,
     calibrate_network_bandwidth,
-    network_bandwidth_debug, # TODO: Remove
+    network_bandwidth_debug,  # TODO: Remove
 )
 from .cost_model import CostModel
 from .simulator import Simulator, PostTypeInferenceSimulator

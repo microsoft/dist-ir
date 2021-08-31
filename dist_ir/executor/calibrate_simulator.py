@@ -151,9 +151,13 @@ def network_bandwidth_debug():
                 )
             )
 
-    df = pd.DataFrame(results, columns=["M", "N", "Shape", "Size", "PyTorch Latency", "Simulated Latency"])
+    df = pd.DataFrame(
+        results,
+        columns=["M", "N", "Shape", "Size", "PyTorch Latency", "Simulated Latency"],
+    )
     df.to_csv("allreduce_benchmark_results.csv")
     print(df)
+
 
 def calibrate_network_bandwidth():
     def _get_bandwidth(src, dst, size):

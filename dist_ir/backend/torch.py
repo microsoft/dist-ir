@@ -30,6 +30,8 @@ DistributedContext = NamedTuple(
     groups=Dict[Tuple[int], Any],
     # Temp store of group IDs until threads can create ProcessGroups
     groups_list=Iterable[Tuple[int]],
+    # Group encompassing all devices
+    global_group=Tuple[int],
     # Debug flag
     debug_stacktrace=bool,
     # Profile flag
@@ -433,10 +435,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
         ranks = [ctx.device_to_rank[d] for d in group]
         # ctx is a curried arg, hence is thread-local and can be modified:
         ctx.groups[group] = dist.new_group(ranks)
-    if ctx.world_size > 1:
-        global_group = sorted(
-            list(ctx.groups.items()), key=lambda x: len(x[0]), reverse=True
-        )[0][1]
+    global_group = dist.new_group([ctx.device_to_rank[d] for d in ctx.global_group])
 
     if ctx.use_gpu:
         # Move inputs to GPU
@@ -460,7 +459,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
         try:
             outputs = run_function(ctx, fn, inputs, rank)
             if ctx.world_size > 1:
-                torch.distributed.barrier()
+                torch.distributed.barrier(group=global_group)
         except Exception as e:
             print_exc()
         print(f"{rank}: PyTorch backend exiting after 1 run in debug mode.")
@@ -480,7 +479,8 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
     ) as p:
         for i in range(num_warmup_steps + num_repetitions):
             add_event()
-            outputs = run_function(ctx, fn, inputs)
+            # TODO: Handle failures here?
+            outputs = run_function(ctx, fn, inputs, rank)
             if ctx.world_size > 1:
                 torch.distributed.barrier(group=global_group)
             if i == (num_warmup_steps + num_repetitions - 1):
@@ -588,11 +588,14 @@ def run_pytorch(
         per_rank_fns.append(device_to_fns[d])
         world_size += 1
 
+    global_group = tuple(sorted(device_to_fns.keys()))
+
     ctx = DistributedContext(
         world_size=world_size,
         use_gpu=use_gpu,
         groups={},
         groups_list=list(groups),
+        global_group=global_group,
         device_to_rank=device_to_rank,
         debug_stacktrace=debug_stacktrace,
         profile=profile,

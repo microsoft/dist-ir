@@ -305,7 +305,7 @@ def distributed_grid_search(
     batch_size = 8192
     all_dims = [1024, 2048, 4096]
     all_num_layers = [8, 16]
-    world_size = 8 #torch.cuda.device_count()
+    world_size = 8  # torch.cuda.device_count()
     all_degrees = mlp_grid_search.get_all_degrees(world_size)
     configs = []
     for (dim, num_layers) in itertools.product(all_dims, all_num_layers):
@@ -427,7 +427,9 @@ def main(args):
     ):
         with open(args.simulation_parameters_file, "rb") as f:
             simulation_parameters = pickle.load(f)
-        print(f"Reading simulation parameters from {args.simulation_parameters_file}...")
+        print(
+            f"Reading simulation parameters from {args.simulation_parameters_file}..."
+        )
         args.device_throughput = simulation_parameters["device_throughput"]
         args.dram_bandwidth = simulation_parameters["dram_bandwidth"]
         args.kernel_launch_overhead = simulation_parameters["kernel_launch_overhead"]

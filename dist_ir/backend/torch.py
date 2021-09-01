@@ -548,8 +548,8 @@ def run_multiprocesses(
 
 def run_pytorch(
     fn: Function,
-    inputs: Sequence[Any],
-    input_types: Sequence[Type] = None,
+    inputs: Tuple[Any],
+    input_types: Tuple[Type] = None,
     use_gpu=False,
     num_repetitions=1,
     num_warmup=0,
@@ -560,7 +560,9 @@ def run_pytorch(
     """Project `fn` and run on `inputs` over `num_devices` devices using the
     PyTorch backend.
 
-    `inputs` is a list/tuple of the same length as `fn.inputs`.
+    `inputs` is a list/tuple of the same length as `fn.inputs`.  `input_types`
+    is a list/tuple of abstract/concrete inputs used for projection.
+
     The run is repeated 'num_warmup + num_repetitions` times, and runtimes from
     the last `num_repetitions` runs are returned along with the outputs of the
     last run.
@@ -599,7 +601,7 @@ def run_pytorch(
     )
 
     per_rank_inputs = [[] for _ in range(world_size)]
-    for v, t, a in zip(fn.inputs, input_types, inputs):
+    for t, a in zip(input_types, inputs):
         per_rank_inputs[device_to_rank[t.device]].append(a)
     assert len(fn.inputs) == len(inputs)
 

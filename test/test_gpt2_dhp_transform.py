@@ -3,7 +3,7 @@ import numpy as np
 from pathlib import Path
 import pytest
 
-from dist_ir.executor import SequentialExecutor
+from dist_ir.executor import SequentialExecutor, ConcreteValue
 from dist_ir.ir import cpprint
 from examples.gpt2 import get_transformed_function_and_input_data, run_pytorch
 
@@ -53,16 +53,30 @@ def _run_gpt(
     if use_real_weights:
         if use_pytorch_backend:
             world_size = dp_degree * hp_degree * pp_degree
-            run_pytorch(
+            outputs, _ = run_pytorch(
                 transformed_function, initialized_input_data, world_size, use_gpu=False
+            )
+            outputs = tuple(
+                ConcreteValue(v.numpy(), None if t.type is None else t.type.device)
+                for v, t in zip(
+                    tuple(itertools.chain.from_iterable(outputs)),
+                    transformed_function.outputs,
+                )
             )
         else:
             ex = SequentialExecutor("numpy")
             outputs = ex.compute(transformed_function, initialized_input_data)
-            return outputs
+        return outputs
 
 
-def _test(original_outputs, dp_degree=1, hp_degree=1, pp_degree=1, num_microbatches=1):
+def _test(
+    original_outputs,
+    dp_degree=1,
+    hp_degree=1,
+    pp_degree=1,
+    num_microbatches=1,
+    use_pytorch_backend=False,
+):
 
     # Test with real weights
     transformed_outputs = _run_gpt(
@@ -70,6 +84,7 @@ def _test(original_outputs, dp_degree=1, hp_degree=1, pp_degree=1, num_microbatc
         hp_degree=hp_degree,
         pp_degree=pp_degree,
         num_microbatches=num_microbatches,
+        use_pytorch_backend=use_pytorch_backend,
     )
     assert len(transformed_outputs) == dp_degree * hp_degree
     for i in range(len(transformed_outputs)):
@@ -156,8 +171,9 @@ def test_dp_hp_pp(original_outputs, dp_degree, hp_degree, pp_degree):
     ("dp_degree", "hp_degree", "pp_degree"),
     list(itertools.product([1, 2], [1, 2], [1, 2])),
 )
-def test_pytorch_backend(dp_degree, hp_degree, pp_degree):
-    _run_gpt(
+def test_pytorch_backend(original_outputs, dp_degree, hp_degree, pp_degree):
+    _test(
+        original_outputs,
         dp_degree=dp_degree,
         hp_degree=hp_degree,
         pp_degree=pp_degree,

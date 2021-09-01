@@ -167,7 +167,6 @@ class Simulator:
 
         Returns a SimulatorState containing timestamps, memory profiles, etc.
         """
-        assert isinstance(inputs, (list, tuple))  # TODO remove
         state = SimulatorState(function, inputs)
 
         # First, interpret the function on inputs to get all values

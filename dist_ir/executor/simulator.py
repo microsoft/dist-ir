@@ -2,6 +2,7 @@ from copy import deepcopy
 from collections import defaultdict
 import json
 from typing import Any, Dict, Sequence, Set, Tuple
+from warnings import warn
 
 from ..ir import Function, Device, Op
 from ..ir.type import Type, abstract_values
@@ -180,6 +181,7 @@ class Simulator:
                 abstracted_inputs = abstract_values(inputs, signature)
                 costs = cost_function(op, *abstracted_inputs)
             except ValueError:
+                warn(f"Dispatch failed for op {op.op_type} on inputs {inputs}")
                 # Use default cost function if signature not in cost_functions
                 devices = _get_all_devices(inputs + outputs)
                 costs = {device: KERNEL_LAUNCH_OVERHEAD for device in devices}

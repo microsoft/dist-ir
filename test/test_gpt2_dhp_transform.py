@@ -58,7 +58,7 @@ def _run_gpt(
                 transformed_function,
                 initialized_input_data,
                 world_size,
-                use_gpu=torch.cuda.device_count() <= world_size,
+                use_gpu=torch.cuda.device_count() >= world_size,
             )
             outputs = tuple(
                 ConcreteValue(v.numpy(), None if t.type is None else t.type.device)

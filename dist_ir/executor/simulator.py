@@ -160,7 +160,14 @@ class Simulator:
         self.cost_functions = {}
         update_semantics_with_register(self.cost_functions, cost_model.cost_functions)
 
-    def simulate(self, function: Function, inputs: Sequence[Any]) -> SimulatorState:
+    def simulate(self, function: Function, inputs: Tuple[Any]) -> SimulatorState:
+        """Simulate `function` on `inputs`.
+
+        `inputs` is a tuple of abstract interpreter values (abstract or concrete).
+
+        Returns a SimulatorState containing timestamps, memory profiles, etc.
+        """
+        assert isinstance(inputs, (list, tuple))  # TODO remove
         state = SimulatorState(function, inputs)
 
         # First, interpret the function on inputs to get all values

@@ -189,9 +189,12 @@ _ProjectorRegister = {
 def project(
     fn: Function, input_types: Sequence[Type]
 ) -> Tuple[Dict[Device, Function], Set[Tuple[Device]]]:
-    """Project `fn` to per-rank functions. Returns a mapping from Devices to
-    per-rank Functions, and a set of Device groups that perform collective
-    communications in `fn`.
+    """Project `fn` to per-rank functions. Uses `input_types` (abstract
+    interpreter values, can be abstract or concrete) to infer the devices each
+    op executes on.
+
+    Returns a mapping from Devices to per-rank Functions, and a set of Device
+    groups that perform collective communications in `fn`.
     """
     state = ProjectorState(fn, input_types)
 

@@ -18,6 +18,10 @@ most-precise-to-most-abstract order. E.g.:
         ((np.ndarray, np.ndarray, np.ndarray), add_3_conc),
     ]
 
+Ties are broken by lexicographic ordering, so the following entry would end up
+as the second element of the list:
+    ((np.ndarray, Tensor), add_mixed)
+
 TODO also assume there are no entries with duplicate signatures?
 """
 
@@ -140,6 +144,8 @@ class AbstractState:
     def __init__(self, function: Function, inputs: Sequence[Any]):
         self.env: Dict[Value, Any] = dict(zip(function.inputs, inputs))
         self.function = function
+
+    # TODO a function that looks up multiple values in self.env?
 
 
 class AbstractInterpreter:

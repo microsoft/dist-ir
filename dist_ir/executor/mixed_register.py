@@ -7,8 +7,8 @@ For example, Reshape requires a concrete shape input to determine the output sha
 
 import numpy as np
 
+from .concrete_value import ConcreteValue
 from ..ir.type import Tensor
-from dist_ir.executor.concrete_value import ConcreteValue
 
 
 def _raise_type_error(op, *args):

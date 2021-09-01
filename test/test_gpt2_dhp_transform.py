@@ -2,6 +2,7 @@ import itertools
 import numpy as np
 from pathlib import Path
 import pytest
+import torch
 
 from dist_ir.executor import SequentialExecutor, ConcreteValue
 from dist_ir.ir import cpprint
@@ -54,7 +55,10 @@ def _run_gpt(
         if use_pytorch_backend:
             world_size = dp_degree * hp_degree * pp_degree
             outputs, _ = run_pytorch(
-                transformed_function, initialized_input_data, world_size, use_gpu=False
+                transformed_function,
+                initialized_input_data,
+                world_size,
+                use_gpu=torch.cuda.device_count() <= world_size,
             )
             outputs = tuple(
                 ConcreteValue(v.numpy(), None if t.type is None else t.type.device)
@@ -92,78 +96,23 @@ def _test(
             original_outputs[0].val, transformed_outputs[i].val, decimal=2
         )
 
-    # Test with mixed implementations
-    # TODO: Factor this out into a separate test?
-    _run_gpt(
-        dp_degree=dp_degree,
-        hp_degree=hp_degree,
-        pp_degree=pp_degree,
-        num_microbatches=num_microbatches,
-        use_real_weights=False,
-    )
-
 
 @pytest.fixture(scope="session")
 def original_outputs():
     return _run_gpt()
 
 
-@pytest.mark.parametrize("dp_degree", [2, 4])
-def test_dp_only(original_outputs, dp_degree):
-    _test(original_outputs, dp_degree=dp_degree)
-
-
-@pytest.mark.parametrize("hp_degree", [2, 4])
-def test_hp_only(original_outputs, hp_degree):
-    _test(original_outputs, hp_degree=hp_degree)
-
-
-@pytest.mark.parametrize(
-    ("pp_degree", "num_microbatches"), list(itertools.product([2, 4], [2, 4]))
-)
-def test_pp_only(original_outputs, pp_degree, num_microbatches):
-    _test(original_outputs, pp_degree=pp_degree, num_microbatches=num_microbatches)
-
-
-@pytest.mark.parametrize(
-    ("dp_degree", "hp_degree"),
-    list(itertools.product([2, 4], [2, 4])),
-)
-def test_dp_hp(original_outputs, dp_degree, hp_degree):
-    _test(original_outputs, dp_degree=dp_degree, hp_degree=hp_degree)
-
-
-@pytest.mark.parametrize(
-    ("dp_degree", "pp_degree"),
-    list(itertools.product([2, 4], [2, 4])),
-)
-def test_dp_pp(original_outputs, dp_degree, pp_degree):
-    _test(
-        original_outputs, dp_degree=dp_degree, pp_degree=pp_degree, num_microbatches=2
-    )
-
-
-@pytest.mark.parametrize(
-    ("hp_degree", "pp_degree"),
-    list(itertools.product([2, 4], [2, 4])),
-)
-def test_hp_pp(original_outputs, hp_degree, pp_degree):
-    _test(
-        original_outputs, hp_degree=hp_degree, pp_degree=pp_degree, num_microbatches=2
-    )
-
-
 @pytest.mark.parametrize(
     ("dp_degree", "hp_degree", "pp_degree"),
-    list(itertools.product([2], [2], [2])),
+    list(itertools.product([1, 2], [1, 2], [1, 2])),
 )
-def test_dp_hp_pp(original_outputs, dp_degree, hp_degree, pp_degree):
+def test_reference_execution(original_outputs, dp_degree, hp_degree, pp_degree):
     _test(
         original_outputs,
         dp_degree=dp_degree,
         hp_degree=hp_degree,
         pp_degree=pp_degree,
-        num_microbatches=2,
+        num_microbatches=pp_degree,
     )
 
 
@@ -179,4 +128,18 @@ def test_pytorch_backend(original_outputs, dp_degree, hp_degree, pp_degree):
         pp_degree=pp_degree,
         num_microbatches=pp_degree,
         use_pytorch_backend=True,
+    )
+
+
+@pytest.mark.parametrize(
+    ("dp_degree", "hp_degree", "pp_degree"),
+    list(itertools.product([1, 2], [1, 2], [1, 2])),
+)
+def test_mixed_simulation(dp_degree, hp_degree, pp_degree):
+    _run_gpt(
+        dp_degree=dp_degree,
+        hp_degree=hp_degree,
+        pp_degree=pp_degree,
+        num_microbatches=pp_degree,
+        use_real_weights=False,
     )

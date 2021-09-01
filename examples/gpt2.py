@@ -379,7 +379,7 @@ def import_function_and_get_input_data(
 
     if not use_real_weights:
         for inp in input_data_map:
-            if "weight" in inp.name or "bias" in inp.name:
+            if "input" in inp.name or "weight" in inp.name or "bias" in inp.name:
                 input_data_map[inp] = inp.type
 
     function = _filter_extra_outputs(function)
@@ -586,12 +586,12 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
         else:
             raise NotImplementedError(dtype)
 
-    is_weight = lambda x: "weight" in x or "bias" in x
+    is_input_or_weight = lambda x: "input" in x or "weight" in x or "bias" in x
 
     input_types = abstract_values(
         input_data,
         tuple(
-            Tensor if is_weight(function.inputs[i].name) else ConcreteValue
+            Tensor if is_input_or_weight(function.inputs[i].name) else ConcreteValue
             for i in range(len(input_data))
         ),
     )

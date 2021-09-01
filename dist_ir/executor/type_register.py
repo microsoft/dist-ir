@@ -119,6 +119,20 @@ def _expand_prop_fn(op, x, y):
     return Tensor(dtype=x.dtype, device=x.device)
 
 
+def _gather_prop_fn(op, x, y):
+    if not (isinstance(x, Tensor) and isinstance(y, Tensor)):
+        _raise_type_error(op, x, y)
+    if "axis" in op.attributes:
+        axis = op.attributes["axis"]
+    else:
+        axis = 0
+    if axis != 0:
+        raise NotImplementedError("abstract Gather function only supports axis 0")
+
+    new_shape = y.shape + x.shape[1:]
+    return Tensor(shape=new_shape, device=x.device, dtype=x.dtype)
+
+
 def _gemm_prop_fn(op, x, y, z):
     if not (
         isinstance(x, Tensor)
@@ -579,6 +593,7 @@ TypePropRegister = {
     ("Div", (Tensor, Tensor)): _elementwise_tensor_op_prop_fn,
     ("Dropout", (Tensor, Tensor, type(Bool()))): _dropout_prop_fn,
     ("Expand", (Tensor, Tensor)): _expand_prop_fn,
+    ("Gather", (Tensor, Tensor)): _gather_prop_fn,
     ("Gemm", (Tensor, Tensor, Tensor)): _gemm_prop_fn,
     ("Identity", (Tensor,)): _identity_prop_fn,
     (

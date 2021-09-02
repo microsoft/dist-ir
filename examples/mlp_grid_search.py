@@ -85,7 +85,7 @@ def run_experiment(config):
         topology,
     )
     simulator = Simulator(CostModel(topology))
-    simulation = simulator.interpret(
+    simulation = simulator.simulate(
         transformed_function,
         (v.type for v in transformed_function.inputs),
     )

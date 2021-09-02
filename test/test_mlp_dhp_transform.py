@@ -150,8 +150,13 @@ def _test_helper(
     outputs = ex.compute(function, input_data)
     dist_input_data = ex.compute(init_function, input_data)
     transformed_outputs = ex.compute(transformed_function, dist_input_data)
-    # TODO verify outputs are on expected devices
+
     outputs = [v.val for v in outputs]
+    # Verify that transformed_outputs are on expected devices
+    assert all(
+        o.type.device == v.device
+        for o, v in zip(transformed_function.outputs, transformed_outputs)
+    )
     transformed_outputs = [v.val for v in transformed_outputs]
 
     if hp_degree > 1:
@@ -191,4 +196,4 @@ def test_dp_hp_pp():
 
 
 if __name__ == "__main__":
-    test_dp_only()
+    test_dp_hp_pp()

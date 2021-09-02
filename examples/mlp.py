@@ -3,6 +3,8 @@ from collections import defaultdict
 import numpy as np
 import re
 import torch
+import os
+import pickle
 
 from dist_ir.ir import FunctionMaker, Topology, cpprint
 from dist_ir.ir.type import Float32, Tensor
@@ -314,7 +316,7 @@ def run_pytorch(function, input_types, use_gpu, profile=False):
         torch.randn(size=typ.shape, dtype=torch.float32) for typ in input_types
     )
     if profile:
-        num_warmup = 10
+        num_warmup = 25
         num_repetitions = 1
     else:
         num_warmup = 5
@@ -331,7 +333,57 @@ def run_pytorch(function, input_types, use_gpu, profile=False):
     return latency
 
 
+def calibrate_parameters(args):
+    if args.simulation_parameters_file is not None and os.path.exists(
+        args.simulation_parameters_file
+    ):
+        with open(args.simulation_parameters_file, "rb") as f:
+            simulation_parameters = pickle.load(f)
+        print(
+            f"Reading simulation parameters from {args.simulation_parameters_file}..."
+        )
+        args.device_throughput = simulation_parameters["device_throughput"]
+        args.dram_bandwidth = simulation_parameters["dram_bandwidth"]
+        args.kernel_launch_overhead = simulation_parameters["kernel_launch_overhead"]
+        args.network_bandwidth = simulation_parameters["network_bandwidth"]
+        if "allreduce_parameters" in simulation_parameters:
+            args.allreduce_parameters = simulation_parameters["allreduce_parameters"]
+        else:
+            assert args.calibrate_allreduce_parameters
+    else:
+        simulation_parameters = {}
+    update_simulation_parameters = False
+    if args.calibrate_device_parameters and args.backend == "simulate":
+        print("Calibrating device parameters...")
+        (
+            args.dram_bandwidth,
+            args.device_throughput,
+            args.kernel_launch_overhead,
+        ) = calibrate_device_parameters()
+        update_simulation_parameters = True
+        print(f"DRAM bandwidth: {args.dram_bandwidth:.2e}")
+        print(f"Device throughput: {args.device_throughput:.2e}")
+        print(f"Kernel launch overhead: {args.kernel_launch_overhead:.2e}")
+    if args.calibrate_network_bandwidth and args.backend == "simulate":
+        args.network_bandwidth = calibrate_network_bandwidth()
+        update_simulation_parameters = True
+        print(f"Network bandwidth: {args.network_bandwidth}")
+    if args.calibrate_allreduce_parameters and args.backend == "simulate":
+        args.allreduce_parameters = calibrate_allreduce_parameters()
+        update_simulation_parameters = True
+        print(f"Allreduce parameters: {args.allreduce_parameters}")
+    if update_simulation_parameters and args.simulation_parameters_file is not None:
+        simulation_parameters["dram_bandwidth"] = args.dram_bandwidth
+        simulation_parameters["device_throughput"] = args.device_throughput
+        simulation_parameters["kernel_launch_overhead"] = args.kernel_launch_overhead
+        simulation_parameters["network_bandwidth"] = args.network_bandwidth
+        simulation_parameters["allreduce_parameters"] = args.allreduce_parameters
+        with open(args.simulation_parameters_file, "wb") as f:
+            pickle.dump(simulation_parameters, f)
+
+
 def main(args):
+    calibrate_parameters(args)
     world_size = args.dp_degree * args.hp_degree * args.pp_degree
     topology = get_topology(
         world_size,
@@ -433,6 +485,25 @@ if __name__ == "__main__":
         type=float,
         default=1e-5,
         help="Kernel launch overhead",
+    )
+    parser.add_argument("--allreduce_parameters", default=None)
+    parser.add_argument(
+        "--calibrate_device_parameters", action="store_true", default=False
+    )
+    parser.add_argument(
+        "--calibrate_network_bandwidth",
+        action="store_true",
+        default=False,
+        help="Calibrate network bandwidth",
+    )
+    parser.add_argument(
+        "--calibrate_allreduce_parameters", action="store_true", default=False
+    )
+    parser.add_argument(
+        "--simulation_parameters_file",
+        type=str,
+        default=None,
+        help="File to load/save simulation parameters from/to",
     )
     parser.add_argument(
         "--mode",

@@ -1,3 +1,5 @@
+import itertools
+import json
 from functools import partial
 import numpy as np
 from operator import getitem
@@ -36,6 +38,8 @@ DistributedContext = NamedTuple(
     debug_stacktrace=bool,
     # Profile flag
     profile=bool,
+    # List of op execution events
+    trace=list,
 )
 
 
@@ -173,6 +177,8 @@ def _recv(shape=None, from_d=None, group=None, dtype=None, ctx=None):
     if ctx.use_gpu:
         x = x.cuda(dist.get_rank())
         dist.broadcast(x, src_rank, group=ctx.groups[group])
+        # Communication ops are asynchronous on GPU, so wait for send
+        torch.distributed.barrier(group=ctx.groups[group])
     else:
         dist.recv(x, src_rank)
     return x
@@ -192,6 +198,8 @@ def _send(x, to_d=None, group=None, ctx=None):
     if ctx.use_gpu:
         src_rank = dist.get_rank()
         dist.broadcast(x, src_rank, group=ctx.groups[group])
+        # Communication ops are asynchronous on GPU, so wait for recv
+        torch.distributed.barrier(group=ctx.groups[group])
     else:
         dst_rank = ctx.device_to_rank[to_d]
         dist.send(x, dst_rank)
@@ -377,12 +385,21 @@ def function_to_module(fn: Function) -> torch.nn.Module:
     return fx.GraphModule({}, g)
 
 
+def add_event(ctx, events):
+    if ctx.use_gpu:
+        events.append(torch.cuda.Event(enable_timing=True))
+        events[-1].record()
+    else:
+        events.append(perf_counter())
+
+
 def run_function(
     ctx: DistributedContext,
     fn: Function,
     inputs: List[Any],
     rank: int,
     debug_mock=False,
+    record_op_runtimes=False,
 ):
     """Runs DistIR Function `fn` on `inputs` in a distributed context `ctx` by
     converting each DistIR op to its torch implementation as given in _op_to_torch.
@@ -401,8 +418,13 @@ def run_function(
         a = torch.cuda.memory_allocated(0)
         print(f"Total: {t} Reserved: {r} Allocated: {a} Free: {r-a}")
 
+    if record_op_runtimes:
+        op_events = []
+
     # Run ops
     for op_num, op in enumerate(fn.ops):
+        if record_op_runtimes:
+            add_event(ctx, op_events)
         inputs = tuple(value_map[v] for v in op.inputs)
         kwargs = {} if op.attributes is None else {**op.attributes}
         kwargs["ctx"] = ctx
@@ -424,6 +446,39 @@ def run_function(
         for v in op.inputs:
             if v in value_map and fn.last_use(v) == op and not (v in fn.outputs):
                 del value_map[v]
+
+    if record_op_runtimes:
+        add_event(ctx, op_events)
+        if ctx.use_gpu:
+            torch.cuda.synchronize()
+            runtimes = [
+                op_events[i].elapsed_time(op_events[i + 1]) / 1e3
+                for i in range(len(op_events) - 1)
+            ]
+        else:
+            runtimes = [
+                op_events[i + 1] - op_events[i] for i in range(len(op_events) - 1)
+            ]
+        trace = []
+        ts = (
+            0.0
+            if len(ctx.trace[rank]) == 0
+            else ctx.trace[rank][-1]["ts"] + ctx.trace[rank][-1]["dur"]
+        )
+        assert len(fn.ops) == len(runtimes)
+        for op, runtime in zip(fn.ops, runtimes):
+            trace.append(
+                {
+                    "name": op.op_type,
+                    "ph": "X",
+                    "ts": ts,
+                    "dur": runtime * 1e6,
+                    "pid": 0,
+                    "tid": rank,
+                }
+            )
+            ts += runtime * 1e6
+        ctx.trace[rank] += trace
 
     # Return outputs
     return tuple(value_map[v] for v in fn.outputs)
@@ -454,13 +509,6 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
 
     events = []
 
-    def add_event():
-        if ctx.use_gpu:
-            events.append(torch.cuda.Event(enable_timing=True))
-            events[-1].record()
-        else:
-            events.append(perf_counter())
-
     if ctx.profile:
         num_wait_steps = 0
     else:
@@ -489,14 +537,37 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
         on_trace_ready=torch.profiler.tensorboard_trace_handler(f"{fn.name}_profile"),
     ) as p:
         for i in range(num_warmup_steps + num_repetitions):
-            add_event()
+            record_op_runtimes = ctx.profile and i >= num_warmup_steps
+            add_event(ctx, events)
             # TODO: Handle failures here?
-            outputs = run_function(ctx, fn, inputs, rank)
+            outputs = run_function(
+                ctx,
+                fn,
+                inputs,
+                rank,
+                record_op_runtimes=record_op_runtimes,
+            )
             if ctx.world_size > 1:
                 torch.distributed.barrier(group=global_group)
             if i == (num_warmup_steps + num_repetitions - 1):
-                add_event()
+                add_event(ctx, events)
             p.step()
+            if record_op_runtimes:
+                ts = max(
+                    ctx.trace[rank][-1]["ts"] + ctx.trace[rank][-1]["dur"]
+                    for rank in ctx.trace.keys()
+                )
+                for rank in ctx.trace.keys():
+                    ctx.trace[rank].append(
+                        {
+                            "name": "Barrier",
+                            "ph": "X",
+                            "ts": ts,
+                            "dur": 0,
+                            "pid": 0,
+                            "tid": rank,
+                        }
+                    )
 
     if ctx.use_gpu:
         # Move outputs back to cpu
@@ -556,6 +627,11 @@ def run_multiprocesses(
     if ctx.debug_stacktrace:
         sys.exit(1)
 
+    if ctx.profile:
+        trace = list(itertools.chain.from_iterable(list(ctx.trace.values())))
+        with open(f"{per_rank_functions[0].name}_profile/trace.json", "w") as f:
+            json.dump(trace, f, indent=0)
+
     per_rank_outputs, runtimes = zip(*outputs)
     return per_rank_outputs, runtimes
 
@@ -601,6 +677,14 @@ def run_pytorch(
 
     global_group = tuple(sorted(device_to_fns.keys()))
 
+    if profile:
+        manager = torch.multiprocessing.Manager()
+        trace = manager.dict()
+        for d in sorted(device_to_rank.keys()):
+            trace[device_to_rank[d]] = []
+    else:
+        trace = None
+
     ctx = DistributedContext(
         world_size=world_size,
         use_gpu=use_gpu,
@@ -610,6 +694,7 @@ def run_pytorch(
         device_to_rank=device_to_rank,
         debug_stacktrace=debug_stacktrace,
         profile=profile,
+        trace=trace,
     )
 
     per_rank_inputs = [[] for _ in range(world_size)]

@@ -19,7 +19,7 @@ from dist_ir.executor import (
 )
 from dist_ir.executor.cost_model import CostModel
 from dist_ir.transforms import mlp_dhp_transform
-from .mlp import mlp, get_topology, simulate, run_pytorch
+from .mlp import mlp, calibrate_parameters, get_topology, simulate, run_pytorch
 
 
 MODEL_PARAMS = {
@@ -238,56 +238,6 @@ def grid_search(
                     "peak_memory": peak_memory,
                 }
             )
-
-
-def calibrate_parameters(args):
-    if args.simulation_parameters_file is not None and os.path.exists(
-        args.simulation_parameters_file
-    ):
-        with open(args.simulation_parameters_file, "rb") as f:
-            simulation_parameters = pickle.load(f)
-        print(
-            f"Reading simulation parameters from {args.simulation_parameters_file}..."
-        )
-        args.device_throughput = simulation_parameters["device_throughput"]
-        args.dram_bandwidth = simulation_parameters["dram_bandwidth"]
-        args.kernel_launch_overhead = simulation_parameters["kernel_launch_overhead"]
-        args.network_bandwidth = simulation_parameters["network_bandwidth"]
-        if "allreduce_parameters" in simulation_parameters:
-            args.allreduce_parameters = simulation_parameters["allreduce_parameters"]
-        else:
-            assert args.calibrate_allreduce_parameters
-    else:
-        simulation_parameters = {}
-    update_simulation_parameters = False
-    if args.calibrate_device_parameters and args.backend == "simulate":
-        print("Calibrating device parameters...")
-        (
-            args.dram_bandwidth,
-            args.device_throughput,
-            args.kernel_launch_overhead,
-        ) = calibrate_device_parameters()
-        update_simulation_parameters = True
-        print(f"DRAM bandwidth: {args.dram_bandwidth:.2e}")
-        print(f"Device throughput: {args.device_throughput:.2e}")
-        print(f"Kernel launch overhead: {args.kernel_launch_overhead:.2e}")
-    if args.calibrate_network_bandwidth and args.backend == "simulate":
-        args.network_bandwidth = calibrate_network_bandwidth()
-        update_simulation_parameters = True
-        print(f"Network bandwidth: {args.network_bandwidth}")
-    if args.calibrate_allreduce_parameters and args.backend == "simulate":
-        args.allreduce_parameters = calibrate_allreduce_parameters()
-        update_simulation_parameters = True
-        print(f"Allreduce parameters: {args.allreduce_parameters}")
-    if update_simulation_parameters and args.simulation_parameters_file is not None:
-        simulation_parameters["dram_bandwidth"] = args.dram_bandwidth
-        simulation_parameters["device_throughput"] = args.device_throughput
-        simulation_parameters["kernel_launch_overhead"] = args.kernel_launch_overhead
-        simulation_parameters["network_bandwidth"] = args.network_bandwidth
-        simulation_parameters["allreduce_parameters"] = args.allreduce_parameters
-        with open(args.simulation_parameters_file, "wb") as f:
-            pickle.dump(simulation_parameters, f)
-
 
 def main(args):
     model_size = "mlp-xs"

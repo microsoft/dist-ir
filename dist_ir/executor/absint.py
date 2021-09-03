@@ -1,7 +1,139 @@
-from typing import Any, Dict, Sequence
+"""
+An abstract interpreter for DistIR programs. The abstract interpreter can be
+instantiated to perform multiple analyses by providing it with a notion of
+abstract state and semantics for each op type.
 
+A semantics is a mapping: OpType -> List[Tuple[Signature, Implementation]].
+OpType is a string, Signature is a tuple of python types (e.g. Tensor,
+np.ndarray), and Implementation is a python function implementing the op that
+additionally takes the Op as its first input and returns corresponding outputs.
+(TODO instead of passing the op, should we pass the attributes as kwargs?)
+
+The order of implementations in the list is sorted into groups according to
+number of inputs, and the implementations in each group are sorted in
+most-precise-to-most-abstract order. E.g.:
+    [
+        ((np.ndarray, np.ndarray), add_conc),
+        ((Tensor, Tensor), add_abs),
+        ((np.ndarray, np.ndarray, np.ndarray), add_3_conc),
+    ]
+
+Ties are broken by lexicographic ordering, so the following entry would end up
+as the second element of the list:
+    ((np.ndarray, Tensor), add_mixed)
+
+TODO also assume there are no entries with duplicate signatures?
+"""
+
+import networkx as nx
+from typing import Any, Callable, Dict, List, Sequence, Tuple
+
+from .concrete_value import ConcreteValue, wrap_concrete_register
 from ..ir import Function, Op, Value
-from ..ir.type import TupleType
+from ..ir.type import *
+from .numpy_register import NumPyRegister
+from .torch_register import TorchRegister
+from .type_register import TypePropRegister
+from .mixed_register import MixedRegister
+from .communication_register import CommunicationRegister
+
+
+# This is a graph of types supported by the AbstractInterpreter, with an edge
+# (t1, t2) indicating that type t2 abstracts type t1.
+# All values allowed by the AbstractInterpreter should have their types here.
+_type_abstraction_graph: nx.DiGraph = nx.transitive_closure(
+    nx.DiGraph(
+        [
+            # TODO (if needed) have ConcreteBool, ConcreteFloat, etc
+            (ConcreteValue, Bool),
+            (ConcreteValue, Float32),
+            (ConcreteValue, Float64),
+            (ConcreteValue, Int32),
+            (ConcreteValue, Int64),
+            (ConcreteValue, Tensor),
+            (ConcreteValue, Tensor),
+            (ConcreteValue, TupleType),
+        ]
+    )
+)
+
+# The index of each type in the abstraction order
+_type_index = {t: i for i, t in enumerate(nx.topological_sort(_type_abstraction_graph))}
+
+
+def _abstracts(type1: type, type2: type):
+    if type1 not in _type_abstraction_graph:
+        raise ValueError(f"type1 ({type1}) not in type_abstraction_graph")
+    if type2 not in _type_abstraction_graph:
+        raise ValueError(f"type2 ({type2}) not in type_abstraction_graph")
+    return type1 == type2 or _type_abstraction_graph.has_edge(type1, type2)
+
+
+def _abstractable_types(source_types: Sequence[type], target_types: Sequence[type]):
+    """Returns true if each type in `source_types` is equal to or can be abstracted
+    by the corresponding `target_type`.
+    """
+    if len(source_types) != len(target_types):
+        return False
+    for source_type, target_type in zip(source_types, target_types):
+        if not _abstracts(source_type, target_type):
+            return False
+    return True
+
+
+def _signature_key(signature):
+    """A key function to sort lists of signatures. See module docstring for
+    details and example.
+    """
+    return (len(signature),) + tuple(_type_index[t] for t in signature)
+
+
+def update_semantics_with_register(
+    semantics: Dict[str, List[Tuple[Tuple[type, ...], Callable]]],
+    register: Dict[Tuple[str, Tuple[type, ...]], Callable],
+):
+    """Update `semantics` with the implementations in `register`. Can be used to
+    build up a semantics for the AbstractInterpreter.
+
+    `semantics`: a map: OpType -> List[Tuple[Signature, Implementation]].
+    See module docstring for more details.
+
+    `register`: a map: Tuple[OpType, Signature] -> Implementation.
+    """
+    # TODO check duplicates?
+    for (op_type, signature), implementation in register.items():
+        implementations = semantics.get(op_type, [])
+        implementations.append((signature, implementation))
+        semantics[op_type] = implementations
+    # Sort all implementation lists
+    for op_type in semantics:
+        semantics[op_type].sort(key=lambda x: _signature_key(x[0]))
+    return semantics
+
+
+def dispatch(
+    semantics: Dict[str, List[Tuple[Tuple[type, ...], Callable]]],
+    op_type: str,
+    inputs: Tuple[Any],
+) -> Callable:
+    """Function dispatch. Looks at the types of `inputs` and finds the appropriate
+    implementation function in `semantics`.
+
+    `semantics`: Mapping: OpType -> List[Tuple[Signature, Implementation]].
+    See module docstring for more details.
+    """
+    implementations = semantics[op_type]
+    input_types = tuple(type(input) for input in inputs)
+
+    # Find most precise implementation that matches input_types
+    # (We break ties arbitrarily using lexicographic ordering)
+    # Note: if this takes too long, memoize the answers
+    # TODO do binary search?
+    for (signature, implementation) in implementations:
+        if _abstractable_types(input_types, signature):
+            return signature, implementation
+
+    raise ValueError(f"Could not dispatch {op_type} with input types {input_types}")
 
 
 class AbstractState:
@@ -13,9 +145,11 @@ class AbstractState:
         self.env: Dict[Value, Any] = dict(zip(function.inputs, inputs))
         self.function = function
 
+    # TODO a function that looks up multiple values in self.env?
+
 
 class AbstractInterpreter:
-    def __init__(self, AbstractState=AbstractState, semantics=None, Tuple=tuple):
+    def __init__(self, AbstractState=AbstractState, semantics=None):
         """An abstract interpreter: Given an abstract domain
         (abstract values and abstract implementation of all ops),
         this class provides methods to abstractly interpret a DistIR function on
@@ -24,19 +158,12 @@ class AbstractInterpreter:
         `AbstractState`: subclass of absint.AbstractState to be used as abstract
         state.
 
-        `semantics`: Mapping from (OpType, tuple of input types) -> Python function.
-        Each function gets the Op and the abstract state as input and modifies
-        the state in-place to reflect the execution of the op.
-
-        `Tuple`: constructor for tuple values in the abstract domain. E.g.
-        Python's tuple for the concrete domain, and TupleType for type domain.
+        `semantics`: Mapping: OpType -> List[Tuple[Signature, Implementation]].
+        See module docstring for more details.
         """
         self.AbstractState = AbstractState
         self.semantics = {} if semantics is None else semantics
         # TODO instead of passing the op, should we pass the attributes as kwargs?
-        self.Tuple = Tuple
-
-        # TODO some kind of type hierarchy for function call dispatch
 
     def interpret_pmap(self, op: Op, state: AbstractState):
         # TODO cache and reuse interpretation of subfunction if possible,
@@ -89,6 +216,22 @@ class AbstractInterpreter:
         From this, the abstract values output by the function can be extracted,
         but the state can also be used to build, e.g., a trace.
         """
+        # Check that all concrete values are wrapped
+        allowed_types = (
+            ConcreteValue,
+            Bool,
+            Float32,
+            Float64,
+            Int32,
+            Int64,
+            Tensor,
+            TupleType,
+        )  # TODO use _type_abstraction_graph instead (needs ConcreteFloat etc?)
+        inputs = tuple(inputs)  # TODO
+        for v in inputs:
+            if not isinstance(v, allowed_types):
+                raise ValueError(f"interpret given value of type {type(v)}")
+
         if state is None:
             state = self.AbstractState(function, inputs)
         else:
@@ -99,35 +242,30 @@ class AbstractInterpreter:
             if op.op_type == "Pmap":
                 self.interpret_pmap(op, state)
             else:
-                # Function dispatch:
-                # I'm not sure whether to figure out input types and do function
-                # dispatch here or in the wrapper that creates the semantics from
-                # a symbol table, somthing like _convert_impls_to_semantics
-                input_types = tuple(type(state.env[inp]) for inp in op.inputs)
+                # Find the op's inputs in state's environment
+                inputs = tuple(state.env[v] for v in op.inputs)
+
                 # Execute this op's semantics on the state
-                self.semantics[op.op_type, input_types](op, state)
+                signature, implementation = dispatch(self.semantics, op.op_type, inputs)
+                # Abstract inputs if necessary
+                abstracted_inputs = abstract_values(inputs, signature)
+                outputs = implementation(op, *abstracted_inputs)
+
+                # Put the outputs back into the state's environment
+                if not isinstance(outputs, tuple):
+                    assert len(op.outputs) == 1
+                    outputs = (outputs,)
+                assert len(outputs) == len(op.outputs)
+                for x, val in zip(op.outputs, outputs):
+                    state.env[x] = val
 
         return state
 
 
-def convert_impls_to_semantics(impls):
-    """Converts a dictionary of semantics functions that take in input values
-    and spit out output values to one that modifies an abstract state in place.
-    """
-
-    def convert_impl(impl_fn):
-        def semantics(op: Op, state: AbstractState):
-            # Find the op's inputs in state's environment
-            inputs = (state.env[v] for v in op.inputs)
-            # Execute the implementation on the inputs
-            outputs = impl_fn(op, *inputs)
-            # Put the outputs back into the state's environment
-            if len(op.outputs) == 1:
-                outputs = (outputs,)
-            assert len(outputs) == len(op.outputs)
-            for x, val in zip(op.outputs, outputs):
-                state.env[x] = val
-
-        return semantics
-
-    return {signature: convert_impl(impl) for signature, impl in impls.items()}
+_semantics = {}
+update_semantics_with_register(_semantics, TypePropRegister)
+update_semantics_with_register(_semantics, wrap_concrete_register(NumPyRegister))
+update_semantics_with_register(_semantics, wrap_concrete_register(TorchRegister))
+update_semantics_with_register(_semantics, MixedRegister)
+update_semantics_with_register(_semantics, CommunicationRegister)
+interpreter = AbstractInterpreter(AbstractState, _semantics)

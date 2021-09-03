@@ -1,11 +1,10 @@
-from collections import defaultdict
-import csv
 import numpy as np
 import pytest
 import torch
 
 from dist_ir.backend.torch import run_pytorch
 from dist_ir.executor import SequentialExecutor
+from dist_ir.executor.concrete_value import ConcreteValue
 from dist_ir.executor.cost_model import CostModel
 from dist_ir.executor.simulator import Simulator
 from dist_ir.executor.type_inference import infer_types
@@ -142,8 +141,10 @@ def test_owt(num_devices, num_layers, use_gpu):
         else:
             input_arrays += np.split(weights[l], num_devices, axis=1)
     input_arrays += np.split(x, num_devices)
+    inputs = [ConcreteValue(v, None) for v in input_arrays]
     ex = SequentialExecutor("numpy")
-    output_arrays = ex.compute(fn, input_arrays)
+    outputs = ex.compute(fn, inputs)
+    output_arrays = [v.val for v in outputs]
 
     # Expected results
     y = x
@@ -232,20 +233,21 @@ def test_mlp_grid_search(use_gpu):
 
         # Create random input data
         input_data = tuple(
-            np.random.randn(*v.type.shape).astype(np.float32) for v in seq_mlp.inputs
+            ConcreteValue(np.random.randn(*v.type.shape).astype(np.float32), d0)
+            for v in seq_mlp.inputs
         )
 
         init_fn, fn = mlp_dist(seq_mlp, d, h, p, m, topology)
         print(fn.name)
 
         # Simulate
-        simulation = simulator.interpret(fn, (v.type for v in fn.inputs))
+        simulation = simulator.simulate(fn, (v.type for v in fn.inputs))
         simulated_time = max([simulation.timestamps[d] for d in simulation.timestamps])
         print(simulated_time)
 
         # Reference-execute init_fn to get inputs for fn
         dist_input_data = seq_executor.compute(init_fn, input_data)
-        dist_input_data = tuple(torch.tensor(t) for t in dist_input_data)
+        dist_input_data = tuple(torch.tensor(t.val) for t in dist_input_data)
         assert all(
             t.shape == v.type.shape for (t, v) in zip(dist_input_data, fn.inputs)
         )
@@ -374,6 +376,29 @@ def test_dp_mlp(use_gpu):
     assert torch.allclose(y, torch.cat([o[0] for o in per_rank_outputs], 0))
 
     return runtimes
+
+
+def test_separate_projection_types():
+    d1 = Device(1, "gpu")
+    d2 = Device(2, "gpu")
+    fn = FunctionMaker()
+    x = fn.add_input_value("x", None)
+    y = fn.add_op("Send", inputs=(x,), attributes={"device": d2})
+    fn.set_outputs((x, y))
+    fn = fn.finalize()
+    cpprint(fn)
+
+    x = torch.randn(4, 4)
+    inputs = [x]
+    input_types = [Tensor(Float32(), (4, 4), d1)]
+    outputs, _ = run_pytorch(fn, inputs, input_types=input_types)
+    assert torch.allclose(x, outputs[1][0])
+
+    x = torch.randn(8, 8)
+    inputs = [x]
+    input_types = [Tensor(Float32(), (8, 8), d1)]
+    outputs, _ = run_pytorch(fn, inputs, input_types=input_types)
+    assert torch.allclose(x, outputs[1][0])
 
 
 if __name__ == "__main__":

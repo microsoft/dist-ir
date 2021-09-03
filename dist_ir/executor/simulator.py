@@ -1,21 +1,39 @@
 from copy import deepcopy
 from collections import defaultdict
 import json
-from typing import Any, Dict, Sequence, Tuple
-
-import numpy as np
+from typing import Any, Dict, Sequence, Set, Tuple
+from warnings import warn
 
 from ..ir import Function, Device, Op
-from ..ir.type import Type, Tensor
-from .absint import AbstractState, AbstractInterpreter
-from .numpy_register import NumPyRegister
-from .type_inference import TypePropRegister
-from .mixed_register import MixedImplementations
+from ..ir.type import Type, abstract_values
+from .absint import (
+    AbstractState,
+    interpreter,
+    update_semantics_with_register,
+    dispatch,
+)
+from .concrete_value import ConcreteValue
+from .cost_model import CostModel, KERNEL_LAUNCH_OVERHEAD
 
 SECONDS_TO_MICROSECONDS = 1e6
 
 
+def _get_all_devices(values: Sequence[Any]) -> Set[Device]:
+    """Returns the devices that `values` live on. `values` can be any valid
+    abstract interpreter values, e.g., any instance of Type or ConcreteValue."""
+    devices = set()
+    for v in values:
+        if isinstance(v, Type):
+            devices.update(v.get_all_devices())
+        elif isinstance(v, ConcreteValue):
+            devices.add(v.device)
+        else:
+            raise ValueError(f"_get_all_devices called on value {v} of type {type(v)}")
+    return devices
+
+
 class SimulatorState(AbstractState):
+    # TODO remove subclass, unnecessary init args?
     def __init__(self, function: Function, inputs: Sequence[Any]):
         AbstractState.__init__(self, function, inputs)
         self.timestamps = defaultdict(float)
@@ -27,6 +45,8 @@ class SimulatorState(AbstractState):
         self._function_inputs_set = set(function.inputs)
 
         for inp in function.inputs:
+            if inp.type is None or inp.type.device is None:
+                continue
             self.peak_memory[inp.type.device] += inp.type.size()
         for device in self.peak_memory:
             self.live_memory[device][0] = (0, self.peak_memory[device])
@@ -55,15 +75,14 @@ class SimulatorState(AbstractState):
         with open(fname, "w") as fout:
             json.dump(_trace, fout, indent=0)
 
-
-def _update_live_memory(state, deltas):
-    for device in deltas:
-        state.live_memory[device].append(
-            (
-                state.timestamps[device],
-                state.live_memory[device][-1][1] + deltas[device],
+    def update_live_memory(self, deltas):
+        for device in deltas:
+            self.live_memory[device].append(
+                (
+                    self.timestamps[device],
+                    self.live_memory[device][-1][1] + deltas[device],
+                )
             )
-        )
 
 
 def _simulate_op(
@@ -78,10 +97,7 @@ def _simulate_op(
     # values are np.ndarrays, which don't have device fields.
     # For e.g., we could wrap all abstract values in some AbstractValue class,
     # and attach the device tag to this class.
-    devices = set()
-    for v in inputs + outputs:
-        if isinstance(v, Type):
-            devices.update(v.get_all_devices())
+    devices = _get_all_devices(inputs + outputs)
     if len(devices) > 1:
         max_timestamp = max([state.timestamps[device] for device in devices])
         for device in devices:
@@ -99,12 +115,12 @@ def _simulate_op(
 
     # Update the live memory with any new activations.
     live_memory_deltas = defaultdict(lambda: 0)
-    for out_edge in op.outputs:
+    for output, out_edge in zip(outputs, op.outputs):
         state.consumers[out_edge] = len(state.function.consumers[out_edge])
-        output_devices = out_edge.type.get_all_devices()
+        output_devices = _get_all_devices([output])
         for output_device in output_devices:
-            live_memory_deltas[output_device] += out_edge.type.size()
-    _update_live_memory(state, live_memory_deltas)
+            live_memory_deltas[output_device] += output.size()
+    state.update_live_memory(live_memory_deltas)
 
     # Update the peak memory.
     for device in state.live_memory:
@@ -126,87 +142,54 @@ def _simulate_op(
             )
         state.consumers[in_edge] -= 1
         if state.consumers[in_edge] == 0:
-            input_devices = in_edge.type.get_all_devices()
-            for input_device in input_devices:
-                live_memory_deltas[input_device] -= in_edge.type.size()
-    _update_live_memory(state, live_memory_deltas)
+            if in_edge.type is not None:
+                input_devices = in_edge.type.get_all_devices()
+                for input_device in input_devices:
+                    live_memory_deltas[input_device] -= in_edge.type.size()
+    state.update_live_memory(live_memory_deltas)
 
 
-def _create_semantics(cost_functions, implementations):
-    """Creates a semantics (dictionary mapping op signatures to abstract state
-    modifiers) given a dictionary of cost functions (input values -> costs) and
-    a dictionary of implementations (input values -> output values).
-    """
+class Simulator:
+    def __init__(
+        self,
+        cost_model: CostModel,
+        # self, cost_functions: Dict[Tuple[str, Tuple[type, ...]], Callable]
+    ) -> None:
+        # Make semantics of cost_functions
+        self.cost_functions = {}
+        update_semantics_with_register(self.cost_functions, cost_model.cost_functions)
 
-    def convert_impl(impl_fn, cost_fn):
-        def semantics(op: Op, state: SimulatorState):
-            # Find the op's inputs in state's environment
+    def simulate(self, function: Function, inputs: Tuple[Any]) -> SimulatorState:
+        """Simulate `function` on `inputs`.
+
+        `inputs` is a tuple of abstract interpreter values (abstract or concrete).
+
+        Returns a SimulatorState containing timestamps, memory profiles, etc.
+        """
+        state = SimulatorState(function, inputs)
+
+        # First, interpret the function on inputs to get all values
+        state = interpreter.interpret(function, inputs, state)
+
+        # Then, run each op's cost function
+        for op in function.ops:
+            # Find the op's inputs & outputs in state's environment
             inputs = tuple(state.env[v] for v in op.inputs)
+            outputs = tuple(state.env[v] for v in op.outputs)
 
-            # Run the abstract/concrete implementation
-            outputs = impl_fn(op, *inputs)
-
-            # Run the cost function
-            costs = cost_fn(op, *inputs)
-
-            if not isinstance(outputs, tuple):
-                outputs = (outputs,)
-            for x, val in zip(op.outputs, outputs):
-                state.env[x] = val
+            # Dispatch to find cost function for op
+            try:
+                signature, cost_function = dispatch(
+                    self.cost_functions, op.op_type, inputs
+                )
+                # Abstract inputs if necessary
+                abstracted_inputs = abstract_values(inputs, signature)
+                costs = cost_function(op, *abstracted_inputs)
+            except ValueError:
+                warn(f"Dispatch failed for op {op.op_type} on inputs {inputs}")
+                # Use default cost function if signature not in cost_functions
+                devices = _get_all_devices(inputs + outputs)
+                costs = {device: KERNEL_LAUNCH_OVERHEAD for device in devices}
 
             _simulate_op(state, op, costs, inputs, outputs)
-
-        return semantics
-
-    signatures = set(cost_functions.keys()).intersection(implementations.keys())
-
-    return {f: convert_impl(implementations[f], cost_functions[f]) for f in signatures}
-
-
-# All these cost functions assume they are getting the type of each input value
-# TODO instead of passing the op, should we pass the attributes as kwargs?
-
-
-def Simulator(cost_model):
-    return AbstractInterpreter(
-        SimulatorState,
-        _create_semantics(
-            cost_model.cost_functions,
-            {**NumPyRegister, **MixedImplementations, **TypePropRegister},
-        ),
-    )
-
-
-# TODO: Remove once we have simulation with mixed types
-def _create_post_type_inference_semantics(cost_functions):
-    """Creates a semantics (dictionary mapping op signatures to abstract state
-    modifiers) given a dictionary of cost functions (input values -> costs) and
-    a dictionary of implementations (input values -> output values).
-    """
-
-    def convert_impl(cost_fn):
-        def semantics(op: Op, state: SimulatorState):
-            # Find the op's inputs in state's environment
-            inputs = tuple(state.env[v] for v in op.inputs)
-            outputs = tuple(x.type for x in op.outputs)
-
-            # Run the cost function
-            costs = cost_fn(op, *inputs)
-
-            for x in op.outputs:
-                state.env[x] = x.type
-
-            _simulate_op(state, op, costs, inputs, outputs)
-
-        return semantics
-
-    signatures = cost_functions.keys()
-
-    return {f: convert_impl(cost_functions[f]) for f in signatures}
-
-
-def PostTypeInferenceSimulator(cost_model):
-    return AbstractInterpreter(
-        SimulatorState,
-        _create_post_type_inference_semantics(cost_model.cost_functions),
-    )
+        return state

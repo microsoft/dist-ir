@@ -14,7 +14,7 @@ from torch import fx
 from ..executor.rank_projector import project
 from ..ir import Function, cpprint
 from ..ir.device import Device
-from ..ir.type import Int64, Float32
+from ..ir.type import Int32, Int64, Float32, Type
 
 # NOTE: The code currently suffers from this issue, more investigation needed:
 # https://github.com/pytorch/pytorch/issues/11201
@@ -162,10 +162,14 @@ def _reshape(x, y, ctx=None):
 
 
 def _recv(shape=None, from_d=None, group=None, dtype=None, ctx=None):
-    if isinstance(dtype, Int64):
+    if isinstance(dtype, Int32):
+        x = torch.zeros(shape).int()
+    elif isinstance(dtype, Int64):
         x = torch.zeros(shape).long()
     elif isinstance(dtype, Float32):
         x = torch.zeros(shape).float()
+    else:
+        raise NotImplementedError(dtype)
 
     src_rank = ctx.device_to_rank[from_d]
     if ctx.use_gpu:
@@ -545,19 +549,21 @@ def run_multiprocesses(
 
 def run_pytorch(
     fn: Function,
-    inputs: Sequence[Any],
+    inputs: Tuple[Any],
+    input_types: Tuple[Type] = None,
     use_gpu=False,
     num_repetitions=1,
     num_warmup=0,
     debug_mock=False,
     debug_stacktrace=False,
     profile=False,
-    run_type_inference=True,  # TODO: Remove once we have mixed implementations
 ):
     """Project `fn` and run on `inputs` over `num_devices` devices using the
     PyTorch backend.
 
-    `inputs` is a list/tuple of the same length as `fn.inputs`.
+    `inputs` is a list/tuple of the same length as `fn.inputs`.  `input_types`
+    is a list/tuple of abstract/concrete inputs used for projection.
+
     The run is repeated 'num_warmup + num_repetitions` times, and runtimes from
     the last `num_repetitions` runs are returned along with the outputs of the
     last run.
@@ -569,9 +575,12 @@ def run_pytorch(
     profiler and outputs logs to TensorBoard.
     """
 
-    device_to_fns, groups = project(
-        fn, tuple(v.type for v in fn.inputs), run_type_inference
-    )
+    if input_types is None:
+        input_types = tuple(v.type for v in fn.inputs)
+    else:
+        assert len(input_types) == len(fn.inputs)
+
+    device_to_fns, groups = project(fn, input_types)
 
     # Map between DistIR devices and pytorch ranks:
     device_to_rank = {}
@@ -593,8 +602,8 @@ def run_pytorch(
     )
 
     per_rank_inputs = [[] for _ in range(world_size)]
-    for v, a in zip(fn.inputs, inputs):
-        per_rank_inputs[device_to_rank[v.type.device]].append(a)
+    for t, a in zip(input_types, inputs):
+        per_rank_inputs[device_to_rank[t.device]].append(a)
     assert len(fn.inputs) == len(inputs)
 
     if debug_mock:

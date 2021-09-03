@@ -298,32 +298,12 @@ def relu_grad(op, x, dy):
     return dx
 
 
-def mpi_allgather(op, *xs):
-    v = mpi_gather(op, *xs)
-    return tuple(v for i in range(len(xs)))
-
-
-def mpi_allreduce(op, *xs):
-    # TODO: Add attribute for reduction operator
-    sum_ = np.sum(xs, axis=0)
-    return tuple(sum_ for i in range(len(xs)))
-
-
-def mpi_broadcast(op, x):
-    return tuple(x for _ in range(len(op.attributes["devices"])))
-
-
-def mpi_gather(op, *xs):
-    dim = op.attributes["axis"]
-    return np.concatenate(xs, axis=dim)
-
-
-def mpi_reduce(op, *xs):
-    return np.sum(xs, axis=0)
-
-
 def mul(op, x, y):
     return x * y
+
+
+def nonzero(op, x):
+    return np.array(np.nonzero(x))
 
 
 def reduce_all_l2(op, *xs):
@@ -613,12 +593,7 @@ def softmax_cross_entropy_loss_grad(op, dy, log_prob, label, weight=None):
 
 def split_uniform(op, x):
     dim = op.attributes["axis"]
-    if op.op_type == "SplitUniform" or op.op_type == "SplitUniformToTupleType":
-        num_splits = op.attributes["num_splits"]
-    elif op.op_type == "MPIScatter" or op.op_type == "MPIScatterToTupleType":
-        num_splits = len(op.attributes["devices"])
-    else:
-        raise NotImplementedError(op.op_type)
+    num_splits = op.attributes["num_splits"]
     return tuple(y for y in np.split(x, num_splits, axis=dim))
 
 
@@ -630,7 +605,7 @@ def split(op, x):
         sections.append(n + s)
         n += s
     axis = op.attributes["axis"]
-    return np.split(x, sections, axis=axis)
+    return tuple(np.split(x, sections, axis=axis))
 
 
 def sub(op, x, y):
@@ -722,71 +697,10 @@ NumPyRegister = {
     ("MatMul", (np.ndarray, np.ndarray)): matmul,
     ("MatMulGrad", (np.ndarray, np.ndarray, np.ndarray)): matmul_grad,
     ("Min", (np.ndarray, np.ndarray)): lambda op, x, y: np.minimum(x, y),
-    (
-        "MPIAllreduceFromTupleType",
-        (tuple,),
-    ): lambda op, *xs: mpi_allreduce(op, *xs[0]),
-    ("MPIAllgather", (np.ndarray,) * 2): mpi_allgather,
-    ("MPIAllgather", (np.ndarray,) * 4): mpi_allgather,
-    ("MPIAllgather", (np.ndarray,) * 8): mpi_allgather,
-    ("MPIAllgather", (np.ndarray,) * 16): mpi_allgather,
-    ("MPIAllgather", (np.ndarray,) * 32): mpi_allgather,
-    ("MPIAllgather", (np.ndarray,) * 64): mpi_allgather,
-    ("MPIAllgather", (np.ndarray,) * 128): mpi_allgather,
-    ("MPIAllgather", (np.ndarray,) * 256): mpi_allgather,
-    ("MPIAllgather", (np.ndarray,) * 512): mpi_allgather,
-    ("MPIAllgather", (np.ndarray,) * 1024): mpi_allgather,
-    ("MPIAllgather", (np.ndarray,) * 2048): mpi_allgather,
-    ("MPIAllgather", (np.ndarray,) * 4096): mpi_allgather,
-    ("MPIAllgather", (np.ndarray,) * 8192): mpi_allgather,
-    ("MPIAllreduce", (np.ndarray,) * 2): mpi_allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 4): mpi_allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 8): mpi_allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 16): mpi_allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 32): mpi_allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 64): mpi_allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 128): mpi_allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 256): mpi_allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 512): mpi_allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 1024): mpi_allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 2048): mpi_allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 4096): mpi_allreduce,
-    ("MPIAllreduce", (np.ndarray,) * 8192): mpi_allreduce,
-    ("MPIBroadcast", (np.ndarray,)): mpi_broadcast,
-    ("MPIBroadcastToTupleType", (np.ndarray,)): mpi_broadcast,
-    ("MPIGather", (np.ndarray,) * 2): mpi_gather,
-    ("MPIGather", (np.ndarray,) * 4): mpi_gather,
-    ("MPIGather", (np.ndarray,) * 8): mpi_gather,
-    ("MPIGather", (np.ndarray,) * 16): mpi_gather,
-    ("MPIGather", (np.ndarray,) * 32): mpi_gather,
-    ("MPIGather", (np.ndarray,) * 64): mpi_gather,
-    ("MPIGather", (np.ndarray,) * 128): mpi_gather,
-    ("MPIGather", (np.ndarray,) * 256): mpi_gather,
-    ("MPIGather", (np.ndarray,) * 512): mpi_gather,
-    ("MPIGather", (np.ndarray,) * 1024): mpi_gather,
-    ("MPIGather", (np.ndarray,) * 2048): mpi_gather,
-    ("MPIGather", (np.ndarray,) * 4096): mpi_gather,
-    ("MPIGather", (np.ndarray,) * 8192): mpi_gather,
-    ("MPIGatherFromTupleType", (tuple,)): lambda op, *xs: mpi_gather(op, *xs[0]),
-    ("MPIReduce", (np.ndarray,) * 2): mpi_reduce,
-    ("MPIReduce", (np.ndarray,) * 4): mpi_reduce,
-    ("MPIReduce", (np.ndarray,) * 8): mpi_reduce,
-    ("MPIReduce", (np.ndarray,) * 16): mpi_reduce,
-    ("MPIReduce", (np.ndarray,) * 32): mpi_reduce,
-    ("MPIReduce", (np.ndarray,) * 64): mpi_reduce,
-    ("MPIReduce", (np.ndarray,) * 128): mpi_reduce,
-    ("MPIReduce", (np.ndarray,) * 256): mpi_reduce,
-    ("MPIReduce", (np.ndarray,) * 512): mpi_reduce,
-    ("MPIReduce", (np.ndarray,) * 1024): mpi_reduce,
-    ("MPIReduce", (np.ndarray,) * 2048): mpi_reduce,
-    ("MPIReduce", (np.ndarray,) * 4096): mpi_reduce,
-    ("MPIReduce", (np.ndarray,) * 8192): mpi_reduce,
-    ("MPIScatter", (np.ndarray,)): split_uniform,
-    ("MPIScatterToTupleType", (np.ndarray,)): split_uniform,
     ("Mul", (np.ndarray, np.ndarray)): mul,
     ("Mul", (np.ndarray, np.float32)): mul,
     ("Mul", (np.int64, np.int64)): mul,
-    ("NonZero", (np.ndarray,)): lambda op, x: np.array(np.nonzero(x)),
+    ("NonZero", (np.ndarray,)): nonzero,
     ("Pow", (np.ndarray, np.float32)): lambda op, x, y: pow(x, y),
     ("ReduceAllL2", tuple(np.ndarray for i in range(60))): reduce_all_l2,
     ("ReduceAllL2", tuple(np.ndarray for i in range(61))): reduce_all_l2,
@@ -800,8 +714,6 @@ NumPyRegister = {
     ("Reshape", (np.ndarray, np.ndarray)): reshape,
     ("Select", (tuple,)): select,
     ("Select", (np.ndarray,)): select,
-    ("Send", (np.int64,)): identity,
-    ("Send", (np.ndarray,)): identity,
     ("SGDOptimizer", tuple(np.ndarray for i in range(16))): sgd,
     ("SGDOptimizer", tuple(np.ndarray for i in range(32))): sgd,
     ("SGDOptimizer", tuple(np.ndarray for i in range(64))): sgd,

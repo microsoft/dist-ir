@@ -1,11 +1,15 @@
 from collections import defaultdict
-from dist_ir.executor.type_inference import TypePropRegister
 from typing import Any, Dict, Sequence, Set, Tuple
 
-from ..ir import Function, FunctionMaker, Device, Op, Value
-from ..ir.type import Type, Float32, Float64, Int64, Tensor
-from .absint import AbstractState, AbstractInterpreter
-
+from ..ir import Function, FunctionMaker, Device, Op
+from ..ir.type import Type, Float32, Float64, Int64, Tensor, abstract_values
+from .absint import (
+    AbstractState,
+    dispatch,
+    interpreter,
+    update_semantics_with_register,
+)
+from .concrete_value import ConcreteValue
 
 # TODO merge this with torch backend -- it breaks semantics to have P2P send/recv
 
@@ -25,8 +29,8 @@ class ProjectorState(AbstractState):
         self.groups: Set[Tuple[Device]] = set()
 
 
-def _get_input_devices(op: Op):
-    return list(set(x.type.device for x in op.inputs if x.type.device is not None))
+def _get_devices(inputs: Tuple[Any]):
+    return list(set(x.device for x in inputs if x.device is not None))
 
 
 def _make_group(devices):
@@ -36,18 +40,27 @@ def _make_group(devices):
     return tuple(sorted(set(devices)))
 
 
-def _collective_projector(op: Op, state: ProjectorState):
+# Projector functions:
+# Each function takes (op, state, inputs, outputs) and adds the projected version
+# of the op to the appropriate per-rank functions. The inputs and outputs arguments
+# are the mixed (abstract/concrete) values from the interpreter run used to
+# figure out device placements and required shapes (e.g. _send_projector
+# needs to know the shape of the sent tensor).
+
+
+def _collective_projector(op: Op, state: ProjectorState, inputs, outputs):
     """Projects a collective op over D devices that has D inputs and D outputs,
     one on each device."""
-    assert len(op.inputs) == len(op.outputs)
-    group = _make_group(v.type.device for v in op.inputs + op.outputs)
+    assert len(inputs) == len(outputs)
+    for in_v, out_v in zip(inputs, outputs):
+        assert in_v.device == out_v.device
+    group = _make_group(v.device for v in inputs + outputs)
     attributes = {
         **(op.attributes if op.attributes is not None else {}),
         "group": group,
     }
-    for in_v, out_v in zip(op.inputs, op.outputs):
-        assert in_v.type.device == out_v.type.device
-        d = in_v.type.device
+    for in_, in_v, out_v in zip(inputs, op.inputs, op.outputs):
+        d = in_.device
 
         new_op = Op(
             op.op_type,
@@ -58,22 +71,22 @@ def _collective_projector(op: Op, state: ProjectorState):
         state.per_rank_fns[d].ops.append(new_op)
 
 
-def _constant_projector(op: Op, state: ProjectorState):
+def _constant_projector(op: Op, state: ProjectorState, inputs, outputs):
     assert len(op.outputs) == 1
     device = op.attributes["device"]
     state.per_rank_fns[device].ops.append(op)
 
 
-def _gather_projector(op: Op, state: ProjectorState):
-    devices = set(v.type.device for v in op.inputs)
+def _gather_projector(op: Op, state: ProjectorState, inputs, outputs):
+    devices = set(v.device for v in inputs)
     assert len(op.inputs) == len(devices)
-    assert len(op.outputs) == 1 and op.outputs[0].type.device in devices
+    assert len(op.outputs) == 1 and outputs[0].device in devices
     attributes = {
         **(op.attributes if op.attributes is not None else {}),
         "group": _make_group(devices),
     }
-    for in_v in op.inputs:
-        d = in_v.type.device
+    for in_, in_v in zip(inputs, op.inputs):
+        d = in_.device
         new_op = Op(
             op.op_type,
             inputs=(in_v,),
@@ -83,11 +96,11 @@ def _gather_projector(op: Op, state: ProjectorState):
         state.per_rank_fns[d].ops.append(new_op)
 
 
-def _identity_projector(op: Op, state: ProjectorState):
+def _identity_projector(op: Op, state: ProjectorState, inputs, outputs):
     """Projects op unchanged to its device's per-rank program.
     The inputs of op must all be on a single device.
     """
-    devices = _get_input_devices(op)
+    devices = _get_devices(inputs)
     if (
         len(devices) > 1
         or len(devices) == 0
@@ -99,17 +112,21 @@ def _identity_projector(op: Op, state: ProjectorState):
         state.per_rank_fns[devices[0]].ops.append(op)
 
 
-def _send_projector(op: Op, state: ProjectorState):
-    from_d = op.inputs[0].type.device
+def _send_projector(op: Op, state: ProjectorState, inputs, outputs):
+    inp = inputs[0]
+    from_d = inp.device
     to_d = op.attributes["device"]
     assert from_d != to_d
     group = _make_group((from_d, to_d))
-    if not isinstance(op.inputs[0].type, Tensor):
+    if not isinstance(inp, Tensor) and not isinstance(inp, ConcreteValue):
+        # Input could be a primitive type
         output_shape = tuple()
-        output_type = op.inputs[0].type
+        output_type = inp
     else:
-        output_shape = op.inputs[0].type.shape
-        output_type = op.inputs[0].type.dtype
+        if isinstance(inp, ConcreteValue):
+            inp = abstract_values((inp,), (Tensor,))[0]
+        output_shape = inp.shape
+        output_type = inp.dtype
     state.per_rank_fns[from_d].ops.append(
         Op(
             "SendP2P",
@@ -131,162 +148,83 @@ def _send_projector(op: Op, state: ProjectorState):
     )
 
 
-ProjectorRegister = {
-    ("Add", (Tensor, Tensor)): _identity_projector,
-    ("Add", (Tensor, Float32)): _identity_projector,
-    ("Cast", (Tensor,)): _identity_projector,
-    ("Cast", (Int64,)): _identity_projector,
-    ("Cast", (Float64,)): _identity_projector,
-    ("Concat", (Tensor, Tensor)): _identity_projector,
-    ("Concat", (Tensor, Tensor, Tensor)): _identity_projector,
-    ("Concat", (Tensor, Tensor, Tensor, Tensor)): _identity_projector,
-    ("Constant", ()): _constant_projector,
-    ("ConstantOfShape", (Tensor,)): _identity_projector,
-    ("Div", (Tensor, Tensor)): _identity_projector,
-    ("Div", (Tensor, Float32)): _identity_projector,
-    ("Div", (Int64, Int64)): _identity_projector,
-    ("Identity", (Tensor,)): _identity_projector,
-    ("Gather", (Tensor, Tensor)): _identity_projector,
-    ("Gather", (Tensor, Int64)): _identity_projector,
-    ("Gemm", (Tensor, Tensor, Tensor)): _identity_projector,
-    ("Loss", (Tensor, Tensor)): _identity_projector,
-    ("LossGrad", (Tensor, Tensor)): _identity_projector,
-    ("MatMul", (Tensor, Tensor)): _identity_projector,
-    ("MatMulGrad", (Tensor, Tensor, Tensor)): _identity_projector,
-    ("MPIAllgather", (Tensor,) * 2): _collective_projector,
-    ("MPIAllgather", (Tensor,) * 4): _collective_projector,
-    ("MPIAllgather", (Tensor,) * 8): _collective_projector,
-    ("MPIAllgather", (Tensor,) * 16): _collective_projector,
-    ("MPIAllreduce", (Tensor,) * 2): _collective_projector,
-    ("MPIAllreduce", (Tensor,) * 4): _collective_projector,
-    ("MPIAllreduce", (Tensor,) * 8): _collective_projector,
-    ("MPIAllreduce", (Tensor,) * 16): _collective_projector,
-    ("MPIGather", (Tensor,) * 2): _gather_projector,
-    ("Mul", (Tensor, Tensor)): _identity_projector,
-    ("Mul", (Tensor, Float32)): _identity_projector,
-    ("Mul", (Int64, Int64)): _identity_projector,
-    ("NonZero", (Tensor,)): _identity_projector,
-    ("Pow", (Tensor, Float32)): _identity_projector,
-    ("ReduceMean", (Tensor,)): _identity_projector,
-    ("Relu", (Tensor,)): _identity_projector,
-    ("ReluGrad", (Tensor, Tensor)): _identity_projector,
-    ("Reshape", (Tensor, Tensor)): _identity_projector,
-    ("Shape", (Tensor,)): _identity_projector,
-    ("Send", (Tensor,)): _send_projector,
-    ("Send", (Int64,)): _send_projector,
-    ("Slice", (Tensor, Tensor, Tensor, Tensor, Int64)): _identity_projector,
-    ("Softmax", (Tensor,)): _identity_projector,
-    ("Split", (Tensor,)): _identity_projector,
-    ("Squeeze", (Tensor,)): _identity_projector,
-    ("Sqrt", (Tensor,)): _identity_projector,
-    ("Sub", (Tensor, Tensor)): _identity_projector,
-    ("Sub", (Int64, Int64)): _identity_projector,
-    ("Sub", (Float32, Tensor)): _identity_projector,
-    ("Tanh", (Tensor,)): _identity_projector,
-    ("Transpose", (Tensor,)): _identity_projector,
-    ("Unsqueeze", (Tensor,)): _identity_projector,
-    ("Unsqueeze", (Int64,)): _identity_projector,
+_ProjectorRegister = {
+    "Add": _identity_projector,
+    "Cast": _identity_projector,
+    "Concat": _identity_projector,
+    "Constant": _constant_projector,
+    "ConstantOfShape": _identity_projector,
+    "Div": _identity_projector,
+    "Identity": _identity_projector,
+    "Gather": _identity_projector,
+    "Gemm": _identity_projector,
+    "Loss": _identity_projector,
+    "LossGrad": _identity_projector,
+    "MatMul": _identity_projector,
+    "MatMulGrad": _identity_projector,
+    "MPIAllgather": _collective_projector,
+    "MPIAllreduce": _collective_projector,
+    "MPIGather": _gather_projector,
+    "Mul": _identity_projector,
+    "NonZero": _identity_projector,
+    "Pow": _identity_projector,
+    "ReduceMean": _identity_projector,
+    "Relu": _identity_projector,
+    "ReluGrad": _identity_projector,
+    "Reshape": _identity_projector,
+    "Shape": _identity_projector,
+    "Send": _send_projector,
+    "Slice": _identity_projector,
+    "Softmax": _identity_projector,
+    "Split": _identity_projector,
+    "Squeeze": _identity_projector,
+    "Sqrt": _identity_projector,
+    "Sub": _identity_projector,
+    "Tanh": _identity_projector,
+    "Transpose": _identity_projector,
+    "Unsqueeze": _identity_projector,
 }
 
 
-def _create_semantics(type_prop_register, projector_register):
-    """Creates a semantics for AbstractInterpreter by combining a register of
-    projector functions and the type propagation register.
-    """
-
-    def convert_impl(type_prop_fn, projector):
-        def semantics(op: Op, state: AbstractState):
-            # Find the op's inputs in state's environment
-            inputs = tuple(state.env[v] for v in op.inputs)
-            # Run the type propagation function
-            outputs = type_prop_fn(op, *inputs)
-
-            # Write outputs to state's environment
-            if not isinstance(outputs, tuple):
-                outputs = (outputs,)
-            for x, val in zip(op.outputs, outputs):
-                state.env[x] = val
-
-            # Project op and add to appropriate per-rank function
-            projector(op, state)
-
-            # If op involves more than one device, create a group
-            devices = [v.device for v in outputs] + [v.type.device for v in op.inputs]
-            group = _make_group(devices)
-            if len(group) > 1:
-                state.groups.add(group)
-
-        return semantics
-
-    signatures = set(projector_register.keys()).intersection(type_prop_register.keys())
-
-    return {
-        f: convert_impl(type_prop_register[f], projector_register[f])
-        for f in signatures
-    }
-
-
-def _create_post_type_inference_semantics(projector_register):
-    """Creates a semantics for AbstractInterpreter using a register of
-    projector functions.
-    """
-
-    def convert_impl(projector):
-        def semantics(op: Op, state: AbstractState):
-            for output in op.outputs:
-                state.env[output] = output.type
-
-            # Project op and add to appropriate per-rank function
-            projector(op, state)
-
-            # If op involves more than one device, create a group
-            devices = [
-                v.type.device for v in op.outputs if v.type.device is not None
-            ] + [v.type.device for v in op.inputs if v.type.device is not None]
-            group = _make_group(devices)
-            if len(group) > 1:
-                state.groups.add(group)
-
-        return semantics
-
-    signatures = projector_register.keys()
-
-    return {f: convert_impl(projector_register[f]) for f in signatures}
-
-
-Projector = AbstractInterpreter(
-    AbstractState=ProjectorState,
-    semantics=_create_semantics(TypePropRegister, ProjectorRegister),
-)
-
-PostTypeInferenceProjector = AbstractInterpreter(
-    AbstractState=ProjectorState,
-    semantics=_create_post_type_inference_semantics(ProjectorRegister),
-)
-
-
-# TODO: Remove run_type_inference once we have mixed implementations
 def project(
-    fn: Function, input_types: Sequence[Type], run_type_inference: bool = True
+    fn: Function, input_types: Sequence[Type]
 ) -> Tuple[Dict[Device, Function], Set[Tuple[Device]]]:
-    """Project `fn` to per-rank functions. Returns a mapping from Devices to
-    per-rank Functions, and a set of Device groups that perform collective
-    communications in `fn`.
+    """Project `fn` to per-rank functions. Uses `input_types` (abstract
+    interpreter values, can be abstract or concrete) to infer the devices each
+    op executes on.
+
+    Returns a mapping from Devices to per-rank Functions, and a set of Device
+    groups that perform collective communications in `fn`.
     """
     state = ProjectorState(fn, input_types)
 
-    devices = sorted(set(v.type.device for v in fn.inputs))
+    devices = sorted(set(typ.device for typ in input_types))
     for d in devices:
         state.per_rank_fns[d] = FunctionMaker(name=fn.name)
 
     # Project fn's inputs to each per-rank fn:
-    for v in fn.inputs:
-        state.per_rank_fns[v.type.device].inputs.append(v)
+    for v, typ in zip(fn.inputs, input_types):
+        state.per_rank_fns[typ.device].inputs.append(v)
 
-    if run_type_inference:
-        state = Projector.interpret(fn, input_types, state=state)
-    else:
-        state = PostTypeInferenceProjector.interpret(fn, input_types, state=state)
+    # First, interpret the function on input_types to get device/shape info
+    state = interpreter.interpret(fn, input_types, state)
+
+    # Then, run each op's projector function
+    for op in fn.ops:
+        # Find the op's inputs & outputs in state's environment
+        inputs = tuple(state.env[v] for v in op.inputs)
+        outputs = tuple(state.env[v] for v in op.outputs)
+
+        # Dispatch to find projector function for op
+        projector = _ProjectorRegister[op.op_type]
+        # Project op and add to appropriate per-rank function
+        projector(op, state, inputs, outputs)
+
+        # If op involves more than one device, create a group
+        devices = [v.device for v in outputs] + [v.device for v in inputs]
+        group = _make_group(devices)
+        if len(group) > 1:
+            state.groups.add(group)
 
     result_fns = {}
     for d, per_rank_fn in state.per_rank_fns.items():

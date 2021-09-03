@@ -389,11 +389,8 @@ def run_function(
         a = torch.cuda.memory_allocated(0)
         print(f"Total: {t} Reserved: {r} Allocated: {a} Free: {r-a}")
 
-    print(f"Starting execution on device {rank}...")
-    sys.stdout.flush()
-
     # Run ops
-    for op_num, op in enumerate(fn.ops):
+    for op in fn.ops:
         inputs = tuple(value_map[v] for v in op.inputs)
         kwargs = {} if op.attributes is None else {**op.attributes}
         kwargs["ctx"] = ctx

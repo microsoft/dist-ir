@@ -134,7 +134,7 @@ def mlp_inference_dp(
 
 def add_optimizer_ops(function):
     function = function.to_function_maker()
-    hp_group_pattern = "hp\_(.+?(?=\_))"
+    hp_group_pattern = r"hp\_(.+?(?=\_))"
 
     all_hp_groups = []
     for output in function.outputs:

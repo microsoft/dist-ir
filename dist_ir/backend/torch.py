@@ -8,6 +8,7 @@ import sys
 from time import perf_counter
 from traceback import print_exc
 from typing import Any, Dict, Iterable, List, NamedTuple, Sequence, Tuple
+import time
 
 import torch
 import torch.distributed as dist
@@ -177,8 +178,6 @@ def _recv(shape=None, from_d=None, group=None, dtype=None, ctx=None):
     if ctx.use_gpu:
         x = x.cuda(dist.get_rank())
         dist.broadcast(x, src_rank, group=ctx.groups[group])
-        # Communication ops are asynchronous on GPU, so wait for send
-        torch.distributed.barrier(group=ctx.groups[group])
     else:
         dist.recv(x, src_rank)
     return x
@@ -198,8 +197,6 @@ def _send(x, to_d=None, group=None, ctx=None):
     if ctx.use_gpu:
         src_rank = dist.get_rank()
         dist.broadcast(x, src_rank, group=ctx.groups[group])
-        # Communication ops are asynchronous on GPU, so wait for recv
-        torch.distributed.barrier(group=ctx.groups[group])
     else:
         dst_rank = ctx.device_to_rank[to_d]
         dist.send(x, dst_rank)
@@ -399,11 +396,12 @@ def run_function(
     inputs: List[Any],
     rank: int,
     debug_mock=False,
-    record_op_runtimes=False,
+    op_runtimes_ts: float=None,
 ):
     """Runs DistIR Function `fn` on `inputs` in a distributed context `ctx` by
     converting each DistIR op to its torch implementation as given in _op_to_torch.
     """
+    record_op_runtimes = op_runtimes_ts is not None
     op_to_torch = _mock_op_to_torch if debug_mock else _op_to_torch
     value_map = {}
 
@@ -419,12 +417,10 @@ def run_function(
         print(f"Total: {t} Reserved: {r} Allocated: {a} Free: {r-a}")
 
     if record_op_runtimes:
-        op_events = []
+        op_runtimes = []
 
     # Run ops
     for op_num, op in enumerate(fn.ops):
-        if record_op_runtimes:
-            add_event(ctx, op_events)
         inputs = tuple(value_map[v] for v in op.inputs)
         kwargs = {} if op.attributes is None else {**op.attributes}
         kwargs["ctx"] = ctx
@@ -433,7 +429,13 @@ def run_function(
         # if "MPI" in op.op_type or op.op_type == "Send":
         #     torch.cuda.synchronize()
 
+        if record_op_runtimes:
+            start = time.time()
         output = op_to_torch[op.op_type](*inputs, **kwargs)
+        if record_op_runtimes:
+            torch.cuda.synchronize(device=rank)
+            end = time.time()
+            op_runtimes.append(end - start)
 
         if len(op.outputs) > 1:
             assert isinstance(output, tuple)
@@ -448,25 +450,10 @@ def run_function(
                 del value_map[v]
 
     if record_op_runtimes:
-        add_event(ctx, op_events)
-        if ctx.use_gpu:
-            torch.cuda.synchronize()
-            runtimes = [
-                op_events[i].elapsed_time(op_events[i + 1]) / 1e3
-                for i in range(len(op_events) - 1)
-            ]
-        else:
-            runtimes = [
-                op_events[i + 1] - op_events[i] for i in range(len(op_events) - 1)
-            ]
         trace = []
-        ts = (
-            0.0
-            if len(ctx.trace[rank]) == 0
-            else ctx.trace[rank][-1]["ts"] + ctx.trace[rank][-1]["dur"]
-        )
-        assert len(fn.ops) == len(runtimes)
-        for op, runtime in zip(fn.ops, runtimes):
+        ts = op_runtimes_ts
+        assert len(fn.ops) == len(op_runtimes)
+        for op, runtime in zip(fn.ops, op_runtimes):
             trace.append(
                 {
                     "name": op.op_type,
@@ -536,8 +523,11 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
         ),
         on_trace_ready=torch.profiler.tensorboard_trace_handler(f"{fn.name}_profile"),
     ) as p:
+        op_runtimes_ts = None
         for i in range(num_warmup_steps + num_repetitions):
             record_op_runtimes = ctx.profile and i >= num_warmup_steps
+            if record_op_runtimes and op_runtimes_ts is None:
+                op_runtimes_ts = 0.0
             add_event(ctx, events)
             # TODO: Handle failures here?
             outputs = run_function(
@@ -545,7 +535,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
                 fn,
                 inputs,
                 rank,
-                record_op_runtimes=record_op_runtimes,
+                op_runtimes_ts=op_runtimes_ts,
             )
             if ctx.world_size > 1:
                 torch.distributed.barrier(group=global_group)
@@ -553,21 +543,10 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
                 add_event(ctx, events)
             p.step()
             if record_op_runtimes:
-                ts = max(
+                op_runtimes_ts = max(
                     ctx.trace[rank][-1]["ts"] + ctx.trace[rank][-1]["dur"]
                     for rank in ctx.trace.keys()
                 )
-                for rank in ctx.trace.keys():
-                    ctx.trace[rank].append(
-                        {
-                            "name": "Barrier",
-                            "ph": "X",
-                            "ts": ts,
-                            "dur": 0,
-                            "pid": 0,
-                            "tid": rank,
-                        }
-                    )
 
     if ctx.use_gpu:
         # Move outputs back to cpu

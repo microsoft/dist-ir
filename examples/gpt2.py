@@ -215,7 +215,8 @@ def _set_model_size(function, n_layer, n_head, d_embd):
                     and "value" not in orig_output.name
                 ):
                     max_output_id = max(
-                        max_output_id, int(re.match(r"(\d+)", orig_output.name).group(1))
+                        max_output_id,
+                        int(re.match(r"(\d+)", orig_output.name).group(1)),
                     )
                 value_map[orig_output] = new_output
                 producer_map[new_output] = (new_op, k)

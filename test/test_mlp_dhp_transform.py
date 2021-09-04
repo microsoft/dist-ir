@@ -1,5 +1,7 @@
 from collections import defaultdict
+import itertools
 import numpy as np
+import pytest
 import re
 
 from dist_ir.executor import infer_types, SequentialExecutor
@@ -48,15 +50,19 @@ def _verify_hp(function, transformed_function, outputs, transformed_outputs, dp=
         )
 
 
-def _test_helper(
+@pytest.mark.parametrize(
+    ("dp_degree", "hp_degree", "pp_degree"),
+    list(itertools.product([1, 2], [1, 2], [1, 2])),
+)
+def test_mlp_dhp_transform(
+    dp_degree,
+    hp_degree,
+    pp_degree,
     batch_size=BATCH_SIZE,
     num_hidden_layers=8,
     input_dim=INPUT_DIM,
-    dp_degree=1,
-    hp_degree=1,
-    pp_degree=1,
-    num_microbatches=1,
 ):
+    num_microbatches = pp_degree
     world_size = dp_degree * hp_degree * pp_degree
     topology = mlp.get_topology(world_size)
     function = mlp.mlp(
@@ -100,31 +106,3 @@ def _test_helper(
         )
     else:
         _verify_no_hp(outputs, transformed_outputs, dp_degree > 1)
-
-
-def test_dp_only():
-    _test_helper(dp_degree=2)
-
-
-def test_hp_only():
-    _test_helper(hp_degree=2)
-
-
-def test_pp_only():
-    _test_helper(pp_degree=2, num_microbatches=2)
-
-
-def test_dp_hp():
-    _test_helper(dp_degree=2, hp_degree=2)
-
-
-def test_dp_pp():
-    _test_helper(dp_degree=2, pp_degree=2, num_microbatches=2)
-
-
-def test_hp_pp():
-    _test_helper(hp_degree=2, pp_degree=2, num_microbatches=2)
-
-
-def test_dp_hp_pp():
-    _test_helper(dp_degree=2, hp_degree=2, pp_degree=2, num_microbatches=2)

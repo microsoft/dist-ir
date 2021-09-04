@@ -714,6 +714,8 @@ NumPyRegister = {
     ("Reshape", (np.ndarray, np.ndarray)): reshape,
     ("Select", (tuple,)): select,
     ("Select", (np.ndarray,)): select,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(4))): sgd,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(8))): sgd,
     ("SGDOptimizer", tuple(np.ndarray for i in range(16))): sgd,
     ("SGDOptimizer", tuple(np.ndarray for i in range(32))): sgd,
     ("SGDOptimizer", tuple(np.ndarray for i in range(64))): sgd,

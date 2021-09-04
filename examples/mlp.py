@@ -152,11 +152,12 @@ def add_optimizer_ops(function):
             continue
         w = inp
         name = w.name.split("_")[0]
-        match = re.search("dp_(\d+)", w.name)
+        match = re.search(r"dp_(\d+)", w.name)
         dp = int(match.group(1)) if match is not None else 0
-        match = re.search("hp_(\d+)", w.name)
+        match = re.search(r"hp_(\d+)", w.name)
         hp = int(match.group(1)) if match is not None else 0
-        weight_map[(dp, hp)][name] = w
+        pp = w.type.device.device_id
+        weight_map[(dp, hp, pp)][name] = w
 
     gradient_map = defaultdict(lambda: {})
     for output in function.outputs:
@@ -171,12 +172,10 @@ def add_optimizer_ops(function):
             hp = all_hp_groups.index(hp_group)
         else:
             hp = 0
-        gradient_map[(dp, hp)][name] = dw
+        pp = dw.type.device.device_id
+        gradient_map[(dp, hp, pp)][name] = dw
 
     if sorted(weight_map.keys()) != sorted(gradient_map.keys()):
-        import pdb
-
-        pdb.set_trace()
         raise ValueError(f"Devices do not match for weights and gradients")
 
     for device in weight_map:

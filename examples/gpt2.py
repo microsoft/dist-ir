@@ -184,7 +184,7 @@ def _set_model_size(function, n_layer, n_head, d_embd):
     for i in range(min(n_layer, len(blocks))):
         cur_block = []
         for k, op in enumerate(blocks[i]):
-            max_op_id = max(max_op_id, int(re.match(".*_(\d+)", op.name).group(1)))
+            max_op_id = max(max_op_id, int(re.match(r".*_(\d+)", op.name).group(1)))
             inputs = tuple(value_map[inp] for inp in op.inputs)
             if op.op_type == "Split" or op.op_type == "Constant":
                 attributes = update_attributes(
@@ -215,7 +215,7 @@ def _set_model_size(function, n_layer, n_head, d_embd):
                     and "value" not in orig_output.name
                 ):
                     max_output_id = max(
-                        max_output_id, int(re.match("(\d+)", orig_output.name).group(1))
+                        max_output_id, int(re.match(r"(\d+)", orig_output.name).group(1))
                     )
                 value_map[orig_output] = new_output
                 producer_map[new_output] = (new_op, k)
@@ -232,7 +232,7 @@ def _set_model_size(function, n_layer, n_head, d_embd):
             for inp in op.inputs:
                 if inp in transformed_function.inputs:
                     if "weight" in inp.name or "bias" in inp.name:
-                        block_id = re.search("h\.(\d+)\.", inp.name).group(1)
+                        block_id = re.search(r"h\.(\d+)\.", inp.name).group(1)
                         new_name = inp.name.replace(block_id, str(j))
                         inputs.append(
                             transformed_function.add_input_value(new_name, inp.type)
@@ -434,10 +434,10 @@ def resize_function_and_input_data(function, input_data, n_layer, n_head, d_embd
     if len(input_data) < len(function.inputs) - 1:
         extra_weight_map = {}
         for i, inp in enumerate(function.inputs[1 : 1 + len(input_data)]):
-            base_input_name = re.sub("h\.(\d+)", "", inp.name)
+            base_input_name = re.sub(r"h\.(\d+)", "", inp.name)
             extra_weight_map[base_input_name] = input_data[i]
         input_data += [
-            extra_weight_map[re.sub("h\.(\d+)", "", inp.name)]
+            extra_weight_map[re.sub(r"h\.(\d+)", "", inp.name)]
             for inp in function.inputs[1 + len(input_data) :]
         ]
     return function, input_data

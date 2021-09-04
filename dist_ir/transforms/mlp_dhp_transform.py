@@ -1,4 +1,5 @@
-from collections import defaultdict, Hashable
+from collections import defaultdict
+from collections.abc import Hashable
 from frozendict import frozendict
 from itertools import chain
 import math
@@ -613,7 +614,7 @@ def mlp_dhp_transform(
                                 mb_k_output = intermediate_value_map[j][k][
                                     microbatch_id
                                 ][output]
-                                match = re.search("hp\_(.*)\_pp", mb_k_output.name)
+                                match = re.search(r"hp\_(.*)\_pp", mb_k_output.name)
                                 hp_level = match.group(1)
                                 if microbatch_id == 0:
                                     # We clone the output from the first microbatch to create
@@ -643,7 +644,7 @@ def mlp_dhp_transform(
                                     ]
                                     assert (
                                         re.search(
-                                            "hp\_(.*)\_pp", mb_all_output.name
+                                            r"hp\_(.*)\_pp", mb_all_output.name
                                         ).group(1)
                                         == hp_level
                                     )

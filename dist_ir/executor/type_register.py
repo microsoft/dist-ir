@@ -711,6 +711,8 @@ TypePropRegister = {
     ("ReluGrad", (Tensor, Tensor)): _relu_grad_prop_fn,
     ("Select", (TupleType,)): _select_prop_fn,
     ("Send", (Tensor,)): _send_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(4)))): _sgd_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(8)))): _sgd_prop_fn,
     ("SGDOptimizer", (tuple(Tensor for i in range(16)))): _sgd_prop_fn,
     ("SGDOptimizer", (tuple(Tensor for i in range(32)))): _sgd_prop_fn,
     ("SGDOptimizer", (tuple(Tensor for i in range(64)))): _sgd_prop_fn,

@@ -126,6 +126,8 @@ class CostModel:
             ("Select", (TupleType,)): self._select_cost_fn,
             ("Send", (Tensor,)): self._send_cost_fn,
             ("Send", (type(Int64()),)): lambda op, x: {},
+            ("SGDOptimizer", tuple(Tensor for i in range(4))): self._sgd_cost_fn,
+            ("SGDOptimizer", tuple(Tensor for i in range(8))): self._sgd_cost_fn,
             ("SGDOptimizer", tuple(Tensor for i in range(16))): self._sgd_cost_fn,
             ("SGDOptimizer", tuple(Tensor for i in range(32))): self._sgd_cost_fn,
             ("SGDOptimizer", tuple(Tensor for i in range(64))): self._sgd_cost_fn,

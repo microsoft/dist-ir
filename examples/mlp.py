@@ -228,8 +228,24 @@ def get_stats(function):
 
 def simulate(function, input_types, topology):
     simulator = Simulator(CostModel(topology))
-    simulation = simulator.interpret(function, input_types)
+    simulation = simulator.simulate(function, input_types)
     return simulation
+
+
+def run_pytorch(function, input_data, world_size, use_gpu=True):
+    if use_gpu and world_size > torch.cuda.device_count():
+        raise ValueError(
+            f"Specified world size is {world_size}, but only "
+            f"{torch.cuda.device_count()} GPUs available"
+        )
+    per_rank_outputs, runtimes = torch_backend.run_pytorch(
+        function,
+        input_data,
+        use_gpu=use_gpu,
+        num_warmup=5,
+        num_repetitions=10,
+    )
+    return per_rank_outputs, runtimes
 
 
 def main(args):

@@ -207,7 +207,6 @@ class GridSearch(ABC):
             num_microbatches,
             lock,
         ) = config
-        n_layer, n_head, d_embd = self.model_params[model_size]
         # TODO: Only do this for GPT
         if hp_degree > 1:
             input_data = copy.deepcopy(input_data)

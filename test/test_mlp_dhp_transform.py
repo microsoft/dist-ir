@@ -9,6 +9,7 @@ from dist_ir.transforms import mlp_dhp_transform
 from examples import mlp
 from dist_ir.executor import infer_types, SequentialExecutor, ConcreteValue
 from dist_ir.transforms import mlp_dhp_transform
+from dist_ir.ir import get_uniform_topology
 
 BATCH_SIZE = 64
 INPUT_DIM = 64
@@ -64,7 +65,7 @@ def test_mlp_dhp_transform(
 ):
     num_microbatches = pp_degree
     world_size = dp_degree * hp_degree * pp_degree
-    topology = mlp.get_topology(world_size)
+    topology = get_uniform_topology(world_size)
     function = mlp.mlp(
         batch_size,
         input_dim,

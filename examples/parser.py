@@ -57,7 +57,25 @@ class Parser(ArgumentParser):
             help="Use GPU with PyTorch backend",
         )
 
-    def add_grid_search_output_config_arguments(self):
+    def add_grid_search_config_arguments(self, defaults):
+        self.add_argument(
+            "--all_world_sizes",
+            nargs="+",
+            type=int,
+            default=defaults["all_world_sizes"],
+        )
+        self.add_argument(
+            "--all_batch_sizes",
+            nargs="+",
+            type=int,
+            default=defaults["all_batch_sizes"],
+        )
+        self.add_argument(
+            "--all_model_sizes",
+            nargs="+",
+            type=str,
+            default=defaults["all_model_sizes"],
+        )
         self.add_argument(
             "--output_file",
             type=str,

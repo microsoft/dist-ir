@@ -190,7 +190,7 @@ class GridSearch(ABC):
         pass
 
     @abstractmethod
-    def pytorch(transformed_fn, input_data, topology):
+    def pytorch(transformed_fn, input_data, world_size):
         pass
 
     def run(self, config):
@@ -230,7 +230,7 @@ class GridSearch(ABC):
                 ) / (2.0 ** 20)
             elif self.backend == "pytorch":
                 world_size = len(topology.devices) - 1
-                per_rank_outputs, runtimes = self.pytorch_fn(
+                per_rank_outputs, runtimes = self.pytorch(
                     transformed_fn, input_data, world_size
                 )
                 latency = np.median(runtimes[-1])
@@ -266,4 +266,9 @@ class GridSearch(ABC):
         with open(self.output_file, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
             writer.writeheader()
-        process_map(self.run, configs)
+        if self.backend == "pytorch":
+            process_map(self.run, configs, max_workers=1)
+        elif self.backend == "simulate":
+            process_map(self.run, configs)
+        else:
+            raise ValueError(f"Invalid backend {backend}")

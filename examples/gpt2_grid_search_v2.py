@@ -107,17 +107,17 @@ class GPTGridSearch(GridSearch):
             use_real_weights=(self.backend == "pytorch"),
         )
 
-    def simulate(transformed_fn, input_data, topology):
+    def simulate(self, transformed_fn, input_data, topology):
         return gpt2.simulate(transformed_fn, input_data, topology)
 
-    def pytorch(transformed_fn, input_data, topology):
+    def pytorch(self, transformed_fn, input_data, topology):
         world_size = len(topology.devices) - 1
         return gpt2.run_pytorch(transformed_fn, input_data, world_size)
 
 
 def main(args):
     # TODO: Make these configurable
-    all_world_sizes = [1, 2, 4]
+    all_world_sizes = [4, 8, 16]
     all_batch_sizes = [64, 256]
     all_model_sizes = [
         "gpt3",

@@ -130,7 +130,7 @@ def _simulate_op(
 
     # Update the live memory to reflect any freed activations.
     live_memory_deltas = defaultdict(lambda: 0)
-    for in_edge in op.inputs:
+    for inp, in_edge in zip(inputs, op.inputs):
         # We don't free live memory for function inputs as these could be for weights
         # or input data buffers that are active for the entire duration of execution.
         if in_edge in state._function_inputs_set:
@@ -142,10 +142,9 @@ def _simulate_op(
             )
         state.consumers[in_edge] -= 1
         if state.consumers[in_edge] == 0:
-            if in_edge.type is not None:
-                input_devices = in_edge.type.get_all_devices()
-                for input_device in input_devices:
-                    live_memory_deltas[input_device] -= in_edge.type.size()
+            input_devices = _get_all_devices([inp])
+            for input_device in input_devices:
+                live_memory_deltas[input_device] -= inp.size()
     state.update_live_memory(live_memory_deltas)
 
 

@@ -412,7 +412,7 @@ def check_params(
             "Embedding dimension must be divisible by number of attention heads"
         )
     elif hp_degree > n_head:
-        raise ValueError("# of attention heads must be > horizontal parallel degree")
+        raise ValueError("# of attention heads must be >= horizontal parallel degree")
 
 
 def update_attributes(

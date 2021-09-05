@@ -216,14 +216,14 @@ class GridSearch(ABC):
                 fn,
                 input_data,
                 topology,
-                hp_degree,
+                dp_degree,
                 hp_degree,
                 pp_degree,
                 num_microbatches,
                 model_size,
             )
             if self.backend == "simulate":
-                simulation = self.simulate_fn(transformed_fn, input_data, topology)
+                simulation = self.simulate(transformed_fn, input_data, topology)
                 latency = max([simulation.timestamps[d] for d in simulation.timestamps])
                 peak_memory = max(
                     [simulation.peak_memory[d] for d in simulation.peak_memory]
@@ -243,11 +243,12 @@ class GridSearch(ABC):
                 f"hp_degree={hp_degree}, pp_degree={pp_degree}, "
                 f"num_microbatches={num_microbatches}: {e}"
             )
+
             latency = -1
             peak_memory = -1
         self._write_row(config, latency, peak_memory)
 
-    def grid_search(self, all_batch_sizes, all_world_sizes, all_model_sizes):
+    def grid_search(self, all_world_sizes, all_batch_sizes, all_model_sizes):
         topology = get_uniform_topology(
             max(all_world_sizes),
             self.device_throughput,

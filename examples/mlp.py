@@ -3,10 +3,11 @@ from collections import defaultdict
 import numpy as np
 import re
 
-from dist_ir.ir import FunctionMaker, Topology
+from dist_ir.ir import FunctionMaker, Topology, get_uniform_topology
 from dist_ir.ir.type import Float32, Tensor
 from dist_ir.executor import CostModel, Simulator, infer_types
 from dist_ir.transforms import mlp_dhp_transform
+from .parser import Parser
 
 
 def mlp(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, device):
@@ -225,28 +226,6 @@ def get_stats(function):
     return parameter_count, model_size, parameter_count_str, model_size_str
 
 
-# TODO: De-duplicate this function with examples/gpt2.py
-def get_topology(
-    world_size, device_throughput=1.4e13, dram_bandwidth=9e11, network_bandwidth=64
-):
-    topology = Topology()
-    d0 = topology.add_device("gpu")
-    for i in range(1, world_size + 1):
-        topology.add_device(
-            "gpu", throughput=device_throughput, dram_bandwidth=dram_bandwidth
-        )
-        for j in range(0, i):
-            if j == 0:
-                topology.set_bandwidth(
-                    topology.devices[i], topology.devices[j], network_bandwidth
-                )
-            else:
-                topology.set_bandwidth(
-                    topology.devices[i], topology.devices[j], network_bandwidth
-                )
-    return topology
-
-
 def simulate(function, input_types, topology):
     simulator = Simulator(CostModel(topology))
     simulation = simulator.interpret(function, input_types)
@@ -255,7 +234,7 @@ def simulate(function, input_types, topology):
 
 def main(args):
     world_size = args.dp_degree * args.hp_degree * args.pp_degree
-    topology = get_topology(
+    topology = get_uniform_topology(
         world_size, args.device_throughput, args.dram_bandwidth, args.network_bandwidth
     )
 
@@ -310,7 +289,12 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="MLP training and inference")
+    parser = Parser(description="MLP training and inference")
+    parser.add_parallelism_config_arguments()
+    parser.add_simulation_topology_config_arguments()
+    parser.add_execution_mode_config_arguments()
+    parser.add_backend_config_arguments()
+    parser.add_simulation_output_config_arguments()
     parser.add_argument("--batch_size", type=int, default=256, help="Batch size")
     parser.add_argument("--input_dim", type=int, default=256, help="Input dim")
     parser.add_argument("--hidden_dim", type=int, default=256, help="Hidden dim")
@@ -318,33 +302,5 @@ if __name__ == "__main__":
     parser.add_argument(
         "--num_hidden_layers", type=int, default=16, help="# hidden layers"
     )
-    parser.add_argument(
-        "-d", "--dp_degree", type=int, default=1, help="Data parallel degree"
-    )
-    parser.add_argument(
-        "-t", "--hp_degree", type=int, default=1, help="Horizontal parallel degree"
-    )
-    parser.add_argument(
-        "-p", "--pp_degree", type=int, default=1, help="Pipeline parallel degree"
-    )
-    parser.add_argument(
-        "-k", "--num_microbatches", type=int, default=1, help="# of microbatches"
-    )
-    parser.add_argument(
-        "--network_bandwidth", type=float, default=64, help="Network bandwidth in Gbps"
-    )
-    parser.add_argument(
-        "--device_throughput", type=float, default=1.4e13, help="Device throughput"
-    )
-    parser.add_argument(
-        "--dram_bandwidth", type=float, default=9e11, help="DRAM Bandwidth"
-    )
-    parser.add_argument(
-        "--mode",
-        choices=["training", "inference"],
-        default="training",
-        help="Execution mode",
-    )
-    parser.add_argument("--trace_file", type=str, default=None, help="Trace file")
     args = parser.parse_args()
     main(args)

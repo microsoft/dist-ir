@@ -15,7 +15,15 @@ from dist_ir.executor import (
     ConcreteValue,
 )
 from dist_ir.importer import import_from_onnx
-from dist_ir.ir import cpprint, Device, FunctionMaker, Op, Topology, Value
+from dist_ir.ir import (
+    cpprint,
+    Device,
+    FunctionMaker,
+    Op,
+    Topology,
+    Value,
+    get_uniform_topology,
+)
 from dist_ir.ir.type import Int64, Float32, Tensor, Type, abstract_values
 from dist_ir.transforms import (
     gpt2_dhp_transform,
@@ -346,26 +354,6 @@ def _get_stats(function):
     return parameter_count, model_size, parameter_count_str, model_size_str
 
 
-# TODO: Move this to dist_ir/ir/topology (perhaps as uniform_topology)
-def get_topology(world_size, device_throughput, dram_bandwidth, network_bandwidth):
-    topology = Topology()
-    d0 = topology.add_device("gpu")
-    for i in range(1, world_size + 1):
-        topology.add_device(
-            "gpu", throughput=device_throughput, dram_bandwidth=dram_bandwidth
-        )
-        for j in range(0, i):
-            if j == 0:
-                topology.set_bandwidth(
-                    topology.devices[i], topology.devices[j], network_bandwidth
-                )
-            else:
-                topology.set_bandwidth(
-                    topology.devices[i], topology.devices[j], network_bandwidth
-                )
-    return topology
-
-
 def import_function_and_get_input_data(
     model_path,
     default_device,
@@ -529,7 +517,7 @@ def get_transformed_function_and_input_data(
     print_stats=False,
 ):
     world_size = dp_degree * hp_degree * pp_degree
-    topology = get_topology(
+    topology = get_uniform_topology(
         world_size, device_throughput, dram_bandwidth, network_bandwidth
     )
 
@@ -680,7 +668,11 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="GPT-2 Inference")
+    parser = Parser("GPT2 Inference")
+    parser.add_parallelism_config_arguments()
+    parser.add_simulation_topology_config_arguments()
+    parser.add_backend_config_arguments()
+    parser.add_execution_mode_config_arguments()
     parser.add_argument(
         "--model_path",
         type=str,
@@ -688,19 +680,6 @@ if __name__ == "__main__":
         help="Path to GPT-2 ONNX model "
         "(downloaded from https://github.com/onnx/models/blob/master/"
         "text/machine_comprehension/gpt-2/model/gpt2-10.onnx?raw=true)",
-    )
-    parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
-    parser.add_argument(
-        "-d", "--dp_degree", type=int, default=1, help="Data parallel degree"
-    )
-    parser.add_argument(
-        "-t", "--hp_degree", type=int, default=1, help="Horizontal parallel degree"
-    )
-    parser.add_argument(
-        "-p", "--pp_degree", type=int, default=1, help="Pipeline parallel degree"
-    )
-    parser.add_argument(
-        "-k", "--num_microbatches", type=int, default=1, help="Num microbatches"
     )
     parser.add_argument("--n_layer", type=int, default=12, help="Num hidden layers")
     parser.add_argument(
@@ -711,38 +690,10 @@ if __name__ == "__main__":
     )
     parser.add_argument("--d_embd", type=int, default=768, help="Embedding dimension")
     parser.add_argument(
-        "--backend",
-        choices=["simulate", "pytorch"],
-        default="simulate",
-        help="Operation to run",
-    )
-    parser.add_argument(
-        "--use-gpu",
-        action="store_true",
-        default=False,
-        help="Use GPU with PyTorch backend",
-    )
-    parser.add_argument(
         "--use_real_weights",
         action="store_true",
         default=False,
         help="Use real weights",
-    )
-    parser.add_argument(
-        "--network_bandwidth", type=float, default=64, help="Network bandwidth in Gbps"
-    )
-    parser.add_argument(
-        "--device_throughput", type=float, default=1.4e13, help="Device throughput"
-    )
-    parser.add_argument(
-        "--dram_bandwidth", type=float, default=9e11, help="DRAM Bandwidth"
-    )
-    parser.add_argument("--trace_file", type=str, default=None, help="Trace file")
-    parser.add_argument(
-        "--debug_stacktrace",
-        default=False,
-        action="store_true",
-        help="Debug stacktrace",
     )
     args = parser.parse_args()
     main(args)

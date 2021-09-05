@@ -34,3 +34,29 @@ class Topology:
         elif device_b not in self._bandwidths[device_a]:
             raise ValueError(f"Bandwidth between {device_a} and {device_b} unknown")
         return self._bandwidths[device_a][device_b]
+
+
+def get_uniform_topology(
+    world_size,
+    device_throughput=1.4e13,
+    dram_bandwidth=9e11,
+    kernel_launch_overhead=1e-5,
+    network_bandwidth=64,
+):
+    # TODO: Add kernel launch overhead to Device definition
+    topology = Topology()
+    d0 = topology.add_device("gpu")
+    for i in range(1, world_size + 1):
+        topology.add_device(
+            "gpu", throughput=device_throughput, dram_bandwidth=dram_bandwidth
+        )
+        for j in range(0, i):
+            if j == 0:
+                topology.set_bandwidth(
+                    topology.devices[i], topology.devices[j], network_bandwidth
+                )
+            else:
+                topology.set_bandwidth(
+                    topology.devices[i], topology.devices[j], network_bandwidth
+                )
+    return topology

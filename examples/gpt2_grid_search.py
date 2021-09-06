@@ -64,7 +64,7 @@ class GPTGridSearch(GridSearch):
             )
         self.all_input_ids = gpt2.create_input_ids(max(all_batch_sizes))
 
-    def select_model_and_input_data(self, batch_size, model_size):
+    def get_model_and_input_data(self, batch_size, model_size):
         model, input_data = self.models_and_input_data[model_size]
         input_ids = self.all_input_ids[:batch_size]
         input_data = [input_ids] + input_data

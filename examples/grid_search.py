@@ -46,8 +46,6 @@ class GridSearch(ABC):
 
     def _write_row(self, config, latency, peak_memory):
         (
-            fn,
-            input_data,
             topology,
             world_size,
             batch_size,
@@ -114,7 +112,6 @@ class GridSearch(ABC):
             batch_size,
             model_size,
         ) in itertools.product(all_world_sizes, all_batch_sizes, all_model_sizes):
-            fn, input_data = self.select_model_and_input_data(batch_size, model_size)
             all_degrees = GridSearch.get_all_degrees(world_size)
             for (dp_degree, hp_degree, pp_degree) in all_degrees:
                 dp_batch_size = batch_size // dp_degree
@@ -147,8 +144,6 @@ class GridSearch(ABC):
                         continue
 
                     yield (
-                        fn,
-                        input_data,
                         topology,
                         world_size,
                         batch_size,
@@ -168,7 +163,7 @@ class GridSearch(ABC):
         pass
 
     @abstractmethod
-    def select_model_and_input_data(self, model_size):
+    def get_model_and_input_data(self, model_size, batch_size):
         pass
 
     @abstractmethod
@@ -201,8 +196,6 @@ class GridSearch(ABC):
 
     def run(self, config):
         (
-            fn,
-            input_data,
             topology,
             world_size,
             batch_size,
@@ -213,9 +206,7 @@ class GridSearch(ABC):
             num_microbatches,
             lock,
         ) = config
-        # TODO: Only do this for GPT
-        if hp_degree > 1:
-            input_data = copy.deepcopy(input_data)
+        fn, input_data = self.get_model_and_input_data(batch_size, model_size)
         try:
             init_fn, transformed_fn, input_data = self.transform(
                 fn,

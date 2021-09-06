@@ -2,6 +2,8 @@ from itertools import product
 import numpy as np
 import argparse
 
+from dist_ir.ir import Value
+from dist_ir.ir.type import Tensor
 from dist_ir.executor import infer_types, SequentialExecutor, ConcreteValue
 from dist_ir.transforms import mlp_dhp_transform
 from . import mlp
@@ -45,34 +47,36 @@ class MLPGridSearch(GridSearch):
         max_dim = max(
             self.model_params[model_size][1] for model_size in all_model_sizes
         )
-        if self.backend == "pytorch":
-            all_input_data = mlp.get_input_data(
-                max_batch_size,
-                max_dim,
-                max_num_layers,
-            )
-        self.models_and_input_data = {}
-        for batch_size, model_size in product(all_batch_sizes, all_model_sizes):
+        self.models = {}
+        for model_size in all_model_sizes:
             num_layers, dim = self.model_params[model_size]
-            fn = mlp.mlp(batch_size, dim, dim, dim, num_layers, topology.devices[0])
-            if self.backend == "pytorch":
-                input_data = [
-                    ConcreteValue(
-                        all_input_data[0][:batch_size][:dim], topology.devices[0]
-                    ),
-                    ConcreteValue(
-                        all_input_data[1][:batch_size][:dim], topology.devices[0]
-                    ),
-                ] + [
-                    ConcreteValue(all_input_data[i][:dim, :dim], topology.devices[0])
-                    for i in range(2, len(all_input_data))
-                ]
-            else:
-                input_data = fn.inputs
-            self.models_and_input_data[(batch_size, model_size)] = (fn, input_data)
+            self.models[model_size] = mlp.mlp(
+                max_batch_size, dim, dim, dim, num_layers, topology.devices[0]
+            )
 
-    def select_model_and_input_data(self, batch_size, model_size):
-        return self.models_and_input_data[(batch_size, model_size)]
+    def get_model_and_input_data(self, batch_size, model_size):
+        fn = self.models[model_size]
+        num_layers, dim = self.model_params[model_size]
+        if self.backend == "pytorch":
+            input_data = mlp.get_input_data(batch_size, dim, num_layers)
+            input_data = tuple(
+                ConcreteValue(input_data[i], fn.inputs[i].type.device)
+                for i in range(len(input_data))
+            )
+        else:
+            input_data = list(fn.inputs)
+            # Update x and z to use the selected batch size
+            for i in range(2):
+                input_data[i] = Value(
+                    fn.inputs[i].name,
+                    Tensor(
+                        shape=(batch_size, dim),
+                        dtype=input_data[i].type.dtype,
+                        device=input_data[i].type.device,
+                    ),
+                )
+            input_data = tuple(input_data)
+        return fn, input_data
 
     def verify_config(
         self, batch_size, dp_degree, hp_degree, pp_degree, num_microbatches, model_size

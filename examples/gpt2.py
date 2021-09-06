@@ -9,14 +9,14 @@ import torch
 import dist_ir.backend.torch as torch_backend
 from dist_ir.executor import (
     CostModel,
-    infer_types,
-    PostTypeInferenceSimulator,
     Simulator,
     SequentialExecutor,
+    infer_types,
+    ConcreteValue,
 )
 from dist_ir.importer import import_from_onnx
 from dist_ir.ir import cpprint, Device, FunctionMaker, Op, Topology, Value
-from dist_ir.ir.type import Float32, Tensor
+from dist_ir.ir.type import Int64, Float32, Tensor, Type, abstract_values
 from dist_ir.transforms import (
     gpt2_dhp_transform,
     sanitize_unhashable_attributes,
@@ -379,7 +379,7 @@ def import_function_and_get_input_data(
 
     if not use_real_weights:
         for inp in input_data_map:
-            if "weight" in inp.name or "bias" in inp.name:
+            if "input" in inp.name or "weight" in inp.name or "bias" in inp.name:
                 input_data_map[inp] = inp.type
 
     function = _filter_extra_outputs(function)
@@ -501,17 +501,13 @@ def transform(
         n_head,
     )
     ex = SequentialExecutor("numpy")
-    init_function = ex.infer_types(
-        init_function,
-        input_data,
-        input_devices=[topology.devices[0] for _ in range(len(input_data))],
-    )
-    initialized_input_data = ex.compute(init_function, input_data)
-    transformed_function = ex.infer_types(
-        transformed_function,
-        initialized_input_data,
-        [output.type.device for output in init_function.outputs],
-    )
+    wrapped_input_data = []
+    for v in input_data:
+        if isinstance(v, Type):
+            wrapped_input_data.append(v)
+        else:
+            wrapped_input_data.append(ConcreteValue(v, topology.devices[0]))
+    initialized_input_data = ex.compute(init_function, wrapped_input_data)
     return init_function, transformed_function, initialized_input_data
 
 
@@ -550,12 +546,6 @@ def get_transformed_function_and_input_data(
     input_data = [input_ids] + input_data
 
     if print_stats:
-        ex = SequentialExecutor("numpy")
-        function = ex.infer_types(
-            function,
-            input_data,
-            input_devices=[topology.devices[0] for _ in range(len(input_data))],
-        )
         parameter_count, model_size, parameter_count_str, model_size_str = _get_stats(
             function
         )
@@ -579,14 +569,36 @@ def get_transformed_function_and_input_data(
 
 
 def simulate(function, input_data, topology):
-    input_types = (v.type for v in function.inputs)
-    simulator = PostTypeInferenceSimulator(CostModel(topology))
-    simulation = simulator.interpret(function, input_types)
+    simulator = Simulator(CostModel(topology))
+    simulation = simulator.simulate(function, input_data)
     return simulation
 
 
 def run_pytorch(function, input_data, world_size, use_gpu=True):
-    pytorch_input_data = [torch.tensor(x) for x in input_data]
+    # TODO: Move this to a utils file
+    def _resolve_dtype(dtype):
+        if dtype == np.int32:
+            return torch.int32
+        elif dtype == np.int64:
+            return torch.int64
+        elif dtype == np.float32:
+            return torch.float32
+        else:
+            raise NotImplementedError(dtype)
+
+    is_input_or_weight = lambda x: "input" in x or "weight" in x or "bias" in x
+
+    input_types = abstract_values(
+        input_data,
+        tuple(
+            Tensor if is_input_or_weight(function.inputs[i].name) else ConcreteValue
+            for i in range(len(input_data))
+        ),
+    )
+    pytorch_input_data = [
+        torch.tensor(x.val, dtype=_resolve_dtype(x.val.dtype)) for x in input_data
+    ]
+
     if use_gpu and world_size > torch.cuda.device_count():
         raise ValueError(
             f"Specified world size is {world_size}, but only "
@@ -595,8 +607,10 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
     per_rank_outputs, runtimes = torch_backend.run_pytorch(
         function,
         pytorch_input_data,
+        input_types=input_types,
         use_gpu=use_gpu,
-        run_type_inference=False,
+        num_warmup=5,
+        num_repetitions=10,
     )
     return per_rank_outputs, runtimes
 
@@ -611,6 +625,9 @@ def main(args):
         args.n_head,
         args.d_embd,
     )
+
+    if args.backend == "pytorch":
+        args.use_real_weights = True
 
     (
         transformed_function,

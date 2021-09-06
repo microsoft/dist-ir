@@ -15,16 +15,8 @@ from dist_ir.executor import (
     ConcreteValue,
 )
 from dist_ir.importer import import_from_onnx
-from dist_ir.ir import (
-    cpprint,
-    Device,
-    FunctionMaker,
-    Op,
-    Topology,
-    Value,
-    get_uniform_topology,
-)
-from dist_ir.ir.type import Int64, Float32, Tensor, Type, abstract_values
+from dist_ir.ir import FunctionMaker, Op, get_uniform_topology
+from dist_ir.ir.type import Tensor, Type, abstract_values
 from dist_ir.transforms import (
     gpt2_dhp_transform,
     sanitize_unhashable_attributes,

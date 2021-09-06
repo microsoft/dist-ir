@@ -4,12 +4,10 @@ import numpy as np
 import pytest
 import re
 
-from dist_ir.executor import infer_types, SequentialExecutor
-from dist_ir.transforms import mlp_dhp_transform
 from examples import mlp
 from dist_ir.executor import infer_types, SequentialExecutor, ConcreteValue
-from dist_ir.transforms import mlp_dhp_transform
 from dist_ir.ir import get_uniform_topology
+from dist_ir.transforms import mlp_dhp_transform
 
 BATCH_SIZE = 64
 INPUT_DIM = 64
@@ -97,8 +95,13 @@ def test_mlp_dhp_transform(
     outputs = ex.compute(function, input_data)
     dist_input_data = ex.compute(init_function, input_data)
     transformed_outputs = ex.compute(transformed_function, dist_input_data)
-    # TODO verify outputs are on expected devices
+
     outputs = [v.val for v in outputs]
+    # Verify that transformed_outputs are on expected devices
+    assert all(
+        o.type.device == v.device
+        for o, v in zip(transformed_function.outputs, transformed_outputs)
+    )
     transformed_outputs = [v.val for v in transformed_outputs]
 
     if hp_degree > 1:

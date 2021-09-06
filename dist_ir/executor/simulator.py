@@ -51,6 +51,20 @@ class SimulatorState(AbstractState):
         for device in self.peak_memory:
             self.live_memory[device][0] = (0, self.peak_memory[device])
 
+    def get_latency(self):
+        return max([self.timestamps[d] for d in self.timestamps])
+
+    def get_throughput(self, batch_size):
+        return batch_size / self.get_latency()
+
+    def get_peak_memory(self):
+        return max([self.peak_memory[d] for d in self.peak_memory])
+
+    def print_summary(self, batch_size):
+        print(f"Latency: {self.get_latency()} seconds")
+        print(f"Throughput: {self.get_throughput(batch_size):.2f} samples / second")
+        print(f"Peak memory: {self.get_peak_memory() / 1e9:.2f} GB")
+
     def add_trace_event(self, op_type, device, start_time, duration):
         if device is None:
             raise ValueError(f"No device specified for {op_type} op trace event")

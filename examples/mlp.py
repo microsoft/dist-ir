@@ -2,12 +2,26 @@ import argparse
 from collections import defaultdict
 import numpy as np
 import re
+import torch
 
 from dist_ir.ir import FunctionMaker, Topology, get_uniform_topology
-from dist_ir.ir.type import Float32, Tensor
+from dist_ir.ir.type import Float32, Tensor, abstract_values
 from dist_ir.executor import CostModel, Simulator, infer_types
 from dist_ir.transforms import mlp_dhp_transform
 from .parser import Parser
+import dist_ir.backend.torch as torch_backend
+
+
+def get_input_data(batch_size, dim, num_layers):
+    x = np.random.normal(size=(batch_size, dim))
+    z = np.random.normal(size=(batch_size, dim))
+    weights = [np.random.normal(size=(dim, dim))]
+    for i in range(1, num_layers - 1):
+        weights.append(np.random.normal(size=(dim, dim)))
+    weights.append(np.random.normal(size=(dim, dim)))
+    input_data = [x, z] + weights
+    input_data = [v.astype(np.float32) for v in input_data]
+    return input_data
 
 
 def mlp(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, device):
@@ -238,9 +252,14 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
             f"Specified world size is {world_size}, but only "
             f"{torch.cuda.device_count()} GPUs available"
         )
+    input_types = abstract_values(
+        input_data, tuple(Tensor for i in range(len(input_data)))
+    )
+    pytorch_input_data = [torch.tensor(x.val, dtype=torch.float32) for x in input_data]
     per_rank_outputs, runtimes = torch_backend.run_pytorch(
         function,
-        input_data,
+        pytorch_input_data,
+        input_types=input_types,
         use_gpu=use_gpu,
         num_warmup=5,
         num_repetitions=10,
@@ -248,60 +267,113 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
     return per_rank_outputs, runtimes
 
 
-def main(args):
-    world_size = args.dp_degree * args.hp_degree * args.pp_degree
+def run_mlp(
+    mode,
+    backend,
+    use_gpu,
+    batch_size,
+    input_dim,
+    hidden_dim,
+    output_dim,
+    num_hidden_layers,
+    dp_degree,
+    hp_degree,
+    pp_degree,
+    num_microbatches,
+    device_throughput,
+    dram_bandwidth,
+    kernel_launch_overhead,
+    network_bandwidth,
+    trace_file,
+    verbose=False,
+):
+    world_size = dp_degree * hp_degree * pp_degree
     topology = get_uniform_topology(
-        world_size, args.device_throughput, args.dram_bandwidth, args.network_bandwidth
+        world_size,
+        device_throughput,
+        dram_bandwidth,
+        kernel_launch_overhead,
+        network_bandwidth,
     )
 
-    if args.mode == "training":
-        function = mlp(
-            args.batch_size,
-            args.input_dim,
-            args.hidden_dim,
-            args.output_dim,
-            args.num_hidden_layers,
+    if mode == "training":
+        fn = mlp(
+            batch_size,
+            input_dim,
+            hidden_dim,
+            output_dim,
+            num_hidden_layers,
             topology.devices[0],
         )
-    elif args.mode == "inference":
-        function = mlp_inference(
-            args.batch_size,
-            args.input_dim,
-            args.hidden_dim,
-            args.output_dim,
-            args.num_hidden_layers,
+    elif mode == "inference":
+        fn = mlp_inference(
+            batch_size,
+            input_dim,
+            hidden_dim,
+            output_dim,
+            num_hidden_layers,
             topology.devices[0],
         )
 
-    parameter_count, model_size, parameter_count_str, model_size_str = get_stats(
-        function
-    )
-    print("Parameter count:", parameter_count_str)
-    print("Model size:", model_size_str)
+    if verbose:
+        parameter_count, model_size, parameter_count_str, model_size_str = get_stats(fn)
+        print("Parameter count:", parameter_count_str)
+        print("Model size:", model_size_str)
 
     if world_size > 1:
-        init_function, transformed_function = mlp_dhp_transform(
-            function,
-            args.dp_degree,
-            args.hp_degree,
-            args.pp_degree,
-            args.num_microbatches,
+        init_fn, transformed_fn = mlp_dhp_transform(
+            fn,
+            dp_degree,
+            hp_degree,
+            pp_degree,
+            num_microbatches,
             topology.devices,
         )
-        init_function = infer_types(init_function, init_function.inputs)
-        input_types = tuple(output.type for output in init_function.outputs)
+        init_fn = infer_types(init_fn, init_fn.inputs)
+        transformed_fn = infer_types(transformed_fn, init_fn.outputs)
+        input_types = tuple(output.type for output in init_fn.outputs)
     else:
-        transformed_function = function
-        input_types = tuple(inp.type for inp in function.inputs)
-    transformed_function = add_optimizer_ops(transformed_function)
-    simulation = simulate(transformed_function, input_types, topology)
-    latency = max([simulation.timestamps[d] for d in simulation.timestamps])
-    peak_memory = max([simulation.peak_memory[d] for d in simulation.peak_memory])
-    print(f"Latency: {latency} seconds")
-    print(f"Throughput: {args.batch_size / latency:.2f} samples / second")
-    print(f"Peak memory: {peak_memory / 1e9:.2f} GB")
-    if args.trace_file is not None:
-        simulation.dump_chrome_trace(args.trace_file)
+        transformed_fn = fn
+        input_types = tuple(inp.type for inp in fn.inputs)
+    transformed_fn = add_optimizer_ops(transformed_fn)
+    if backend == "simulate":
+        simulation = simulate(transformed_fn, input_types, topology)
+        if verbose:
+            simulation.print_summary()
+        if trace_file is not None:
+            simulation.dump_chrome_trace(trace_file)
+        return simulation
+    elif backend == "pytorch":
+        input_data = [
+            ConcreteValue(
+                np.random.normal(size=typ.size).astype(np.float32), device=typ.device
+            )
+            for typ in input_types
+        ]
+        return run_pytorch(fn, input_data, world_size, use_gpu)
+
+
+def main(args):
+    run_mlp(
+        args.mode,
+        args.backend,
+        args.use_gpu,
+        args.batch_size,
+        args.input_dim,
+        args.hidden_dim,
+        args.output_dim,
+        args.num_hidden_layers,
+        args.dp_degree,
+        args.hp_degree,
+        args.pp_degree,
+        args.num_microbatches,
+        args.device_throughput,
+        args.dram_bandwidth,
+        args.kernel_launch_overhead,
+        args.network_bandwidth,
+        args.trace_file,
+        args.verbose,
+    )
 
 
 if __name__ == "__main__":
@@ -311,6 +383,8 @@ if __name__ == "__main__":
     parser.add_execution_mode_config_arguments()
     parser.add_backend_config_arguments()
     parser.add_simulation_output_config_arguments()
+    parser.add_global_output_config_arguments()
+    parser.add_argument("--mode", choices=["inference", "training"])
     parser.add_argument("--batch_size", type=int, default=256, help="Batch size")
     parser.add_argument("--input_dim", type=int, default=256, help="Input dim")
     parser.add_argument("--hidden_dim", type=int, default=256, help="Hidden dim")

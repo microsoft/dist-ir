@@ -201,6 +201,15 @@ def _send(x, to_d=None, group=None, ctx=None):
     # a single buffer and call a single send op
 
 
+def _sgd(*xs, lr=None, ctx=None):
+    weights = xs[: (len(xs) // 2)]
+    gradients = xs[(len(xs) // 2) :]
+    updated_weights = []
+    for w, dw in zip(weights, gradients):
+        updated_weights.append(w - lr * dw)
+    return tuple(updated_weights)
+
+
 def _shape(x, ctx=None):
     output = torch.tensor(x.shape)
     if ctx.use_gpu:
@@ -290,6 +299,7 @@ _op_to_torch = {
     "ReluGrad": _relu_grad,
     "Reshape": _reshape,
     "SendP2P": _send,
+    "SGDOptimizer": _sgd,
     "Shape": _shape,
     "Slice": _slice,
     "Softmax": _softmax,

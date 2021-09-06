@@ -5,6 +5,7 @@ import itertools
 from multiprocessing import Manager
 import numpy as np
 from tqdm.contrib.concurrent import process_map
+import traceback
 
 from dist_ir.ir import get_uniform_topology
 
@@ -26,20 +27,22 @@ class GridSearch(ABC):
     def __init__(
         self,
         model_params,
+        backend,
+        use_gpu,
+        output_file,
         device_throughput,
         dram_bandwidth,
         kernel_launch_overhead,
         network_bandwidth,
-        backend,
-        output_file,
     ):
         self.model_params = model_params
+        self.backend = backend
+        self.use_gpu = use_gpu
+        self.output_file = output_file
         self.device_throughput = device_throughput
         self.dram_bandwidth = dram_bandwidth
         self.kernel_launch_overhead = kernel_launch_overhead
         self.network_bandwidth = network_bandwidth
-        self.backend = backend
-        self.output_file = output_file
 
     def _write_row(self, config, latency, peak_memory):
         (
@@ -157,6 +160,9 @@ class GridSearch(ABC):
                         lock,
                     )
 
+    def get_model_params(self, model_size):
+        return self.model_params[model_size]
+
     @abstractmethod
     def prepare_models_and_input_data(self, topology, all_batch_sizes, all_model_sizes):
         pass
@@ -240,8 +246,9 @@ class GridSearch(ABC):
                 f"Failed to run the configuration model_size={model_size}, "
                 f"batch_size={batch_size}, dp_degree={dp_degree}, "
                 f"hp_degree={hp_degree}, pp_degree={pp_degree}, "
-                f"num_microbatches={num_microbatches}: {e}"
+                f"num_microbatches={num_microbatches}:"
             )
+            traceback.print_exc()
 
             latency = -1
             peak_memory = -1

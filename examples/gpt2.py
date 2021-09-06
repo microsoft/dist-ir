@@ -504,6 +504,7 @@ def get_transformed_function_and_input_data(
     model_path,
     device_throughput,
     dram_bandwidth,
+    kernel_launch_overhead,
     network_bandwidth,
     batch_size,
     dp_degree,
@@ -518,7 +519,11 @@ def get_transformed_function_and_input_data(
 ):
     world_size = dp_degree * hp_degree * pp_degree
     topology = get_uniform_topology(
-        world_size, device_throughput, dram_bandwidth, network_bandwidth
+        world_size,
+        device_throughput,
+        dram_bandwidth,
+        kernel_launch_overhead,
+        network_bandwidth,
     )
 
     function, input_data = import_function_and_get_input_data(
@@ -626,6 +631,7 @@ def main(args):
         args.model_path,
         args.device_throughput,
         args.dram_bandwidth,
+        args.kernel_launch_overhead,
         args.network_bandwidth,
         args.batch_size,
         args.dp_degree,
@@ -643,14 +649,7 @@ def main(args):
         simulation = simulate(transformed_function, initialized_input_data, topology)
         if args.trace_file is not None:
             simulation.dump_chrome_trace(args.trace_file)
-        distributed_running_time = max(
-            [simulation.timestamps[d] for d in simulation.timestamps]
-        )
-        print(f"Latency: {distributed_running_time*1000:.2f} ms")
-        print(
-            f"Throughput: {args.batch_size / distributed_running_time:.2f} "
-            f"samples/second"
-        )
+        simulation.print_summary()
     elif args.backend == "pytorch":
         world_size = args.dp_degree * args.hp_degree * args.pp_degree
         per_rank_outputs, runtimes = run_pytorch(

@@ -1,4 +1,7 @@
 from argparse import ArgumentParser
+import torch
+
+from dist_ir.utils import constants
 
 
 class Parser(ArgumentParser):
@@ -21,19 +24,25 @@ class Parser(ArgumentParser):
         self.add_argument(
             "--network_bandwidth",
             type=float,
-            default=64,
+            default=constants.DEFAULT_NETWORK_BANDWIDTH,
             help="Network bandwidth in Gbps",
         )
         self.add_argument(
-            "--device_throughput", type=float, default=1.4e13, help="Device throughput"
+            "--device_throughput",
+            type=float,
+            default=constants.DEFAULT_DEVICE_THROUGHPUT,
+            help="Device throughput",
         )
         self.add_argument(
-            "--dram_bandwidth", type=float, default=9e11, help="DRAM Bandwidth"
+            "--dram_bandwidth",
+            type=float,
+            default=constants.DEFAULT_DRAM_BANDWIDTH,
+            help="DRAM Bandwidth",
         )
         self.add_argument(
             "--kernel_launch_overhead",
             type=float,
-            default=1e-5,
+            default=constants.DEFAULT_KERNEL_LAUNCH_OVERHEAD,
             help="Kernel launch overhead",
         )
 
@@ -53,7 +62,7 @@ class Parser(ArgumentParser):
         self.add_argument(
             "--use-gpu",
             action="store_true",
-            default=False,
+            default=torch.cuda.is_available(),
             help="Use GPU with PyTorch backend",
         )
 
@@ -81,6 +90,11 @@ class Parser(ArgumentParser):
             type=str,
             required=True,
             help="Output file",
+        )
+
+    def add_global_output_config_arguments(self):
+        self.add_argument(
+            "--verbose", action="store_true", default=False, help="Verbose"
         )
 
     def add_calibration_arguments(self):

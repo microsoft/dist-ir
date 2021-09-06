@@ -1,4 +1,5 @@
 from .device import Device
+from dist_ir.utils import constants
 
 
 class Topology:
@@ -38,10 +39,10 @@ class Topology:
 
 def get_uniform_topology(
     world_size,
-    device_throughput=1.4e13,
-    dram_bandwidth=9e11,
-    kernel_launch_overhead=1e-5,
-    network_bandwidth=64,
+    device_throughput=constants.DEFAULT_DEVICE_THROUGHPUT,
+    dram_bandwidth=constants.DEFAULT_DRAM_BANDWIDTH,
+    kernel_launch_overhead=constants.DEFAULT_KERNEL_LAUNCH_OVERHEAD,
+    network_bandwidth=constants.DEFAULT_NETWORK_BANDWIDTH,
 ):
     # TODO: Add kernel launch overhead to Device definition
     topology = Topology()

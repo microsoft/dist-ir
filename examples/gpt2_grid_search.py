@@ -5,42 +5,42 @@ from . import gpt2
 from .parser import Parser
 from dist_ir.transforms.gpt2_dhp_transform import check_params
 
-MODEL_PARAMS = {
-    "gpt2": (12, 12, 768),
-    "gpt2-medium": (24, 16, 1024),
-    "gpt2-large": (36, 20, 1280),
-    "gpt2-xl": (48, 25, 1600),
-    "gpt2-xl": (48, 25, 1600),
-    "gpt3": (12, 12, 768),
-    "gpt3-medium": (24, 16, 1024),
-    "gpt3-large": (24, 16, 1536),
-    "gpt3-xl": (24, 16, 2048),
-    "gpt3-2.7B": (32, 32, 2560),
-    "gpt3-6.7B": (32, 32, 4096),
-    "gpt3-13B": (40, 40, 5120),
-}
-
 
 class GPTGridSearch(GridSearch):
     def __init__(
         self,
-        model_params,
+        backend,
+        use_gpu,
+        output_file,
+        model_path,
         device_throughput,
         dram_bandwidth,
         kernel_launch_overhead,
         network_bandwidth,
-        backend,
-        output_file,
-        model_path,
     ):
+        model_params = {
+            "gpt2": (12, 12, 768),
+            "gpt2-medium": (24, 16, 1024),
+            "gpt2-large": (36, 20, 1280),
+            "gpt2-xl": (48, 25, 1600),
+            "gpt2-xl": (48, 25, 1600),
+            "gpt3": (12, 12, 768),
+            "gpt3-medium": (24, 16, 1024),
+            "gpt3-large": (24, 16, 1536),
+            "gpt3-xl": (24, 16, 2048),
+            "gpt3-2.7B": (32, 32, 2560),
+            "gpt3-6.7B": (32, 32, 4096),
+            "gpt3-13B": (40, 40, 5120),
+        }
         super().__init__(
             model_params,
+            backend,
+            use_gpu,
+            output_file,
             device_throughput,
             dram_bandwidth,
             kernel_launch_overhead,
             network_bandwidth,
-            backend,
-            output_file,
         )
         self.model_path = model_path
 
@@ -113,19 +113,21 @@ class GPTGridSearch(GridSearch):
         return gpt2.simulate(transformed_fn, input_data, topology)
 
     def pytorch(self, transformed_fn, input_data, world_size):
-        return gpt2.run_pytorch(transformed_fn, input_data, world_size)
+        return gpt2.run_pytorch(
+            transformed_fn, input_data, world_size, use_gpu=self.use_gpu
+        )
 
 
 def main(args):
     grid_search = GPTGridSearch(
-        MODEL_PARAMS,
+        args.backend,
+        args.use_gpu,
+        args.output_file,
+        args.model_path,
         args.device_throughput,
         args.dram_bandwidth,
         args.kernel_launch_overhead,
         args.network_bandwidth,
-        args.backend,
-        args.output_file,
-        args.model_path,
     )
     grid_search.grid_search(
         args.all_world_sizes, args.all_batch_sizes, args.all_model_sizes

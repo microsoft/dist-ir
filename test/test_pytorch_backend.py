@@ -10,15 +10,16 @@ from dist_ir.executor.simulator import Simulator
 from dist_ir.executor.type_inference import infer_types
 from dist_ir.ir import Device, FunctionMaker, cpprint, Value
 from dist_ir.ir.type import Float32, Tensor
-from dist_ir.ir.topology import Topology
+from dist_ir.ir.topology import Topology, get_uniform_topology
 
 # TODO make examples submodule of dist_ir?
+"""
 from examples.mlp_grid_search import (
     MODEL_PARAMS,
-    add_devices_to_topology,
-    gen_configurations,
+    #gen_configurations,
     mlp_dist,
 )
+"""
 from examples.mlp import mlp, mlp_inference_dp
 
 
@@ -197,6 +198,7 @@ def test_dp_mp_matmuls():
         cpprint(per_rank_fn)
 
 
+"""
 @pytest.mark.parametrize(
     "use_gpu",
     [
@@ -222,10 +224,7 @@ def test_mlp_grid_search(use_gpu):
     ):
         num_layers, hidden_dim = MODEL_PARAMS[model_size]
         world_size = d * h * p
-        # TODO reuse seq_mlp
-        topology = Topology()
-        d0 = topology.add_device("gpu")
-        add_devices_to_topology(topology, world_size)
+        topology = get_uniform_topology(world_size)
         simulator = Simulator(CostModel(topology))
         seq_executor = SequentialExecutor("numpy")
         seq_mlp = mlp(batch_size, hidden_dim, hidden_dim, hidden_dim, num_layers, d0)
@@ -266,6 +265,7 @@ def test_mlp_grid_search(use_gpu):
         actual_time = max(np.median(times) for times in runtimes)
 
         print(fn.name, simulated_time, actual_time)
+"""
 
 
 @pytest.mark.parametrize(

@@ -234,7 +234,7 @@ class CostModel:
                     self._topology.get_bandwidth(devices[i], devices[j])
                 )
         average_bandwidth = np.mean(all_bandwidths)
-        average_input_size = np.mean([x.size() for x in xs]) * xs[0].dtype.size()
+        average_input_size = np.mean([x.size() for x in xs])
         per_device_data = 2 * average_input_size * (len(devices) - 1)
         per_device_data_gb = per_device_data / BYTES_IN_Gb
         cost = per_device_data_gb / average_bandwidth

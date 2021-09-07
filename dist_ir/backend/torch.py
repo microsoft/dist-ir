@@ -173,10 +173,8 @@ def _recv(shape=None, from_d=None, group=None, dtype=None, ctx=None):
     # torch.distributed.barrier(group=ctx.groups[group])
     allocate_buffer = (shape, type(dtype)) not in ctx.recv_buffers
     if not allocate_buffer:
-        print(f"Loading buffer for tensor of shape {shape} and dtype {type(dtype)}")
         x = ctx.recv_buffers[(shape, type(dtype))]
     else:
-        print(f"Allocating new tensor of shape {shape} and dtype {type(dtype)}")
         if isinstance(dtype, Int64):
             x = torch.zeros(shape).long()
         elif isinstance(dtype, Float32):

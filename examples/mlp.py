@@ -8,7 +8,15 @@ import pickle
 
 from dist_ir.ir import FunctionMaker, Topology, cpprint
 from dist_ir.ir.type import Float32, Tensor
-from dist_ir.executor import CostModel, Simulator, infer_types
+from dist_ir.executor import (
+    CostModel,
+    Simulator,
+    infer_types,
+    calibrate_device_parameters,
+    calibrate_network_bandwidth,
+    calibrate_allreduce_parameters,
+)
+
 from dist_ir.transforms import mlp_dhp_transform
 import dist_ir.backend.torch as torch_backend
 

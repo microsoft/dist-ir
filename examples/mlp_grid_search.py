@@ -180,6 +180,7 @@ def grid_search(
     backend,
     topology,
     allreduce_parameters,
+    output_file,
 ):
     configs = list(
         gen_configurations(
@@ -197,7 +198,7 @@ def grid_search(
     else:
         results = process_map(run_experiment, configs, chunksize=1)
 
-    with open("mlp_grid_search_results.csv", "w", newline="") as f:
+    with open(output_file, "w", newline="") as f:
         fieldnames = [
             "model_size",
             "world_size",
@@ -259,6 +260,7 @@ def main(args):
         backend=args.backend,
         topology=topology,
         allreduce_parameters=args.allreduce_parameters,
+        output_file=args.output_file,
     )
 
 
@@ -299,5 +301,6 @@ if __name__ == "__main__":
         default=None,
         help="File to load/save simulation parameters from/to",
     )
+    parser.add_argument("--output_file", type=str, required=True, help="Output file")
     args = parser.parse_args()
     main(args)

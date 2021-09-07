@@ -139,6 +139,7 @@ def calibrate_network_bandwidth():
     params = {}
     devices = [Device(i, "gpu") for i in range(torch.cuda.device_count())]
     for src in devices:
+        bandwidths[(0, src.device_id)] = 64
         for dst in devices:
             if src == dst:
                 continue

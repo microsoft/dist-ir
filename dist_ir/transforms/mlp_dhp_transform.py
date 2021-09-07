@@ -35,12 +35,15 @@ def _identity(v, function, output_name):
 
 def _split_value(v, function, num_splits, parallelism_level, dim=0):
     output_names = [f"{v.name}_{parallelism_level}_{i}" for i in range(num_splits)]
-    return function.add_op(
+    split_values = function.add_op(
         "SplitUniform",
         inputs=[v],
         attributes={"axis": dim, "num_splits": num_splits},
         output_names=output_names,
     )
+    if not isinstance(split_values, tuple):
+        split_values = (split_values,)
+    return split_values
 
 
 def _mpi_allgather_values(vs, function, dim, output_names):
@@ -213,6 +216,7 @@ def _partition_inputs_pp(
                             dim=0,
                         )
                     elif k == 1:
+                        # Labels will be used on downstream device
                         consumer_devices = _get_consumer_devices_for_pp_value(
                             orig_inp,
                             function,
@@ -274,6 +278,7 @@ def _partition_inputs_pp(
                 else:
                     # If not using pipeline parallelism, no action necessary here.
                     pp_inputs[hp_input][0] = [hp_input]
+
     return pp_inputs
 
 

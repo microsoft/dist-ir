@@ -41,6 +41,7 @@ DistributedContext = NamedTuple(
     profile=bool,
     # List of op execution events
     trace=list,
+    recv_buffers=dict,
 )
 
 
@@ -169,17 +170,27 @@ def _reshape(x, y, ctx=None):
 
 
 def _recv(shape=None, from_d=None, group=None, dtype=None, ctx=None):
-    if isinstance(dtype, Int64):
-        x = torch.zeros(shape).long()
-    elif isinstance(dtype, Float32):
-        x = torch.zeros(shape).float()
+    # torch.distributed.barrier(group=ctx.groups[group])
+    allocate_buffer = (shape, type(dtype)) not in ctx.recv_buffers
+    if not allocate_buffer:
+        print(f"Loading buffer for tensor of shape {shape} and dtype {type(dtype)}")
+        x = ctx.recv_buffers[(shape, type(dtype))]
+    else:
+        print(f"Allocating new tensor of shape {shape} and dtype {type(dtype)}")
+        if isinstance(dtype, Int64):
+            x = torch.zeros(shape).long()
+        elif isinstance(dtype, Float32):
+            x = torch.zeros(shape).float()
 
     src_rank = ctx.device_to_rank[from_d]
     if ctx.use_gpu:
-        x = x.cuda(dist.get_rank())
+        if allocate_buffer:
+            x = x.cuda(dist.get_rank())
         dist.broadcast(x, src_rank, group=ctx.groups[group])
     else:
         dist.recv(x, src_rank)
+    if allocate_buffer:
+        ctx.recv_buffers[(shape, type(dtype))] = x
     return x
 
 
@@ -194,6 +205,7 @@ def _relu_grad(x, dy, ctx=None):
 
 
 def _send(x, to_d=None, group=None, ctx=None):
+    # torch.distributed.barrier(group=ctx.groups[group])
     if ctx.use_gpu:
         src_rank = dist.get_rank()
         dist.broadcast(x, src_rank, group=ctx.groups[group])
@@ -396,7 +408,7 @@ def run_function(
     inputs: List[Any],
     rank: int,
     debug_mock=False,
-    op_runtimes_ts: float=None,
+    op_runtimes_ts: float = None,
 ):
     """Runs DistIR Function `fn` on `inputs` in a distributed context `ctx` by
     converting each DistIR op to its torch implementation as given in _op_to_torch.
@@ -433,8 +445,21 @@ def run_function(
             start = time.time()
         output = op_to_torch[op.op_type](*inputs, **kwargs)
         if record_op_runtimes:
-            torch.cuda.synchronize(device=rank)
+            if ctx.use_gpu:
+                torch.cuda.synchronize(device=rank)
             end = time.time()
+            if op.op_type == "SendP2P":
+                x = inputs[0]
+                src_rank = dist.get_rank()
+                dst_rank = ctx.device_to_rank[kwargs["to_d"]]
+                group = ctx.groups[kwargs["group"]]
+                latency = end - start
+                print(
+                    f"Sending tensor of size {x.size()} on device {x.device} with dtype "
+                    f"{x.dtype} from device {src_rank} to {dst_rank}: latency={latency}, "
+                    f"throughput={x.shape[0] * x.shape[1] * 4 / 1.25e8 / latency}"
+                )
+
             op_runtimes.append(end - start)
 
         if len(op.outputs) > 1:
@@ -445,9 +470,11 @@ def run_function(
             value_map[op.outputs[0]] = output
 
         # Free tensors that are not used again
+        """
         for v in op.inputs:
             if v in value_map and fn.last_use(v) == op and not (v in fn.outputs):
                 del value_map[v]
+        """
 
     if record_op_runtimes:
         trace = []
@@ -461,7 +488,7 @@ def run_function(
                     "ts": ts,
                     "dur": runtime * 1e6,
                     "pid": 0,
-                    "tid": rank,
+                    "tid": rank + 1,
                 }
             )
             ts += runtime * 1e6
@@ -645,12 +672,19 @@ def run_pytorch(
         fn, tuple(v.type for v in fn.inputs), run_type_inference
     )
 
+    if len(device_to_fns) > torch.cuda.device_count():
+        raise ValueError(
+            f"Received {len(device_to_fns)} projected functions, "
+            f"but only {torch.cuda.device_count()} GPUs available"
+        )
+
     # Map between DistIR devices and pytorch ranks:
     device_to_rank = {}
     world_size = 0
     per_rank_fns = []
     for d in device_to_fns:
-        device_to_rank[d] = world_size
+        rank = world_size
+        device_to_rank[d] = rank
         per_rank_fns.append(device_to_fns[d])
         world_size += 1
 
@@ -674,6 +708,7 @@ def run_pytorch(
         debug_stacktrace=debug_stacktrace,
         profile=profile,
         trace=trace,
+        recv_buffers={},
     )
 
     per_rank_inputs = [[] for _ in range(world_size)]

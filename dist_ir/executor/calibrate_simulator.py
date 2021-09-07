@@ -131,49 +131,44 @@ def network_bandwidth_debug():
 
 
 def calibrate_network_bandwidth():
-    def _get_bandwidth(src, dst):
-        all_sizes = [1024, 2048, 4096, 8192]
-        n = len(all_sizes)
-        X = np.zeros(shape=(n, 2))
-        Y = np.zeros(shape=(n,))
-        params = {}
-        devices = [Device(0, "cpu")] + [
-            Device(i + 1, "gpu") for i in range(torch.cuda.device_count())
-        ]
-        for i, size in enumerate(tqdm(all_sizes)):
-            fn = _send(src, dst, m=size, n=size)
-            fn = infer_types(fn, fn.inputs)
-            X[i][0] = fn.inputs[0].type.size() / BYTES_IN_Gb
-            X[i][1] = 1
-
-            _, runtimes = run_pytorch(
-                fn=fn,
-                inputs=[
-                    torch.randn(size=fn.inputs[i].type.shape, dtype=torch.float32)
-                    for i in range(len(fn.inputs))
-                ],
-                use_gpu=True,
-                num_repetitions=10,
-                num_warmup=5,
-            )
-            pytorch_latency = np.median(runtimes[0])
-            Y[i] = pytorch_latency
-
-        reg = LinearRegression(positive=True, fit_intercept=False).fit(X, Y)
-        bandwidth = 1.0 / reg.coef_[0]
-        return bandwidth
-
-    devices = [Device(0, "cpu")] + [
-        Device(i + 1, "gpu") for i in range(torch.cuda.device_count())
-    ]
     bandwidths = {}
-    for i in range(1, len(devices)):
-        bandwidths[(0, i)] = _get_bandwidth(devices[0], devices[i])
-        print(f"bandwidth[(0, {i})] = {bandwidths[(0, i)]} Gbps")
-        for j in range(i + 1, len(devices)):
-            bandwidth = _get_bandwidth(devices[i], devices[j])
-            print(f"bandwidth[({i}, {j})] = {bandwidth} Gbps")
-            bandwidths[(i, j)] = bandwidth
+    all_sizes = [1024, 2048, 4096, 8192]
+    n = len(all_sizes)
+    X = np.zeros(shape=(n, 2))
+    Y = np.zeros(shape=(n,))
+    params = {}
+    devices = [Device(i, "gpu") for i in range(torch.cuda.device_count())]
+    for src in devices:
+        for dst in devices:
+            if src == dst:
+                continue
+            for i, size in enumerate(tqdm(all_sizes)):
+                fn = _send(src, dst, m=size, n=size)
+                fn = infer_types(fn, fn.inputs)
+                X[i][0] = fn.inputs[0].type.size() / BYTES_IN_Gb
+                X[i][1] = 1
+
+                _, runtimes = run_pytorch(
+                    fn=fn,
+                    inputs=[
+                        torch.randn(size=fn.inputs[i].type.shape, dtype=torch.float32)
+                        for i in range(len(fn.inputs))
+                    ],
+                    use_gpu=True,
+                    num_repetitions=10,
+                    num_warmup=5,
+                )
+                print(
+                    f"src={src.device_id}, dst={dst.device_id}, size={size}: {np.median(runtimes[0])} ({np.std(runtimes[0])})"
+                )
+                pytorch_latency = np.median(runtimes[0])
+                Y[i] = pytorch_latency
+
+            reg = LinearRegression(positive=True, fit_intercept=False).fit(X, Y)
+            bandwidth = 1.0 / reg.coef_[0]
+            bandwidths[(src.device_id, dst.device_id)] = bandwidth
+            print(f"bandwidth[({src.device_id}, {dst.device_id})] = {bandwidth} Gbps")
+
     return bandwidths
 
 

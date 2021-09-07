@@ -239,6 +239,7 @@ def grid_search(
                 }
             )
 
+
 def main(args):
     model_size = "mlp-xs"
     all_world_sizes = [1, 2, 4]

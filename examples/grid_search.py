@@ -4,6 +4,7 @@ import copy
 import itertools
 from multiprocessing import Manager
 import numpy as np
+from os import path
 from tqdm.contrib.concurrent import process_map
 import traceback
 
@@ -260,12 +261,17 @@ class GridSearch(ABC):
                 topology, all_world_sizes, all_batch_sizes, all_model_sizes
             )
         )
-        with open(self.output_file, "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
-            writer.writeheader()
+        if path.exists(self.output_file):
+            message = f'File "{self.output_file}" already exists. Append to it? [y/n] '
+            if input(message).lower().strip()[0] != "y":
+                return
+        else:
+            with open(self.output_file, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+                writer.writeheader()
         if self.backend == "pytorch":
             process_map(self.run, configs, max_workers=1)
         elif self.backend == "simulate":
             process_map(self.run, configs)
         else:
-            raise ValueError(f"Invalid backend {backend}")
+            raise ValueError(f"Invalid backend {self.backend}")

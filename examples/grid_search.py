@@ -244,6 +244,10 @@ class GridSearch(ABC):
 
             latency = -1
             peak_memory = -1
+        except RuntimeError as e:
+            print(e)
+            latency = -1
+            peak_memory = -1
         self._write_row(config, latency, peak_memory)
 
     def grid_search(self, all_world_sizes, all_batch_sizes, all_model_sizes):
@@ -270,7 +274,9 @@ class GridSearch(ABC):
                 writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
                 writer.writeheader()
         if self.backend == "pytorch":
-            process_map(self.run, configs, max_workers=1)
+            for config in configs:
+                print(config)
+                self.run(config)
         elif self.backend == "simulate":
             process_map(self.run, configs)
         else:

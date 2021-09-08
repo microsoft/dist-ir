@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """
 This module contains a register mapping ops to type propagation functions:
 - This is a function foo(op, x1, x2, .., xN), where op is an N-ary Op, and x1 to

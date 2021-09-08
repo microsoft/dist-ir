@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 from pathlib import Path
 
 from dist_ir.importer import import_from_onnx

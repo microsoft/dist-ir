@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """
 Pretty printer for DistIR. Uses the prettyprinter package, which uses a modified
 Wadler-Leijen layout algorithm:

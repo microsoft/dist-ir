@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 from ..ir import Op
 from ..ir.function import FunctionMaker
 from .sanitize_attributes_transform import (

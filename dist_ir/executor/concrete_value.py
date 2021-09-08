@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 from dataclasses import dataclass
 import numpy as np
 from typing import Any, Callable, Dict, Tuple

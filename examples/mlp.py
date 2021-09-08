@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 from dist_ir.ir import FunctionMaker
 from dist_ir.ir.type import Float32, Tensor
 

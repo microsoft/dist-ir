@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 from dist_ir.transforms import FIFOScheduler, PipeDreamScheduler
 from . import pipeline_parallel_utils as utils
 

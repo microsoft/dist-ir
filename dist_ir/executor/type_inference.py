@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """
 This is the type propagation abstract domain for the abstract interpreter.
 Interpreting a DistIR Function using this domain essentially results in type

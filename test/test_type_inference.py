@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 import pytest
 
 from dist_ir.ir import cpprint, Device, Function, FunctionMaker, Op, Value

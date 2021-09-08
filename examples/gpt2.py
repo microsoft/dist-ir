@@ -1,6 +1,4 @@
-import argparse
 from collections import defaultdict
-from frozendict import frozendict
 import numpy as np
 import re
 from transformers import GPT2Tokenizer
@@ -23,6 +21,8 @@ from dist_ir.transforms import (
     restore_unhashable_attributes,
 )
 from dist_ir.transforms.gpt2_dhp_transform import check_params, update_attributes
+
+from .parser import Parser
 
 
 def _to_numpy(x):

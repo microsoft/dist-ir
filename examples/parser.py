@@ -18,7 +18,7 @@ class Parser(ArgumentParser):
         self.add_argument(
             "-k", "--num_microbatches", type=int, default=1, help="# of microbatches"
         )
-        parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
+        self.add_argument("--batch_size", type=int, default=64, help="Batch size")
 
     def add_simulation_topology_config_arguments(self):
         self.add_argument(

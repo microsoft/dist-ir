@@ -152,6 +152,7 @@ if __name__ == "__main__":
     parser.add_simulation_topology_config_arguments()
     parser.add_execution_mode_config_arguments()
     parser.add_grid_search_config_arguments(defaults)
+    parser.add_backend_config_arguments()
     parser.add_argument(
         "--model_path",
         type=str,

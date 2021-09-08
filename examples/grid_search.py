@@ -207,6 +207,22 @@ class GridSearch(ABC):
             peak_memory = -1
         self._write_row(config, latency, peak_memory, lock)
 
+    def _filter_configs_from_file(self, configs, file):
+        """Filter `configs` to those configs that are not already in `file`."""
+        df = pd.read_csv(file)
+        existing_configs = {
+            DHPConfig(
+                r.model_size,
+                r.dp_degree,
+                r.hp_degree,
+                r.pp_degree,
+                r.num_microbatches,
+                r.batch_size,
+            )
+            for _, r in df.iterrows()
+        }
+        print(f"Found {len(existing_configs)} existing configurations, skipping them")
+        return [c for c in configs if c not in existing_configs]
 
     def grid_search(self, all_world_sizes, all_batch_sizes, all_model_sizes):
         topology = get_uniform_topology(
@@ -226,6 +242,8 @@ class GridSearch(ABC):
             message = f'File "{self.output_file}" already exists. Append to it? [y/n] '
             if input(message).lower().strip()[0] != "y":
                 return
+            # Filter configs to those not already present in output_file
+            configs = self._filter_configs_from_file(configs, self.output_file)
         else:
             with open(self.output_file, "w", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=FIELDNAMES)

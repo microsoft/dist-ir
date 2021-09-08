@@ -560,7 +560,7 @@ def simulate(function, input_data, topology):
     return simulation
 
 
-def run_pytorch(function, input_data, world_size, use_gpu=True):
+def run_pytorch(function, input_data, world_size, use_gpu=True, debug_stacktrace=False):
     # TODO: Move this to a utils file
     def _resolve_dtype(dtype):
         if dtype == np.int32:
@@ -597,6 +597,7 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
         use_gpu=use_gpu,
         num_warmup=5,
         num_repetitions=10,
+        debug_stacktrace=debug_stacktrace,
     )
     return per_rank_outputs, runtimes
 
@@ -648,8 +649,8 @@ def main(args):
             transformed_function,
             initialized_input_data,
             world_size,
-            args.use_gpu,
-            args.debug_stacktrace,
+            use_gpu=args.use_gpu,
+            debug_stacktrace=args.debug_stacktrace,
         )
         print(f"Latency: {np.median(runtimes[-1])*1000:.2f} ms")
         print(

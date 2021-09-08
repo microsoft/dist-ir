@@ -1,14 +1,17 @@
 from abc import ABC, abstractmethod
 import csv
-import copy
 import itertools
 from multiprocessing import Manager
-import numpy as np
 from os import path
-from tqdm.contrib.concurrent import process_map
+from typing import NamedTuple
 import traceback
 
-from dist_ir.ir import get_uniform_topology
+import numpy as np
+import pandas as pd
+from tqdm.contrib.concurrent import process_map
+
+from dist_ir.ir.topology import get_uniform_topology, Topology
+
 
 FIELDNAMES = [
     "model_size",
@@ -22,6 +25,15 @@ FIELDNAMES = [
     "throughput",
     "peak_memory",
 ]
+
+
+class DHPConfig(NamedTuple):
+    model_size: str
+    dp_degree: int
+    hp_degree: int
+    pp_degree: int
+    num_microbatches: int
+    batch_size: int
 
 
 class GridSearch(ABC):
@@ -45,31 +57,21 @@ class GridSearch(ABC):
         self.kernel_launch_overhead = kernel_launch_overhead
         self.network_bandwidth = network_bandwidth
 
-    def _write_row(self, config, latency, peak_memory):
-        (
-            topology,
-            world_size,
-            batch_size,
-            model_size,
-            dp_degree,
-            hp_degree,
-            pp_degree,
-            num_microbatches,
-            lock,
-        ) = config
-        throughput = batch_size / latency
+    def _write_row(self, config: DHPConfig, latency, peak_memory, lock):
+        throughput = config.batch_size / latency
+        world_size = config.dp_degree * config.hp_degree * config.pp_degree
         with lock:
             with open(self.output_file, "a+", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
                 writer.writerow(
                     {
-                        "model_size": model_size,
+                        "model_size": config.model_size,
                         "world_size": world_size,
-                        "batch_size": batch_size,
-                        "dp_degree": dp_degree,
-                        "hp_degree": hp_degree,
-                        "pp_degree": pp_degree,
-                        "num_microbatches": num_microbatches,
+                        "batch_size": config.batch_size,
+                        "dp_degree": config.dp_degree,
+                        "hp_degree": config.hp_degree,
+                        "pp_degree": config.pp_degree,
+                        "num_microbatches": config.num_microbatches,
                         "latency": latency,
                         "throughput": throughput,
                         "peak_memory": peak_memory,
@@ -103,11 +105,7 @@ class GridSearch(ABC):
             d *= 2
         return all_degrees
 
-    def gen_configurations(
-        self, topology, all_world_sizes, all_batch_sizes, all_model_sizes
-    ):
-        manager = Manager()
-        lock = manager.Lock()
+    def gen_configurations(self, all_world_sizes, all_batch_sizes, all_model_sizes):
         for (
             world_size,
             batch_size,
@@ -126,35 +124,21 @@ class GridSearch(ABC):
                         for k in range(1, int(np.floor(np.log2(dp_batch_size) / 2)))
                     ]
                 for num_microbatches in all_num_microbatches:
-                    try:
-                        self.verify_config(
-                            batch_size,
-                            dp_degree,
-                            hp_degree,
-                            pp_degree,
-                            num_microbatches,
-                            model_size,
-                        )
-                    except Exception as e:
-                        print(
-                            f"Skipping configuration batch_size={batch_size}, "
-                            f"model_size={model_size}, dp_degree={dp_degree}, "
-                            f"hp_degree={hp_degree}, pp_degree={pp_degree}, "
-                            f"num_microbatches={num_microbatches}: {e}"
-                        )
-                        continue
-
-                    yield (
-                        topology,
-                        world_size,
-                        batch_size,
+                    config = DHPConfig(
                         model_size,
                         dp_degree,
                         hp_degree,
                         pp_degree,
                         num_microbatches,
-                        lock,
+                        batch_size,
                     )
+                    try:
+                        self.verify_config(config)
+                    except Exception as e:
+                        print(f"Skipping configuration {config}:\n{e}")
+                        continue
+
+                    yield config
 
     def get_model_params(self, model_size):
         return self.model_params[model_size]
@@ -164,13 +148,11 @@ class GridSearch(ABC):
         pass
 
     @abstractmethod
-    def get_model_and_input_data(self, model_size, batch_size):
+    def get_model_and_input_data(self, batch_size, model_size):
         pass
 
     @abstractmethod
-    def verify_config(
-        self, batch_size, dp_degree, hp_degree, pp_degree, num_microbatches, model_size
-    ):
+    def verify_config(self, config: DHPConfig):
         pass
 
     @abstractmethod
@@ -179,11 +161,7 @@ class GridSearch(ABC):
         fn,
         input_data,
         topology,
-        dp_degree,
-        hp_degree,
-        pp_degree,
-        num_microbatches,
-        model_size,
+        config: DHPConfig,
     ):
         pass
 
@@ -195,29 +173,13 @@ class GridSearch(ABC):
     def pytorch(transformed_fn, input_data, world_size):
         pass
 
-    def run(self, config):
-        (
-            topology,
-            world_size,
-            batch_size,
-            model_size,
-            dp_degree,
-            hp_degree,
-            pp_degree,
-            num_microbatches,
-            lock,
-        ) = config
-        fn, input_data = self.get_model_and_input_data(batch_size, model_size)
+    def run(self, config: DHPConfig, topology: Topology, lock=None):
+        fn, input_data = self.get_model_and_input_data(
+            config.batch_size, config.model_size
+        )
         try:
             init_fn, transformed_fn, input_data = self.transform(
-                fn,
-                input_data,
-                topology,
-                dp_degree,
-                hp_degree,
-                pp_degree,
-                num_microbatches,
-                model_size,
+                fn, input_data, topology, config
             )
             if self.backend == "simulate":
                 simulation = self.simulate(transformed_fn, input_data, topology)
@@ -234,12 +196,7 @@ class GridSearch(ABC):
                 # TODO: Measure peak memory?
                 peak_memory = 0
         except Exception as e:
-            print(
-                f"Failed to run the configuration model_size={model_size}, "
-                f"batch_size={batch_size}, dp_degree={dp_degree}, "
-                f"hp_degree={hp_degree}, pp_degree={pp_degree}, "
-                f"num_microbatches={num_microbatches}:"
-            )
+            print(f"Failed to run the configuration {config}:")
             traceback.print_exc()
 
             latency = -1
@@ -248,7 +205,8 @@ class GridSearch(ABC):
             print(e)
             latency = -1
             peak_memory = -1
-        self._write_row(config, latency, peak_memory)
+        self._write_row(config, latency, peak_memory, lock)
+
 
     def grid_search(self, all_world_sizes, all_batch_sizes, all_model_sizes):
         topology = get_uniform_topology(
@@ -261,10 +219,9 @@ class GridSearch(ABC):
 
         self.prepare_models_and_input_data(topology, all_batch_sizes, all_model_sizes)
         configs = list(
-            self.gen_configurations(
-                topology, all_world_sizes, all_batch_sizes, all_model_sizes
-            )
+            self.gen_configurations(all_world_sizes, all_batch_sizes, all_model_sizes)
         )
+        print(f"Generated {len(configs)} configurations")
         if path.exists(self.output_file):
             message = f'File "{self.output_file}" already exists. Append to it? [y/n] '
             if input(message).lower().strip()[0] != "y":
@@ -276,8 +233,13 @@ class GridSearch(ABC):
         if self.backend == "pytorch":
             for config in configs:
                 print(config)
-                self.run(config)
+                self.run(config, topology)
         elif self.backend == "simulate":
-            process_map(self.run, configs)
+            manager = Manager()
+            lock = manager.Lock()
+            # TODO is there a cleaner way to pass fixed arguments to run?
+            process_map(
+                self.run, configs, itertools.repeat(topology), itertools.repeat(lock)
+            )
         else:
             raise ValueError(f"Invalid backend {self.backend}")

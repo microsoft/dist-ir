@@ -7,7 +7,7 @@ from dist_ir.ir.type import Tensor
 from dist_ir.executor import infer_types, SequentialExecutor, ConcreteValue
 from dist_ir.transforms import mlp_dhp_transform
 from . import mlp
-from .grid_search import GridSearch
+from .grid_search import DHPConfig, GridSearch
 from .parser import Parser
 
 
@@ -41,12 +41,6 @@ class MLPGridSearch(GridSearch):
 
     def prepare_models_and_input_data(self, topology, all_batch_sizes, all_model_sizes):
         max_batch_size = max(all_batch_sizes)
-        max_num_layers = max(
-            self.model_params[model_size][0] for model_size in all_model_sizes
-        )
-        max_dim = max(
-            self.model_params[model_size][1] for model_size in all_model_sizes
-        )
         self.models = {}
         for model_size in all_model_sizes:
             num_layers, dim = self.model_params[model_size]
@@ -60,8 +54,8 @@ class MLPGridSearch(GridSearch):
         if self.backend == "pytorch":
             input_data = mlp.get_input_data(batch_size, dim, num_layers)
             input_data = tuple(
-                ConcreteValue(input_data[i], fn.inputs[i].type.device)
-                for i in range(len(input_data))
+                ConcreteValue(t, inp.type.device)
+                for t, inp in zip(input_data, fn.inputs)
             )
         else:
             input_data = list(fn.inputs)
@@ -78,9 +72,7 @@ class MLPGridSearch(GridSearch):
             input_data = tuple(input_data)
         return fn, input_data
 
-    def verify_config(
-        self, batch_size, dp_degree, hp_degree, pp_degree, num_microbatches, model_size
-    ):
+    def verify_config(self, config: DHPConfig):
         pass
 
     def transform(
@@ -88,18 +80,14 @@ class MLPGridSearch(GridSearch):
         fn,
         input_data,
         topology,
-        dp_degree,
-        hp_degree,
-        pp_degree,
-        num_microbatches,
-        model_size,
+        config: DHPConfig,
     ):
         init_fn, transformed_fn = mlp_dhp_transform(
             fn,
-            dp_degree,
-            hp_degree,
-            pp_degree,
-            num_microbatches,
+            config.dp_degree,
+            config.hp_degree,
+            config.pp_degree,
+            config.num_microbatches,
             topology.devices,
         )
         init_fn = infer_types(init_fn, init_fn.inputs)

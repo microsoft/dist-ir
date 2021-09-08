@@ -1,6 +1,6 @@
 import copy
 
-from .grid_search import GridSearch
+from .grid_search import DHPConfig, GridSearch
 from . import gpt2
 from .parser import Parser
 from dist_ir.transforms.gpt2_dhp_transform import check_params
@@ -70,16 +70,14 @@ class GPTGridSearch(GridSearch):
         input_data = [input_ids] + input_data
         return model, input_data
 
-    def verify_config(
-        self, batch_size, dp_degree, hp_degree, pp_degree, num_microbatches, model_size
-    ):
-        n_layer, n_head, d_embd = self.model_params[model_size]
+    def verify_config(self, config: DHPConfig):
+        _, n_head, d_embd = self.model_params[config.model_size]
         check_params(
-            batch_size,
-            dp_degree,
-            hp_degree,
-            pp_degree,
-            num_microbatches,
+            config.batch_size,
+            config.dp_degree,
+            config.hp_degree,
+            config.pp_degree,
+            config.num_microbatches,
             n_head,
             d_embd,
         )
@@ -89,21 +87,17 @@ class GPTGridSearch(GridSearch):
         fn,
         input_data,
         topology,
-        dp_degree,
-        hp_degree,
-        pp_degree,
-        num_microbatches,
-        model_size,
+        config: DHPConfig,
     ):
-        n_layer, n_head, d_embd = self.model_params[model_size]
+        _, n_head, d_embd = self.model_params[config.model_size]
         return gpt2.transform(
             fn,
             input_data,
             topology,
-            dp_degree,
-            hp_degree,
-            pp_degree,
-            num_microbatches,
+            config.dp_degree,
+            config.hp_degree,
+            config.pp_degree,
+            config.num_microbatches,
             d_embd,
             n_head,
             use_real_weights=(self.backend == "pytorch"),

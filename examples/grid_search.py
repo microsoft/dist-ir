@@ -173,7 +173,7 @@ class GridSearch(ABC):
     def pytorch(transformed_fn, input_data, world_size):
         pass
 
-    def run(self, config: DHPConfig, topology: Topology, lock=None):
+    def run(self, config: DHPConfig, topology: Topology, lock):
         fn, input_data = self.get_model_and_input_data(
             config.batch_size, config.model_size
         )
@@ -248,13 +248,14 @@ class GridSearch(ABC):
             with open(self.output_file, "w", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
                 writer.writeheader()
+
+        manager = Manager()
+        lock = manager.Lock()
         if self.backend == "pytorch":
             for config in configs:
                 print(config)
-                self.run(config, topology)
+                self.run(config, topology, lock)
         elif self.backend == "simulate":
-            manager = Manager()
-            lock = manager.Lock()
             # TODO is there a cleaner way to pass fixed arguments to run?
             process_map(
                 self.run, configs, itertools.repeat(topology), itertools.repeat(lock)

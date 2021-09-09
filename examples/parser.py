@@ -95,7 +95,7 @@ class Parser(ArgumentParser):
             "--config_number",
             type=int,
             default=None,
-            help="The configuration from configs_file to run (line number, excluding header)",
+            help="The configuration from configs_file to run (line number, 0 = header)",
         )
         self.add_argument(
             "--output_file",

@@ -275,7 +275,7 @@ def run_grid_search(args, grid_search_cls):
         if args.config_number is not None:
             df = pd.read_csv(args.configs_file)
             # lookup and run only given config
-            configs = [GridSearch._config_from_df(df, args.config_number)]
+            configs = [GridSearch._config_from_df(df, args.config_number - 1)]
         else:
             # use all configs
             configs = GridSearch._read_configs(args.configs_file)

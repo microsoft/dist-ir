@@ -20,6 +20,7 @@ class GPTGridSearch(GridSearch):
         model_path,
     ):
         model_params = {
+            "gpt2-xs": (4, 12, 768),
             "gpt2": (12, 12, 768),
             "gpt2-medium": (24, 16, 1024),
             "gpt2-large": (36, 20, 1280),

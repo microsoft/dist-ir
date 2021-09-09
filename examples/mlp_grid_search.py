@@ -56,7 +56,7 @@ class MLPGridSearch(GridSearch):
                 for t, inp in zip(input_data, fn.inputs)
             )
         else:
-            input_data = mlp_get_typed_inputs(init_fn.inputs, batch_size, dim, dim)
+            input_data = mlp.get_typed_input_values(fn.inputs, batch_size, dim, dim)
         return fn, input_data
 
     def verify_config(self, config: DHPConfig):

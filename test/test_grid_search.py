@@ -46,7 +46,6 @@ def test_mlp_grid_search(backend):
         grid_search.grid_search(configs)
 
         df = pd.read_csv(tf.name)
-        print(df)
 
         if backend == "simulate":
             all_degrees = GridSearch.get_all_degrees(all_world_sizes[-1])
@@ -82,7 +81,6 @@ def test_mlp_grid_search(backend):
                     & (df["pp_degree"] == p)
                     & (df["num_microbatches"] == p)
                 ]["latency"].values[0]
-                print(latency, grid_search_latency)
                 assert math.isclose(latency, grid_search_latency, abs_tol=10 ** -8)
 
     # TODO: Check correctness for PyTorch?
@@ -94,8 +92,8 @@ def test_mlp_grid_search(backend):
 )
 def test_gpt_grid_search(backend):
     all_world_sizes = [1, 2, 4]
-    all_batch_sizes = [256]
-    all_model_sizes = ["gpt3"]
+    all_batch_sizes = [64]
+    all_model_sizes = ["gpt2-xs"]
     with tempfile.NamedTemporaryFile() as tf:
         with open(tf.name, "w") as f:
             writer = csv.DictWriter(f, fieldnames=FIELDNAMES)

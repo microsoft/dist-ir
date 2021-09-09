@@ -351,7 +351,9 @@ def run_mlp(
             num_microbatches,
             topology.devices,
         )
-        typed_inputs = get_typed_input_values(init_fn.inputs, batch_size, dim, dim)
+        typed_inputs = get_typed_input_values(
+            init_fn.inputs, batch_size, input_dim, output_dim
+        )
         init_fn = infer_types(init_fn, typed_inputs)
         transformed_fn = infer_types(transformed_fn, init_fn.outputs)
         input_types = tuple(output.type for output in init_fn.outputs)

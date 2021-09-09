@@ -283,9 +283,12 @@ def run_grid_search(args, grid_search_cls):
 
     # If output file exists, skip existing configs and append results to output file
     if path.exists(args.output_file) and not args.overwrite_output_file:
-        message = f'File "{args.output_file}" already exists. Append to it? [y/n] '
-        if input(message).lower().strip()[0] != "y":
-            return
+        if args.append_output_file:
+            print(f'File "{args.output_file}" already exists. Appending to it')
+        else:
+            message = f'File "{args.output_file}" already exists. Append to it? [y/n] '
+            if input(message).lower().strip()[0] != "y":
+                return
 
         configs = GridSearch._filter_configs_from_file(configs, args.output_file)
     else:

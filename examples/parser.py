@@ -103,7 +103,14 @@ class Parser(ArgumentParser):
             required=True,
             help="Output file",
         )
-        self.add_argument(
+        output_file_group = self.add_mutually_exclusive_group()
+        output_file_group.add_argument(
+            "--append_output_file",
+            action="store_true",
+            default=False,
+            help="Append to output file (and skip configurations already present)",
+        )
+        output_file_group.add_argument(
             "--overwrite_output_file",
             action="store_true",
             default=False,

@@ -32,6 +32,7 @@ def test_mlp_grid_search(backend):
             constants.DEFAULT_DRAM_BANDWIDTH,
             constants.DEFAULT_KERNEL_LAUNCH_OVERHEAD,
             constants.DEFAULT_NETWORK_BANDWIDTH,
+            overwrite_output_file=True,
         )
         grid_search.grid_search(all_world_sizes, all_batch_sizes, all_model_sizes)
 
@@ -89,11 +90,12 @@ def test_gpt_grid_search(backend):
             backend,
             torch.cuda.is_available(),
             tf.name,
-            GPT2_MODEL_PATH,
             constants.DEFAULT_DEVICE_THROUGHPUT,
             constants.DEFAULT_DRAM_BANDWIDTH,
             constants.DEFAULT_KERNEL_LAUNCH_OVERHEAD,
             constants.DEFAULT_NETWORK_BANDWIDTH,
+            model_path=GPT2_MODEL_PATH,
+            overwrite_output_file=True,
         )
         grid_search.grid_search(all_world_sizes, all_batch_sizes, all_model_sizes)
 

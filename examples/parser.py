@@ -97,6 +97,12 @@ class Parser(ArgumentParser):
             required=True,
             help="Output file",
         )
+        self.add_argument(
+            "--overwrite_output_file",
+            action="store_true",
+            default=False,
+            help="Overwrite output file",
+        )
 
     def add_global_output_config_arguments(self):
         self.add_argument(

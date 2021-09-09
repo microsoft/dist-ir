@@ -52,6 +52,7 @@ class GridSearch(ABC):
         network_bandwidth,
         model_path=None,
         configs=None,
+        overwrite_output_file=False,
     ):
         self.model_params = model_params
         self.backend = backend
@@ -63,6 +64,7 @@ class GridSearch(ABC):
         self.network_bandwidth = network_bandwidth
         self.model_path = model_path
         self.configs = configs
+        self.overwrite_output_file = overwrite_output_file
 
     def _write_row(self, config: DHPConfig, latency, peak_memory, lock):
         throughput = config.batch_size / latency
@@ -250,7 +252,7 @@ class GridSearch(ABC):
         else:
             configs = self.configs
         print(f"Generated {len(configs)} configurations")
-        if path.exists(self.output_file):
+        if path.exists(self.output_file) and not self.overwrite_output_file:
             message = f'File "{self.output_file}" already exists. Append to it? [y/n] '
             if input(message).lower().strip()[0] != "y":
                 return
@@ -323,6 +325,7 @@ def run_grid_search(args, grid_search_cls):
             args.network_bandwidth,
             model_path=args.model_path if hasattr(args, "model_path") else None,
             configs=configs,
+            overwrite_output_file=args.overwrite_output_file,
         )
         grid_search.grid_search(
             args.all_world_sizes, args.all_batch_sizes, args.all_model_sizes

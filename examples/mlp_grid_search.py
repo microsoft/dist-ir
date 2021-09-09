@@ -19,6 +19,7 @@ class MLPGridSearch(GridSearch):
         network_bandwidth,
         model_path=None,
         configs=None,
+        overwrite_output_file=False,
     ):
         model_params = {
             "mlp-xs": (8, 512),
@@ -37,6 +38,7 @@ class MLPGridSearch(GridSearch):
             network_bandwidth,
             model_path,
             configs,
+            overwrite_output_file,
         )
 
     def prepare_models_and_input_data(self, topology, all_batch_sizes, all_model_sizes):

@@ -65,14 +65,16 @@ def test_mlp_dhp_transform(
     world_size = dp_degree * hp_degree * pp_degree
     topology = get_uniform_topology(world_size)
     function = mlp.mlp(
-        batch_size,
         input_dim,
         input_dim,
         input_dim,
         num_hidden_layers,
         topology.devices[0],
     )
-    function = infer_types(function, function.inputs)
+    typed_inputs = mlp.get_typed_input_values(
+        function.inputs, batch_size, input_dim, input_dim
+    )
+    function = infer_types(function, typed_inputs)
 
     init_function, transformed_function = mlp_dhp_transform(
         function,
@@ -88,8 +90,11 @@ def test_mlp_dhp_transform(
     transformed_function = mlp.add_optimizer_ops(transformed_function)
 
     input_data = [
-        ConcreteValue(np.random.normal(size=inp.type.shape), topology.devices[0])
-        for inp in function.inputs
+        ConcreteValue(
+            np.random.normal(size=inp.type.shape) if i != 2 else batch_size,
+            topology.devices[0],
+        )
+        for i, inp in enumerate(typed_inputs)
     ]
     ex = SequentialExecutor("numpy")
     outputs = ex.compute(function, input_data)

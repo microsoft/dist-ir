@@ -4,36 +4,63 @@ import numpy as np
 import re
 import torch
 
-from dist_ir.ir import FunctionMaker, Topology, get_uniform_topology
-from dist_ir.ir.type import Float32, Tensor, abstract_values
+from dist_ir.ir import FunctionMaker, Topology, get_uniform_topology, Value
+from dist_ir.ir.type import Int32, Float32, Tensor, abstract_values
 from dist_ir.executor import CostModel, Simulator, infer_types
 from dist_ir.transforms import mlp_dhp_transform
 from .parser import Parser
 import dist_ir.backend.torch as torch_backend
 
 
+def get_typed_input_values(inputs, batch_size, input_dim, output_dim):
+    # TODO: Add types for weights as well?
+    typed_inputs = list(inputs)
+    # Update x and z to use the selected batch size
+    typed_inputs[0] = Value(
+        typed_inputs[0].name,
+        Tensor(
+            shape=(batch_size, input_dim),
+            dtype=typed_inputs[0].type.dtype,
+            device=typed_inputs[0].type.device,
+        ),
+    )
+    typed_inputs[1] = Value(
+        typed_inputs[1].name,
+        Tensor(
+            shape=(batch_size, output_dim),
+            dtype=typed_inputs[1].type.dtype,
+            device=typed_inputs[1].type.device,
+        ),
+    )
+    return tuple(typed_inputs)
+
+
 def get_input_data(batch_size, dim, num_layers):
     x = np.random.normal(size=(batch_size, dim))
     z = np.random.normal(size=(batch_size, dim))
+    n = batch_size
     weights = [np.random.normal(size=(dim, dim))]
     for i in range(1, num_layers - 1):
         weights.append(np.random.normal(size=(dim, dim)))
     weights.append(np.random.normal(size=(dim, dim)))
-    input_data = [x, z] + weights
-    input_data = [v.astype(np.float32) for v in input_data]
+    input_data = [x, z, n] + weights
+    input_data = [
+        v.astype(np.float32) if i != 2 else v for i, v in enumerate(input_data)
+    ]
     return input_data
 
 
-def mlp(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, device):
+def mlp(input_dim, hidden_dim, output_dim, num_hidden_layers, device):
     function = FunctionMaker(name="mlp")
     x = function.add_input_value(
         "x",
-        Tensor(dtype=Float32(), shape=(batch_size, input_dim), device=device),
+        Tensor(dtype=Float32(), shape=None, device=device),
     )
     z = function.add_input_value(
         "z",
-        Tensor(dtype=Float32(), shape=(batch_size, output_dim), device=device),
+        Tensor(dtype=Float32(), shape=None, device=device),
     )
+    n = function.add_input_value("n", Int32(device=device))
     weights = []
     for i in range(num_hidden_layers - 1):
         w = function.add_input_value(
@@ -52,13 +79,10 @@ def mlp(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, device
         y = function.add_op("MatMul", inputs=[a, weight], output_names=[f"y{i}"])
         a = function.add_op("Relu", inputs=[y], output_names=[f"a{i}"])
 
-    l = function.add_op(
-        "Loss", inputs=[a, z], attributes={"N": batch_size}, output_names=["l"]
-    )
+    l = function.add_op("Loss", inputs=[a, z, n], output_names=["l"])
     dl = function.add_op(
         "LossGrad",
-        inputs=[a, z],
-        attributes={"N": batch_size},
+        inputs=[a, z, n],
         output_names=["dl"],
     )
 
@@ -253,7 +277,7 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
             f"{torch.cuda.device_count()} GPUs available"
         )
     input_types = abstract_values(
-        input_data, tuple(Tensor for i in range(len(input_data)))
+        input_data, tuple(Tensor for i in range(len(input_data) if i != 2 else Int32))
     )
     pytorch_input_data = [torch.tensor(x.val, dtype=torch.float32) for x in input_data]
     per_rank_outputs, runtimes = torch_backend.run_pytorch(
@@ -298,7 +322,6 @@ def run_mlp(
 
     if mode == "training":
         fn = mlp(
-            batch_size,
             input_dim,
             hidden_dim,
             output_dim,
@@ -307,7 +330,6 @@ def run_mlp(
         )
     elif mode == "inference":
         fn = mlp_inference(
-            batch_size,
             input_dim,
             hidden_dim,
             output_dim,
@@ -329,7 +351,8 @@ def run_mlp(
             num_microbatches,
             topology.devices,
         )
-        init_fn = infer_types(init_fn, init_fn.inputs)
+        typed_inputs = get_typed_input_values(init_fn.inputs, batch_size, dim, dim)
+        init_fn = infer_types(init_fn, typed_inputs)
         transformed_fn = infer_types(transformed_fn, init_fn.outputs)
         input_types = tuple(output.type for output in init_fn.outputs)
     else:

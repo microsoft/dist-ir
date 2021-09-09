@@ -268,14 +268,12 @@ def layer_norm_grad(op, y_grad, x, scale, mean, inv_std_var):
     return x_grad, bias_grad, scale_grad
 
 
-def loss(op, x, y):
-    N = op.attributes["N"]
-    return np.square(x - y) / N
+def loss(op, x, y, n):
+    return np.square(x - y) / n
 
 
-def loss_grad(op, x, y):
-    N = op.attributes["N"]
-    return 2 * (x - y) / N
+def loss_grad(op, x, y, n):
+    return 2 * (x - y) / n
 
 
 def matmul(op, x, y):
@@ -692,8 +690,8 @@ NumPyRegister = {
         "LayerNormalizationGrad",
         (np.ndarray, np.ndarray, np.ndarray, np.float32, np.float32),
     ): layer_norm_grad,
-    ("Loss", (np.ndarray, np.ndarray)): loss,
-    ("LossGrad", (np.ndarray, np.ndarray)): loss_grad,
+    ("Loss", (np.ndarray, np.ndarray, int)): loss,
+    ("LossGrad", (np.ndarray, np.ndarray, int)): loss_grad,
     ("MatMul", (np.ndarray, np.ndarray)): matmul,
     ("MatMulGrad", (np.ndarray, np.ndarray, np.ndarray)): matmul_grad,
     ("Min", (np.ndarray, np.ndarray)): lambda op, x, y: np.minimum(x, y),

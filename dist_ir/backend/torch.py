@@ -123,12 +123,12 @@ def _identity(x, ctx=None):
     return x
 
 
-def _loss(x, y, N=None, ctx=None):
-    return torch.square(x - y) / N
+def _loss(x, y, n, ctx=None):
+    return torch.square(x - y) / n
 
 
-def _loss_grad(x, y, N=None, ctx=None):
-    return 2 * (x - y) / N
+def _loss_grad(x, y, n, ctx=None):
+    return 2 * (x - y) / n
 
 
 def _matmul(x, y, ctx=None):

@@ -1,5 +1,5 @@
 from dist_ir.ir import Value
-from dist_ir.ir.type import Tensor
+from dist_ir.ir.type import Tensor, abstract_values
 from dist_ir.executor import infer_types, SequentialExecutor, ConcreteValue
 from dist_ir.transforms import mlp_dhp_transform
 from . import mlp
@@ -43,9 +43,8 @@ class MLPGridSearch(GridSearch):
     def get_model_and_input_data(self, batch_size, model_size):
         if model_size not in self.models:
             num_layers, dim = self.model_params[model_size]
-            max_batch_size = dim  # TODO this is (or should be) irrelevant
             self.models[model_size] = mlp.mlp(
-                max_batch_size, dim, dim, dim, num_layers, self.topology.devices[0]
+                dim, dim, dim, num_layers, self.topology.devices[0]
             )
 
         fn = self.models[model_size]
@@ -57,18 +56,7 @@ class MLPGridSearch(GridSearch):
                 for t, inp in zip(input_data, fn.inputs)
             )
         else:
-            input_data = list(fn.inputs)
-            # Update x and z to use the selected batch size
-            for i in range(2):
-                input_data[i] = Value(
-                    fn.inputs[i].name,
-                    Tensor(
-                        shape=(batch_size, dim),
-                        dtype=input_data[i].type.dtype,
-                        device=input_data[i].type.device,
-                    ),
-                )
-            input_data = tuple(input_data)
+            input_data = mlp_get_typed_inputs(init_fn.inputs, batch_size, dim, dim)
         return fn, input_data
 
     def verify_config(self, config: DHPConfig):
@@ -89,7 +77,7 @@ class MLPGridSearch(GridSearch):
             config.num_microbatches,
             topology.devices,
         )
-        init_fn = infer_types(init_fn, init_fn.inputs)
+        init_fn = infer_types(init_fn, input_data)
         # init_function.outputs = transformed_function.inputs, so get types from there:
         transformed_fn = infer_types(transformed_fn, init_fn.outputs)
         transformed_fn = mlp.add_optimizer_ops(transformed_fn)

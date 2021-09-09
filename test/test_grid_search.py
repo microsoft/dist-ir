@@ -1,3 +1,4 @@
+import csv
 import math
 from pathlib import Path
 import pandas as pd
@@ -6,7 +7,7 @@ import tempfile
 import torch
 
 from dist_ir.utils import constants
-from examples.grid_search import GridSearch
+from examples.grid_search import GridSearch, FIELDNAMES
 from examples.mlp_grid_search import MLPGridSearch
 from examples.gpt2_grid_search import GPTGridSearch
 from examples import mlp, gpt2
@@ -24,6 +25,9 @@ def test_mlp_grid_search(backend):
     all_batch_sizes = [256]
     all_model_sizes = ["mlp-xs"]
     with tempfile.NamedTemporaryFile() as tf:
+        with open(tf.name, "w") as f:
+            writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+            writer.writeheader()
         grid_search = MLPGridSearch(
             backend,
             torch.cuda.is_available(),
@@ -32,11 +36,17 @@ def test_mlp_grid_search(backend):
             constants.DEFAULT_DRAM_BANDWIDTH,
             constants.DEFAULT_KERNEL_LAUNCH_OVERHEAD,
             constants.DEFAULT_NETWORK_BANDWIDTH,
-            overwrite_output_file=True,
+            max_world_size=max(all_world_sizes),
         )
-        grid_search.grid_search(all_world_sizes, all_batch_sizes, all_model_sizes)
+        configs = list(
+            grid_search.gen_configurations(
+                all_world_sizes, all_batch_sizes, all_model_sizes
+            )
+        )
+        grid_search.grid_search(configs)
 
         df = pd.read_csv(tf.name)
+        print(df)
 
         if backend == "simulate":
             all_degrees = GridSearch.get_all_degrees(all_world_sizes[-1])
@@ -72,6 +82,7 @@ def test_mlp_grid_search(backend):
                     & (df["pp_degree"] == p)
                     & (df["num_microbatches"] == p)
                 ]["latency"].values[0]
+                print(latency, grid_search_latency)
                 assert math.isclose(latency, grid_search_latency, abs_tol=10 ** -8)
 
     # TODO: Check correctness for PyTorch?
@@ -86,6 +97,9 @@ def test_gpt_grid_search(backend):
     all_batch_sizes = [256]
     all_model_sizes = ["gpt3"]
     with tempfile.NamedTemporaryFile() as tf:
+        with open(tf.name, "w") as f:
+            writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+            writer.writeheader()
         grid_search = GPTGridSearch(
             backend,
             torch.cuda.is_available(),
@@ -95,9 +109,14 @@ def test_gpt_grid_search(backend):
             constants.DEFAULT_KERNEL_LAUNCH_OVERHEAD,
             constants.DEFAULT_NETWORK_BANDWIDTH,
             model_path=GPT2_MODEL_PATH,
-            overwrite_output_file=True,
+            max_world_size=max(all_world_sizes),
         )
-        grid_search.grid_search(all_world_sizes, all_batch_sizes, all_model_sizes)
+        configs = list(
+            grid_search.gen_configurations(
+                all_world_sizes, all_batch_sizes, all_model_sizes
+            )
+        )
+        grid_search.grid_search(configs)
 
         df = pd.read_csv(tf.name)
 

@@ -155,7 +155,7 @@ def _partition_inputs_hp(function, device_tree, dp_inputs):
         # data parallel partition.
         if len(hp_devices) > 1:
             for j, inp in enumerate(function.inputs):
-                if j < 2:
+                if j < 3:
                     hp_inputs[dp_inputs[inp][i]] = _mpi_broadcast_value(
                         dp_inputs[inp][i],
                         function,
@@ -163,7 +163,7 @@ def _partition_inputs_hp(function, device_tree, dp_inputs):
                         parallelism_level="hp",
                     )
                 else:
-                    dim = (j + 1) % 2
+                    dim = j % 2
                     hp_inputs[dp_inputs[inp][i]] = _mpi_scatter_value(
                         dp_inputs[inp][i],
                         function,
@@ -290,7 +290,7 @@ def _pipeline_parallel_partition(function, pp_degree, devices):
 
     Returns a map from stage to device.
     """
-    num_blocks = len(function.inputs) - 2
+    num_blocks = len(function.inputs) - 3
     assert num_blocks % pp_degree == 0
     num_blocks_per_device = num_blocks // pp_degree
     partition_map = {}

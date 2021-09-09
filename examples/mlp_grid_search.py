@@ -17,9 +17,8 @@ class MLPGridSearch(GridSearch):
         dram_bandwidth,
         kernel_launch_overhead,
         network_bandwidth,
+        max_world_size,
         model_path=None,
-        configs=None,
-        overwrite_output_file=False,
     ):
         model_params = {
             "mlp-xs": (8, 512),
@@ -36,21 +35,19 @@ class MLPGridSearch(GridSearch):
             dram_bandwidth,
             kernel_launch_overhead,
             network_bandwidth,
+            max_world_size,
             model_path,
-            configs,
-            overwrite_output_file,
         )
-
-    def prepare_models_and_input_data(self, topology, all_batch_sizes, all_model_sizes):
-        max_batch_size = max(all_batch_sizes)
         self.models = {}
-        for model_size in all_model_sizes:
-            num_layers, dim = self.model_params[model_size]
-            self.models[model_size] = mlp.mlp(
-                max_batch_size, dim, dim, dim, num_layers, topology.devices[0]
-            )
 
     def get_model_and_input_data(self, batch_size, model_size):
+        if model_size not in self.models:
+            num_layers, dim = self.model_params[model_size]
+            max_batch_size = dim  # TODO this is (or should be) irrelevant
+            self.models[model_size] = mlp.mlp(
+                max_batch_size, dim, dim, dim, num_layers, self.topology.devices[0]
+            )
+
         fn = self.models[model_size]
         num_layers, dim = self.model_params[model_size]
         if self.backend == "pytorch":

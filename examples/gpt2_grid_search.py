@@ -16,9 +16,8 @@ class GPTGridSearch(GridSearch):
         dram_bandwidth,
         kernel_launch_overhead,
         network_bandwidth,
+        max_world_size,
         model_path,
-        configs=None,
-        overwrite_output_file=False,
     ):
         model_params = {
             "gpt2": (12, 12, 768),
@@ -43,32 +42,34 @@ class GPTGridSearch(GridSearch):
             dram_bandwidth,
             kernel_launch_overhead,
             network_bandwidth,
+            max_world_size,
             model_path,
-            configs,
-            overwrite_output_file,
         )
-
-    def prepare_models_and_input_data(self, topology, all_batch_sizes, all_model_sizes):
-        base_model, base_input_data = gpt2.import_function_and_get_input_data(
+        self.base_model, self.base_input_data = gpt2.import_function_and_get_input_data(
             self.model_path,
-            topology.devices[0],
+            self.topology.devices[0],
             use_real_weights=(self.backend == "pytorch"),
         )
         self.models_and_input_data = {}
-        for model_size in all_model_sizes:
+        self.all_input_ids = []
+
+    def get_model_and_input_data(self, batch_size, model_size):
+        if len(self.all_input_ids) < batch_size:
+            # TODO only do this for pytorch backend, use abstract tensor for simulator?
+            self.all_input_ids = gpt2.create_input_ids(batch_size)
+
+        if model_size not in self.models_and_input_data:
             n_layer, n_head, d_embd = self.model_params[model_size]
             self.models_and_input_data[
                 model_size
             ] = gpt2.resize_function_and_input_data(
-                base_model,
-                copy.deepcopy(base_input_data),
+                self.base_model,
+                copy.deepcopy(self.base_input_data),
                 n_layer,
                 n_head,
                 d_embd,
             )
-        self.all_input_ids = gpt2.create_input_ids(max(all_batch_sizes))
 
-    def get_model_and_input_data(self, batch_size, model_size):
         model, input_data = self.models_and_input_data[model_size]
         input_ids = self.all_input_ids[:batch_size]
         input_data = [input_ids] + input_data

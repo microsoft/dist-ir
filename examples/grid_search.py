@@ -9,11 +9,8 @@ import traceback
 import numpy as np
 import pandas as pd
 from tqdm.contrib.concurrent import process_map
-import os
-import tempfile
-import uuid
 
-from dist_ir.ir.topology import get_uniform_topology, Topology
+from dist_ir.ir.topology import get_uniform_topology
 
 
 FIELDNAMES = [
@@ -50,9 +47,8 @@ class GridSearch(ABC):
         dram_bandwidth,
         kernel_launch_overhead,
         network_bandwidth,
+        max_world_size,
         model_path=None,
-        configs=None,
-        overwrite_output_file=False,
     ):
         self.model_params = model_params
         self.backend = backend
@@ -63,13 +59,20 @@ class GridSearch(ABC):
         self.kernel_launch_overhead = kernel_launch_overhead
         self.network_bandwidth = network_bandwidth
         self.model_path = model_path
-        self.configs = configs
-        self.overwrite_output_file = overwrite_output_file
+        self.topology = get_uniform_topology(
+            max_world_size,
+            self.device_throughput,
+            self.dram_bandwidth,
+            self.kernel_launch_overhead,
+            self.network_bandwidth,
+        )
+        manager = Manager()
+        self.lock = manager.Lock()
 
-    def _write_row(self, config: DHPConfig, latency, peak_memory, lock):
+    def _write_row(self, config: DHPConfig, latency, peak_memory):
         throughput = config.batch_size / latency
         world_size = config.dp_degree * config.hp_degree * config.pp_degree
-        with lock:
+        with self.lock:
             with open(self.output_file, "a+", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
                 writer.writerow(
@@ -87,6 +90,31 @@ class GridSearch(ABC):
                     }
                 )
                 f.flush()
+
+    # TODO is it cleaner to have these outside the class?
+    @staticmethod
+    def _config_from_df(df: pd.DataFrame, row_number):
+        r = df.iloc[row_number]
+        return DHPConfig(
+            r.model_size,
+            r.dp_degree,
+            r.hp_degree,
+            r.pp_degree,
+            r.num_microbatches,
+            r.batch_size,
+        )
+
+    @staticmethod
+    def _read_configs(configs_file):
+        df = pd.read_csv(configs_file)
+        return [GridSearch._config_from_df(df, i) for i in range(len(df))]
+
+    @staticmethod
+    def _filter_configs_from_file(configs, file):
+        """Filter `configs` to those configs that are not already in `file`."""
+        existing_configs = set(GridSearch._read_configs(file))
+        print(f"Found {len(existing_configs)} existing configurations, skipping them")
+        return [c for c in configs if c not in existing_configs]
 
     @staticmethod
     def get_all_degrees(n):
@@ -153,10 +181,6 @@ class GridSearch(ABC):
         return self.model_params[model_size]
 
     @abstractmethod
-    def prepare_models_and_input_data(self, topology, all_batch_sizes, all_model_sizes):
-        pass
-
-    @abstractmethod
     def get_model_and_input_data(self, batch_size, model_size):
         pass
 
@@ -182,25 +206,23 @@ class GridSearch(ABC):
     def pytorch(transformed_fn, input_data, world_size):
         pass
 
-    def run(self, config: DHPConfig, topology: Topology, lock):
+    def run(self, config: DHPConfig):
         fn, input_data = self.get_model_and_input_data(
             config.batch_size, config.model_size
         )
         try:
-            init_fn, transformed_fn, input_data = self.transform(
-                fn, input_data, topology, config
+            _, transformed_fn, input_data = self.transform(
+                fn, input_data, self.topology, config
             )
             if self.backend == "simulate":
-                simulation = self.simulate(transformed_fn, input_data, topology)
+                simulation = self.simulate(transformed_fn, input_data, self.topology)
                 latency = max([simulation.timestamps[d] for d in simulation.timestamps])
                 peak_memory = max(
                     [simulation.peak_memory[d] for d in simulation.peak_memory]
                 ) / (2.0 ** 20)
             elif self.backend == "pytorch":
-                world_size = len(topology.devices) - 1
-                per_rank_outputs, runtimes = self.pytorch(
-                    transformed_fn, input_data, world_size
-                )
+                world_size = config.dp_degree * config.hp_degree * config.pp_degree
+                _, runtimes = self.pytorch(transformed_fn, input_data, world_size)
                 latency = np.median(runtimes[-1])
                 # TODO: Measure peak memory?
                 peak_memory = 0
@@ -214,119 +236,61 @@ class GridSearch(ABC):
             print(e)
             latency = -1
             peak_memory = -1
-        self._write_row(config, latency, peak_memory, lock)
+        self._write_row(config, latency, peak_memory)
 
-    def _filter_configs_from_file(self, configs, file):
-        """Filter `configs` to those configs that are not already in `file`."""
-        df = pd.read_csv(file)
-        existing_configs = {
-            DHPConfig(
-                r.model_size,
-                r.dp_degree,
-                r.hp_degree,
-                r.pp_degree,
-                r.num_microbatches,
-                r.batch_size,
-            )
-            for _, r in df.iterrows()
-        }
-        print(f"Found {len(existing_configs)} existing configurations, skipping them")
-        return [c for c in configs if c not in existing_configs]
-
-    def grid_search(self, all_world_sizes, all_batch_sizes, all_model_sizes):
-        topology = get_uniform_topology(
-            max(all_world_sizes),
-            self.device_throughput,
-            self.dram_bandwidth,
-            self.kernel_launch_overhead,
-            self.network_bandwidth,
-        )
-
-        self.prepare_models_and_input_data(topology, all_batch_sizes, all_model_sizes)
-        if self.configs is None:
-            configs = list(
-                self.gen_configurations(
-                    all_world_sizes, all_batch_sizes, all_model_sizes
-                )
-            )
-        else:
-            configs = self.configs
-        print(f"Generated {len(configs)} configurations")
-        if path.exists(self.output_file) and not self.overwrite_output_file:
-            message = f'File "{self.output_file}" already exists. Append to it? [y/n] '
-            if input(message).lower().strip()[0] != "y":
-                return
-            # Filter configs to those not already present in output_file
-            configs = self._filter_configs_from_file(configs, self.output_file)
-        else:
-            with open(self.output_file, "w", newline="") as f:
-                writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
-                writer.writeheader()
-
-        manager = Manager()
-        lock = manager.Lock()
+    def grid_search(self, configs):
         if self.backend == "pytorch":
             for config in configs:
                 print(config)
-                self.run(config, topology, lock)
+                self.run(config)
         elif self.backend == "simulate":
-            # TODO is there a cleaner way to pass fixed arguments to run?
-            process_map(
-                self.run, configs, itertools.repeat(topology), itertools.repeat(lock)
-            )
+            process_map(self.run, configs)
         else:
             raise ValueError(f"Invalid backend {self.backend}")
 
 
+# TODO merge with grid_search? move everything there or here?
 def run_grid_search(args, grid_search_cls):
-    if args.backend == "pytorch":
-        if args.simulation_results_file is not None:
-            output_file = args.simulation_results_file
-        else:
-            print("Running simulation grid search before PyTorch grid search...")
-            td = tempfile.TemporaryDirectory()
-            output_file = os.path.join(td.name, str(uuid.uuid4()))
-    else:
-        output_file = args.output_file
     grid_search = grid_search_cls(
-        "simulate",
+        args.backend,
         args.use_gpu,
-        output_file,
+        args.output_file,
         args.device_throughput,
         args.dram_bandwidth,
         args.kernel_launch_overhead,
         args.network_bandwidth,
+        max(args.all_world_sizes),
         model_path=args.model_path if hasattr(args, "model_path") else None,
     )
-    grid_search.grid_search(
-        args.all_world_sizes, args.all_batch_sizes, args.all_model_sizes
-    )
-    if args.backend == "pytorch":
-        df = pd.read_csv(output_file)
-        df = df.sort_values(by=["peak_memory"])
-        configs = [
-            DHPConfig(
-                row["model_size"],
-                row["dp_degree"],
-                row["hp_degree"],
-                row["pp_degree"],
-                row["num_microbatches"],
-                row["batch_size"],
+
+    # If we are not given which config(s) to run, generate them
+    if args.configs_file is None:
+        configs = list(
+            grid_search.gen_configurations(
+                args.all_world_sizes, args.all_batch_sizes, args.all_model_sizes
             )
-            for index, row in df.iterrows()
-        ]
-        grid_search = grid_search_cls(
-            args.backend,
-            args.use_gpu,
-            args.output_file,
-            args.device_throughput,
-            args.dram_bandwidth,
-            args.kernel_launch_overhead,
-            args.network_bandwidth,
-            model_path=args.model_path if hasattr(args, "model_path") else None,
-            configs=configs,
-            overwrite_output_file=args.overwrite_output_file,
         )
-        grid_search.grid_search(
-            args.all_world_sizes, args.all_batch_sizes, args.all_model_sizes
-        )
+        print(f"Generated {len(configs)} configurations")
+    else:
+        if args.config_number is not None:
+            df = pd.read_csv(args.configs_file)
+            # lookup and run only given config
+            configs = [GridSearch._config_from_df(df, args.config_number)]
+        else:
+            # use all configs
+            configs = GridSearch._read_configs(args.configs_file)
+        print(f"Found {len(configs)} configurations")
+
+    # If output file exists, skip existing configs and append results to output file
+    if path.exists(args.output_file) and not args.overwrite_output_file:
+        message = f'File "{args.output_file}" already exists. Append to it? [y/n] '
+        if input(message).lower().strip()[0] != "y":
+            return
+
+        configs = GridSearch._filter_configs_from_file(configs, args.output_file)
+    else:
+        with open(args.output_file, "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
+            writer.writeheader()
+
+    grid_search.grid_search(configs)

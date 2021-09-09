@@ -86,10 +86,16 @@ class Parser(ArgumentParser):
             default=defaults["all_model_sizes"],
         )
         self.add_argument(
-            "--simulation_results_file",
+            "--configs_file",
             type=str,
             default=None,
-            help="Simulation results file",
+            help="File containing configurations to run",
+        )
+        self.add_argument(
+            "--config_number",
+            type=int,
+            default=None,
+            help="The configuration from configs_file to run (line number, excluding header)",
         )
         self.add_argument(
             "--output_file",

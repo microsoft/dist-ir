@@ -665,14 +665,7 @@ if __name__ == "__main__":
     parser.add_simulation_topology_config_arguments()
     parser.add_backend_config_arguments()
     parser.add_execution_mode_config_arguments()
-    parser.add_argument(
-        "--model_path",
-        type=str,
-        required=True,
-        help="Path to GPT-2 ONNX model "
-        "(downloaded from https://github.com/onnx/models/blob/master/"
-        "text/machine_comprehension/gpt-2/model/gpt2-10.onnx?raw=true)",
-    )
+    parser.add_gpt2_model_path_config_arguments()
     parser.add_argument("--n_layer", type=int, default=12, help="Num hidden layers")
     parser.add_argument(
         "--n_head",

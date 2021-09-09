@@ -86,6 +86,12 @@ class Parser(ArgumentParser):
             default=defaults["all_model_sizes"],
         )
         self.add_argument(
+            "--simulation_results_file",
+            type=str,
+            default=None,
+            help="Simulation results file",
+        )
+        self.add_argument(
             "--output_file",
             type=str,
             required=True,
@@ -95,6 +101,18 @@ class Parser(ArgumentParser):
     def add_global_output_config_arguments(self):
         self.add_argument(
             "--verbose", action="store_true", default=False, help="Verbose"
+        )
+
+    def add_gpt2_model_path_config_arguments(self):
+        self.add_argument(
+            "--model_path",
+            type=str,
+            required=True,
+            help=(
+                "Path to GPT-2 ONNX model "
+                "(downloaded from https://github.com/onnx/models/blob/master/"
+                "text/machine_comprehension/gpt-2/model/gpt2-10.onnx?raw=True)"
+            ),
         )
 
     def add_calibration_arguments(self):

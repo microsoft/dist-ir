@@ -1,6 +1,6 @@
 import copy
 
-from .grid_search import DHPConfig, GridSearch
+from .grid_search import DHPConfig, GridSearch, run_grid_search
 from . import gpt2
 from .parser import Parser
 from dist_ir.transforms.gpt2_dhp_transform import check_params
@@ -12,11 +12,12 @@ class GPTGridSearch(GridSearch):
         backend,
         use_gpu,
         output_file,
-        model_path,
         device_throughput,
         dram_bandwidth,
         kernel_launch_overhead,
         network_bandwidth,
+        model_path,
+        configs=None,
     ):
         model_params = {
             "gpt2": (12, 12, 768),
@@ -41,8 +42,9 @@ class GPTGridSearch(GridSearch):
             dram_bandwidth,
             kernel_launch_overhead,
             network_bandwidth,
+            model_path,
+            configs,
         )
-        self.model_path = model_path
 
     def prepare_models_and_input_data(self, topology, all_batch_sizes, all_model_sizes):
         base_model, base_input_data = gpt2.import_function_and_get_input_data(
@@ -112,22 +114,6 @@ class GPTGridSearch(GridSearch):
         )
 
 
-def main(args):
-    grid_search = GPTGridSearch(
-        args.backend,
-        args.use_gpu,
-        args.output_file,
-        args.model_path,
-        args.device_throughput,
-        args.dram_bandwidth,
-        args.kernel_launch_overhead,
-        args.network_bandwidth,
-    )
-    grid_search.grid_search(
-        args.all_world_sizes, args.all_batch_sizes, args.all_model_sizes
-    )
-
-
 if __name__ == "__main__":
     defaults = {
         "all_world_sizes": [4, 8, 16],
@@ -147,15 +133,6 @@ if __name__ == "__main__":
     parser.add_execution_mode_config_arguments()
     parser.add_grid_search_config_arguments(defaults)
     parser.add_backend_config_arguments()
-    parser.add_argument(
-        "--model_path",
-        type=str,
-        required=True,
-        help=(
-            "Path to GPT-2 ONNX model "
-            "(downloaded from https://github.com/onnx/models/blob/master/"
-            "text/machine_comprehension/gpt-2/model/gpt2-10.onnx?raw=True)"
-        ),
-    )
+    parser.add_gpt2_model_path_config_arguments()
     args = parser.parse_args()
-    main(args)
+    run_grid_search(args, GPTGridSearch)

@@ -9,6 +9,9 @@ import traceback
 import numpy as np
 import pandas as pd
 from tqdm.contrib.concurrent import process_map
+import os
+import tempfile
+import uuid
 
 from dist_ir.ir.topology import get_uniform_topology, Topology
 
@@ -47,6 +50,8 @@ class GridSearch(ABC):
         dram_bandwidth,
         kernel_launch_overhead,
         network_bandwidth,
+        model_path=None,
+        configs=None,
     ):
         self.model_params = model_params
         self.backend = backend
@@ -56,6 +61,8 @@ class GridSearch(ABC):
         self.dram_bandwidth = dram_bandwidth
         self.kernel_launch_overhead = kernel_launch_overhead
         self.network_bandwidth = network_bandwidth
+        self.model_path = model_path
+        self.configs = configs
 
     def _write_row(self, config: DHPConfig, latency, peak_memory, lock):
         throughput = config.batch_size / latency
@@ -234,9 +241,14 @@ class GridSearch(ABC):
         )
 
         self.prepare_models_and_input_data(topology, all_batch_sizes, all_model_sizes)
-        configs = list(
-            self.gen_configurations(all_world_sizes, all_batch_sizes, all_model_sizes)
-        )
+        if self.configs is None:
+            configs = list(
+                self.gen_configurations(
+                    all_world_sizes, all_batch_sizes, all_model_sizes
+                )
+            )
+        else:
+            configs = self.configs
         print(f"Generated {len(configs)} configurations")
         if path.exists(self.output_file):
             message = f'File "{self.output_file}" already exists. Append to it? [y/n] '
@@ -262,3 +274,56 @@ class GridSearch(ABC):
             )
         else:
             raise ValueError(f"Invalid backend {self.backend}")
+
+
+def run_grid_search(args, grid_search_cls):
+    if args.backend == "pytorch":
+        if args.simulation_results_file is not None:
+            output_file = args.simulation_results_file
+        else:
+            print("Running simulation grid search before PyTorch grid search...")
+            td = tempfile.TemporaryDirectory()
+            output_file = os.path.join(td.name, str(uuid.uuid4()))
+    else:
+        output_file = args.output_file
+    grid_search = grid_search_cls(
+        "simulate",
+        args.use_gpu,
+        output_file,
+        args.device_throughput,
+        args.dram_bandwidth,
+        args.kernel_launch_overhead,
+        args.network_bandwidth,
+        model_path=args.model_path if hasattr(args, "model_path") else None,
+    )
+    grid_search.grid_search(
+        args.all_world_sizes, args.all_batch_sizes, args.all_model_sizes
+    )
+    if args.backend == "pytorch":
+        df = pd.read_csv(output_file)
+        df = df.sort_values(by=["peak_memory"])
+        configs = [
+            DHPConfig(
+                row["model_size"],
+                row["dp_degree"],
+                row["hp_degree"],
+                row["pp_degree"],
+                row["num_microbatches"],
+                row["batch_size"],
+            )
+            for index, row in df.iterrows()
+        ]
+        grid_search = grid_search_cls(
+            args.backend,
+            args.use_gpu,
+            args.output_file,
+            args.device_throughput,
+            args.dram_bandwidth,
+            args.kernel_launch_overhead,
+            args.network_bandwidth,
+            model_path=args.model_path if hasattr(args, "model_path") else None,
+            configs=configs,
+        )
+        grid_search.grid_search(
+            args.all_world_sizes, args.all_batch_sizes, args.all_model_sizes
+        )

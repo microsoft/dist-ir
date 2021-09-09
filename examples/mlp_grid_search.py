@@ -1,13 +1,9 @@
-from itertools import product
-import numpy as np
-import argparse
-
 from dist_ir.ir import Value
 from dist_ir.ir.type import Tensor
 from dist_ir.executor import infer_types, SequentialExecutor, ConcreteValue
 from dist_ir.transforms import mlp_dhp_transform
 from . import mlp
-from .grid_search import DHPConfig, GridSearch
+from .grid_search import DHPConfig, GridSearch, run_grid_search
 from .parser import Parser
 
 
@@ -21,6 +17,8 @@ class MLPGridSearch(GridSearch):
         dram_bandwidth,
         kernel_launch_overhead,
         network_bandwidth,
+        model_path=None,
+        configs=None,
     ):
         model_params = {
             "mlp-xs": (8, 512),
@@ -37,6 +35,8 @@ class MLPGridSearch(GridSearch):
             dram_bandwidth,
             kernel_launch_overhead,
             network_bandwidth,
+            model_path,
+            configs,
         )
 
     def prepare_models_and_input_data(self, topology, all_batch_sizes, all_model_sizes):
@@ -113,21 +113,6 @@ class MLPGridSearch(GridSearch):
         )
 
 
-def main(args):
-    grid_search = MLPGridSearch(
-        args.backend,
-        args.use_gpu,
-        args.output_file,
-        args.device_throughput,
-        args.dram_bandwidth,
-        args.kernel_launch_overhead,
-        args.network_bandwidth,
-    )
-    grid_search.grid_search(
-        args.all_world_sizes, args.all_batch_sizes, args.all_model_sizes
-    )
-
-
 if __name__ == "__main__":
     defaults = {
         "all_world_sizes": [1, 2, 4],
@@ -140,4 +125,4 @@ if __name__ == "__main__":
     parser.add_grid_search_config_arguments(defaults)
     parser.add_backend_config_arguments()
     args = parser.parse_args()
-    main(args)
+    run_grid_search(args, MLPGridSearch)

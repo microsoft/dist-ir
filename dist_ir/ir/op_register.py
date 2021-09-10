@@ -38,8 +38,8 @@ OpRegister = {
     "LambOptimizer": OpRegisterEntry(variadic_inputs=True, variadic_outputs=True),
     "LayerNormalization": OpRegisterEntry(num_inputs=3, num_outputs=3),
     "LayerNormalizationGrad": OpRegisterEntry(num_inputs=5, num_outputs=3),
-    "Loss": OpRegisterEntry(num_inputs=2, num_outputs=1),
-    "LossGrad": OpRegisterEntry(num_inputs=2, num_outputs=1),
+    "Loss": OpRegisterEntry(num_inputs=3, num_outputs=1),
+    "LossGrad": OpRegisterEntry(num_inputs=3, num_outputs=1),
     # TODO support variadic number of inputs
     "Min": OpRegisterEntry(num_inputs=2, num_outputs=1),
     "MatMul": OpRegisterEntry(num_inputs=2, num_outputs=1),

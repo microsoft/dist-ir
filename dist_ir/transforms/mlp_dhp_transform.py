@@ -1,4 +1,5 @@
-from collections import defaultdict, Hashable
+from collections import defaultdict
+from collections.abc import Hashable
 from frozendict import frozendict
 from itertools import chain
 import math
@@ -157,7 +158,7 @@ def _partition_inputs_hp(function, device_tree, dp_inputs):
         # data parallel partition.
         if len(hp_devices) > 1:
             for j, inp in enumerate(function.inputs):
-                if j < 2:
+                if j < 3:
                     hp_inputs[dp_inputs[inp][i]] = _mpi_broadcast_value(
                         dp_inputs[inp][i],
                         function,
@@ -165,7 +166,7 @@ def _partition_inputs_hp(function, device_tree, dp_inputs):
                         parallelism_level="hp",
                     )
                 else:
-                    dim = (j + 1) % 2
+                    dim = j % 2
                     hp_inputs[dp_inputs[inp][i]] = _mpi_scatter_value(
                         dp_inputs[inp][i],
                         function,
@@ -294,7 +295,7 @@ def _pipeline_parallel_partition(function, pp_degree, devices):
 
     Returns a map from stage to device.
     """
-    num_blocks = len(function.inputs) - 2
+    num_blocks = len(function.inputs) - 3
     assert num_blocks % pp_degree == 0
     num_blocks_per_device = num_blocks // pp_degree
     partition_map = {}
@@ -618,7 +619,7 @@ def mlp_dhp_transform(
                                 mb_k_output = intermediate_value_map[j][k][
                                     microbatch_id
                                 ][output]
-                                match = re.search("hp\_(.*)\_pp", mb_k_output.name)
+                                match = re.search(r"hp\_(.*)\_pp", mb_k_output.name)
                                 hp_level = match.group(1)
                                 if microbatch_id == 0:
                                     # We clone the output from the first microbatch to create
@@ -648,7 +649,7 @@ def mlp_dhp_transform(
                                     ]
                                     assert (
                                         re.search(
-                                            "hp\_(.*)\_pp", mb_all_output.name
+                                            r"hp\_(.*)\_pp", mb_all_output.name
                                         ).group(1)
                                         == hp_level
                                     )

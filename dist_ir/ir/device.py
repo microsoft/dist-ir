@@ -1,15 +1,17 @@
 from dataclasses import dataclass
 from typing import ClassVar
 
+from dist_ir.utils import constants
+
 
 @dataclass(frozen=True)
 class Device:
 
     device_id: str
     device_type: str
-    throughput: float = 1.0e14
-    dram_bandwidth: float = 1.2e12
-    kernel_launch_overhead: float = 1e-5
+    throughput: float = constants.DEFAULT_DEVICE_THROUGHPUT
+    dram_bandwidth: float = constants.DEFAULT_DRAM_BANDWIDTH
+    kernel_launch_overhead: float = constants.DEFAULT_KERNEL_LAUNCH_OVERHEAD
     is_variable: bool = False
 
     device_variable_id: ClassVar[int] = 0

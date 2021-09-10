@@ -1,4 +1,5 @@
-from collections import defaultdict, Hashable
+from collections import defaultdict
+from collections.abc import Hashable
 from frozendict import frozendict
 from itertools import chain
 import math
@@ -8,8 +9,8 @@ import re
 import roundrobin
 
 
-from ..ir import cpprint, Op
-from ..ir.function import Function, FunctionMaker
+from ..executor.type_inference import infer_types
+from ..ir.function import FunctionMaker
 from .pipedream_scheduler import PipeDreamScheduler
 from .sanitize_attributes_transform import (
     sanitize_unhashable_attributes,
@@ -411,7 +412,7 @@ def check_params(
             "Embedding dimension must be divisible by number of attention heads"
         )
     elif hp_degree > n_head:
-        raise ValueError("# of attention heads must be > horizontal parallel degree")
+        raise ValueError("# of attention heads must be >= horizontal parallel degree")
 
 
 def update_attributes(
@@ -464,6 +465,7 @@ def update_attributes(
     return attributes
 
 
+# TODO assign device 1 to init_fn inputs here?
 def gpt2_dhp_transform(
     function,
     dp_degree,
@@ -547,6 +549,9 @@ def gpt2_dhp_transform(
         op_to_stage_maps,
     )
     init_function = init_function.finalize()
+
+    # Infer types so that init_function.outputs have correct types
+    # init_function = infer_types(init_function, init_function.inputs)
 
     # Inputs of transformed_function are outputs of init_function.
     for v in init_function.outputs:
@@ -724,7 +729,7 @@ def gpt2_dhp_transform(
                                 mb_k_output = intermediate_value_map[j][k][
                                     microbatch_id
                                 ][output]
-                                match = re.search("hp\_(.*)\_pp", mb_k_output.name)
+                                match = re.search(r"hp\_(.*)\_pp", mb_k_output.name)
                                 hp_level = match.group(1)
                                 if microbatch_id == 0:
                                     # We clone the output from the first microbatch to create
@@ -754,7 +759,7 @@ def gpt2_dhp_transform(
                                     ]
                                     assert (
                                         re.search(
-                                            "hp\_(.*)\_pp", mb_all_output.name
+                                            r"hp\_(.*)\_pp", mb_all_output.name
                                         ).group(1)
                                         == hp_level
                                     )

@@ -53,7 +53,16 @@ jobs:
         key: ${{ env.GPT_ONNX_COMMIT }}
 
     - name: Download GPT ONNX file (if not already present)
-      run: if [ ! -f "$GPT_ONNX_FNAME" ]; then wget https://github.com/onnx/models/raw/${GPT_ONNX_COMMIT}/text/machine_comprehension/gpt-2/model/${GPT_ONNX_FNAME}; fi
+      run: |
+        if [ ! -f "$GPT_ONNX_FNAME" ]; then \
+          pushd /tmp; \
+          git clone https://github.com/onnx/models.git; \
+          pushd models; \
+          git checkout ${{ env.GPT_ONNX_COMMIT }}; \
+          git lfs pull --include="text/machine_comprehension/gpt-2/model/${GPT_ONNX_FNAME}" --exclude ""; \
+          popd; popd; \
+          mv /tmp/models/text/machine_comprehension/gpt-2/model/${GPT_ONNX_FNAME} ./; \
+        fi
 
     - name: Check formatting (black)
       run: black --diff --check .

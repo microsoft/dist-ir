@@ -17,7 +17,7 @@ from torch import fx
 from ..executor.rank_projector import project
 from ..ir import Function, cpprint
 from ..ir.device import Device
-from ..ir.type import Int64, Float32
+from ..ir.type import Int32, Int64, Float32, Type
 
 # NOTE: The code currently suffers from this issue, more investigation needed:
 # https://github.com/pytorch/pytorch/issues/11201
@@ -131,12 +131,12 @@ def _identity(x, ctx=None):
     return x
 
 
-def _loss(x, y, N=None, ctx=None):
-    return torch.square(x - y) / N
+def _loss(x, y, n, ctx=None):
+    return torch.square(x - y) / n
 
 
-def _loss_grad(x, y, N=None, ctx=None):
-    return 2 * (x - y) / N
+def _loss_grad(x, y, n, ctx=None):
+    return 2 * (x - y) / n
 
 
 def _matmul(x, y, ctx=None):
@@ -175,10 +175,14 @@ def _recv(shape=None, from_d=None, group=None, dtype=None, ctx=None):
     if not allocate_buffer:
         x = ctx.recv_buffers[(shape, type(dtype))]
     else:
+        if isinstance(dtype, Int32):
+            x = torch.zeros(shape).int()
         if isinstance(dtype, Int64):
             x = torch.zeros(shape).long()
         elif isinstance(dtype, Float32):
             x = torch.zeros(shape).float()
+        else:
+            raise NotImplementedError(dtype)
 
     src_rank = ctx.device_to_rank[from_d]
     if ctx.use_gpu:
@@ -430,7 +434,7 @@ def run_function(
         op_runtimes = []
 
     # Run ops
-    for op_num, op in enumerate(fn.ops):
+    for op in fn.ops:
         inputs = tuple(value_map[v] for v in op.inputs)
         kwargs = {} if op.attributes is None else {**op.attributes}
         kwargs["ctx"] = ctx
@@ -468,6 +472,7 @@ def run_function(
             value_map[op.outputs[0]] = output
 
         # Free tensors that are not used again
+        # TODO: Add this back after resolving recv buffers
         """
         for v in op.inputs:
             if v in value_map and fn.last_use(v) == op and not (v in fn.outputs):
@@ -642,19 +647,21 @@ def run_multiprocesses(
 
 def run_pytorch(
     fn: Function,
-    inputs: Sequence[Any],
+    inputs: Tuple[Any],
+    input_types: Tuple[Type] = None,
     use_gpu=False,
     num_repetitions=1,
     num_warmup=0,
     debug_mock=False,
     debug_stacktrace=False,
     profile=False,
-    run_type_inference=True,  # TODO: Remove once we have mixed implementations
 ):
     """Project `fn` and run on `inputs` over `num_devices` devices using the
     PyTorch backend.
 
-    `inputs` is a list/tuple of the same length as `fn.inputs`.
+    `inputs` is a list/tuple of the same length as `fn.inputs`.  `input_types`
+    is a list/tuple of abstract/concrete inputs used for projection.
+
     The run is repeated 'num_warmup + num_repetitions` times, and runtimes from
     the last `num_repetitions` runs are returned along with the outputs of the
     last run.
@@ -666,9 +673,12 @@ def run_pytorch(
     profiler and outputs logs to TensorBoard.
     """
 
-    device_to_fns, groups = project(
-        fn, tuple(v.type for v in fn.inputs), run_type_inference
-    )
+    if input_types is None:
+        input_types = tuple(v.type for v in fn.inputs)
+    else:
+        assert len(input_types) == len(fn.inputs)
+
+    device_to_fns, groups = project(fn, input_types)
 
     if len(device_to_fns) > torch.cuda.device_count():
         raise ValueError(
@@ -710,8 +720,8 @@ def run_pytorch(
     )
 
     per_rank_inputs = [[] for _ in range(world_size)]
-    for v, a in zip(fn.inputs, inputs):
-        per_rank_inputs[device_to_rank[v.type.device]].append(a)
+    for t, a in zip(input_types, inputs):
+        per_rank_inputs[device_to_rank[t.device]].append(a)
     assert len(fn.inputs) == len(inputs)
 
     if debug_mock:

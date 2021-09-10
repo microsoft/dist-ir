@@ -1,18 +1,13 @@
 from collections import defaultdict
+import itertools
 import numpy as np
 import pytest
 import re
 
-from dist_ir.importer import import_from_onnx, parse_tensor_from_file
-from dist_ir.ir import FunctionMaker, cpprint, pformat, Device, Topology, Value
-from dist_ir.executor import infer_types, SequentialExecutor
-from dist_ir.executor.cost_model import CostModel
-from dist_ir.ir.type import Bool, Float32, Int64, Tensor
-from dist_ir.transforms import (
-    mlp_dhp_transform,
-    PipeDreamScheduler,
-)
 from examples import mlp
+from dist_ir.executor import infer_types, SequentialExecutor, ConcreteValue
+from dist_ir.ir import get_uniform_topology
+from dist_ir.transforms import mlp_dhp_transform
 
 BATCH_SIZE = 64
 INPUT_DIM = 64
@@ -54,26 +49,32 @@ def _verify_hp(function, transformed_function, outputs, transformed_outputs, dp=
         )
 
 
-def _test_helper(
+@pytest.mark.parametrize(
+    ("dp_degree", "hp_degree", "pp_degree"),
+    list(itertools.product([1, 2], [1, 2], [1, 2])),
+)
+def test_mlp_dhp_transform(
+    dp_degree,
+    hp_degree,
+    pp_degree,
     batch_size=BATCH_SIZE,
     num_hidden_layers=8,
     input_dim=INPUT_DIM,
-    dp_degree=1,
-    hp_degree=1,
-    pp_degree=1,
-    num_microbatches=1,
 ):
+    num_microbatches = pp_degree
     world_size = dp_degree * hp_degree * pp_degree
-    topology = mlp.get_topology(world_size)
+    topology = get_uniform_topology(world_size)
     function = mlp.mlp(
-        batch_size,
         input_dim,
         input_dim,
         input_dim,
         num_hidden_layers,
         topology.devices[0],
     )
-    function = infer_types(function, function.inputs)
+    typed_inputs = mlp.get_typed_input_values(
+        function.inputs, batch_size, input_dim, input_dim
+    )
+    function = infer_types(function, typed_inputs)
 
     init_function, transformed_function = mlp_dhp_transform(
         function,
@@ -88,11 +89,25 @@ def _test_helper(
     transformed_function = infer_types(transformed_function, init_function.outputs)
     transformed_function = mlp.add_optimizer_ops(transformed_function)
 
-    input_data = [np.random.normal(size=inp.type.shape) for inp in function.inputs]
+    input_data = [
+        ConcreteValue(
+            np.random.normal(size=inp.type.shape) if i != 2 else batch_size,
+            topology.devices[0],
+        )
+        for i, inp in enumerate(typed_inputs)
+    ]
     ex = SequentialExecutor("numpy")
     outputs = ex.compute(function, input_data)
     dist_input_data = ex.compute(init_function, input_data)
     transformed_outputs = ex.compute(transformed_function, dist_input_data)
+
+    outputs = [v.val for v in outputs]
+    # Verify that transformed_outputs are on expected devices
+    assert all(
+        o.type.device == v.device
+        for o, v in zip(transformed_function.outputs, transformed_outputs)
+    )
+    transformed_outputs = [v.val for v in transformed_outputs]
 
     if hp_degree > 1:
         _verify_hp(
@@ -100,31 +115,3 @@ def _test_helper(
         )
     else:
         _verify_no_hp(outputs, transformed_outputs, dp_degree > 1)
-
-
-def test_dp_only():
-    _test_helper(dp_degree=2)
-
-
-def test_hp_only():
-    _test_helper(hp_degree=2)
-
-
-def test_pp_only():
-    _test_helper(pp_degree=2, num_microbatches=2)
-
-
-def test_dp_hp():
-    _test_helper(dp_degree=2, hp_degree=2)
-
-
-def test_dp_pp():
-    _test_helper(dp_degree=2, pp_degree=2, num_microbatches=2)
-
-
-def test_hp_pp():
-    _test_helper(hp_degree=2, pp_degree=2, num_microbatches=2)
-
-
-def test_dp_hp_pp():
-    _test_helper(dp_degree=2, hp_degree=2, pp_degree=2, num_microbatches=2)

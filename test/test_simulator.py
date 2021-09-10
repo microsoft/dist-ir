@@ -10,18 +10,24 @@ from dist_ir.transforms import shard_transform
 def test_single_device():
     function = FunctionMaker()
     topology = Topology()
-
     d = topology.add_device("gpu")
+    simulator = Simulator(CostModel(topology))
 
-    a = function.add_input_value("a", Tensor(dtype=Float32(), shape=(4, 4), device=d))
-    b = function.add_input_value("b", Tensor(dtype=Float32(), shape=(4, 4), device=d))
+    a = function.add_input_value("a", None)
+    b = function.add_input_value("b", None)
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b])
     function = function.finalize()
-    function = infer_types(function, [a, b])
-    simulator = Simulator(CostModel(topology))
-    state = simulator.interpret(function, (v.type for v in function.inputs))
-    assert d in state.timestamps
-    assert d in state.peak_memory
+
+    inputs = (Tensor(dtype=Float32(), shape=(400, 400), device=d),) * 2
+    state1 = simulator.simulate(function, inputs)
+    assert d in state1.timestamps
+    assert d in state1.peak_memory
+
+    inputs = (Tensor(dtype=Float32(), shape=(800, 800), device=d),) * 2
+    state2 = simulator.simulate(function, inputs)
+    assert d in state2.timestamps
+    assert d in state2.peak_memory
+    assert state1.timestamps[d] < state2.timestamps[d]
     # TODO: Check specific values
 
 
@@ -57,7 +63,7 @@ def _test_data_parallel():
 
     cpprint(transformed_function)
     simulator = Simulator(CostModel(topology))
-    simulator_state = simulator.interpret(
+    simulator_state = simulator.simulate(
         transformed_function, (v.type for v in transformed_function.inputs)
     )
     assert d0 in simulator_state.timestamps
@@ -70,14 +76,18 @@ def _test_data_parallel():
 def test_chrome_trace():
     function = FunctionMaker()
     topology = Topology()
-
     d = topology.add_device("gpu")
+    simulator = Simulator(CostModel(topology))
 
-    a = function.add_input_value("a", Tensor(dtype=Float32(), shape=(4, 4), device=d))
-    b = function.add_input_value("b", Tensor(dtype=Float32(), shape=(4, 4), device=d))
+    a = function.add_input_value("a", None)
+    b = function.add_input_value("b", None)
     x = function.add_op("MatMul", "MatMul0", inputs=[a, b])
     function = function.finalize()
-    function = infer_types(function, [a, b])
-    simulator = Simulator(CostModel(topology))
-    state = simulator.interpret(function, (v.type for v in function.inputs))
+
+    inputs = (Tensor(dtype=Float32(), shape=(400, 400), device=d),) * 2
+    state = simulator.simulate(function, inputs)
     state.dump_chrome_trace("test/trace.json")
+
+
+if __name__ == "__main__":
+    test_single_device()

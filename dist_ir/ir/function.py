@@ -146,26 +146,12 @@ class Function:
 
     def to_function_maker(self):
         """Returns a mutable (FunctionMaker) version of this function."""
-        function = FunctionMaker(name=self.name)
-        value_map = {}
-        for inp in self.inputs:
-            value_map[inp] = function.add_input_value(inp.name, inp.type)
-        for op in self.ops:
-            inputs = [value_map[inp] for inp in op.inputs]
-            new_op = Op(
-                op_type=op.op_type,
-                name=op.name,
-                inputs=inputs,
-                attributes=op.attributes,
-                subfunctions=op.subfunctions,
-                output_names=tuple(output.name for output in op.outputs),
-                output_types=tuple(output.type for output in op.outputs),
-            )
-            function.ops.append(new_op)
-            for orig_output, new_output in zip(op.outputs, new_op.outputs):
-                value_map[orig_output] = new_output
-        function.set_outputs_auto()
-        return function
+        return FunctionMaker(
+            name=self.name,
+            ops=list(self.ops),
+            inputs=list(self.inputs),
+            outputs=list(self.outputs),
+        )
 
 
 @dataclass
@@ -183,7 +169,7 @@ class FunctionMaker:
         op_type,
         name=None,
         inputs: List[Value] = None,
-        attributes: Dict[str, Any] = {},
+        attributes: Dict[str, Any] = frozendict({}),
         subfunctions: List["Function"] = None,
         output_names: List[str] = None,
     ) -> Union[None, Value, Tuple[Value, ...]]:

@@ -1,4 +1,4 @@
-from collections import Hashable
+from collections.abc import Hashable
 from frozendict import frozendict
 import numpy as np
 

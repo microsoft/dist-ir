@@ -2,7 +2,7 @@ import numpy as np
 from functools import reduce
 from operator import mul
 
-from ..ir.type import Float32, Float64, Int64, Tensor, TupleType
+from ..ir.type import Float32, Float64, Int32, Int64, Tensor, TupleType
 
 BYTES_IN_Gb = 1.25e8
 
@@ -30,19 +30,19 @@ class CostModel:
         # TODO: Add support for variadic inputs
         self.cost_functions = {
             ("Add", (Tensor, Tensor)): self._elementwise_cost_fn,
-            ("Add", (Tensor, type(Float32()))): self._elementwise_cost_fn,
+            ("Add", (Tensor, Float32)): self._elementwise_cost_fn,
             ("Cast", (Tensor,)): self._elementwise_cost_fn,
-            ("Cast", (type(Float64()),)): lambda op, x: {},
-            ("Cast", (type(Int64()),)): lambda op, x: {},
+            ("Cast", (Float64,)): lambda op, x: {},
+            ("Cast", (Int64,)): lambda op, x: {},
             ("Concat", (Tensor, Tensor)): self._concat_cost_fn,
             ("Concat", (Tensor, Tensor, Tensor)): self._concat_cost_fn,
             ("Concat", (Tensor, Tensor, Tensor, Tensor)): self._concat_cost_fn,
             ("Constant", ()): lambda op: {},
             ("ConstantOfShape", (Tensor,)): self._constant_of_shape_cost_fn,
-            ("Div", (type(Int64()), type(Int64()))): lambda op, x, y: {},
-            ("Div", (Tensor, type(Float32()))): self._elementwise_cost_fn,
+            ("Div", (Int64, Int64)): lambda op, x, y: {},
+            ("Div", (Tensor, Float32)): self._elementwise_cost_fn,
             ("Div", (Tensor, Tensor)): self._elementwise_cost_fn,
-            ("Gather", (Tensor, type(Int64()))): self._gather_cost_fn,
+            ("Gather", (Tensor, Int64)): self._gather_cost_fn,
             ("Gather", (Tensor, Tensor)): self._gather_cost_fn,
             ("Gemm", (Tensor, Tensor, Tensor)): self._gemm_cost_fn,
             ("Identity", (Tensor,)): self._identity_cost_fn,
@@ -110,22 +110,30 @@ class CostModel:
             ("MPIScatter", (Tensor,)): self._mpi_scatter_cost_fn,
             ("MPIScatterToTupleType", (Tensor,)): self._mpi_scatter_cost_fn,
             # ("MPIAllreduce_v2", (TupleType,)): self._allreduce_cost_fn,
-            ("Loss", (Tensor, Tensor)): self._elementwise_cost_fn,
-            ("LossGrad", (Tensor, Tensor)): self._elementwise_cost_fn,
+            (
+                "Loss",
+                (Tensor, Tensor, Int32),
+            ): lambda op, x, y, z: self._elementwise_cost_fn(x, y),
+            (
+                "LossGrad",
+                (Tensor, Tensor, Int32),
+            ): lambda op, x, y, z: self._elementwise_cost_fn(x, y),
             ("MatMul", (Tensor, Tensor)): self._matmul_cost_fn,
             ("MatMulGrad", (Tensor, Tensor, Tensor)): self._matmul_grad_cost_fn,
             ("Min", (Tensor, Tensor)): self._min_cost_fn,
             ("Mul", (Tensor, Tensor)): self._elementwise_cost_fn,
-            ("Mul", (Tensor, type(Float32()))): self._elementwise_cost_fn,
-            ("Mul", (type(Int64()), type(Int64()))): lambda op, x, y: {},
-            ("Pow", (Tensor, type(Float32()))): self._elementwise_cost_fn,
+            ("Mul", (Tensor, Float32)): self._elementwise_cost_fn,
+            ("Mul", (Int64, Int64)): lambda op, x, y: {},
+            ("Pow", (Tensor, Float32)): self._elementwise_cost_fn,
             ("ReduceMean", (Tensor,)): self._reduce_mean_cost_fn,
             ("Relu", (Tensor,)): self._elementwise_cost_fn,
             ("ReluGrad", (Tensor, Tensor)): self._elementwise_cost_fn,
             ("Reshape", (Tensor, Tensor)): self._reshape_cost_fn,
             ("Select", (TupleType,)): self._select_cost_fn,
             ("Send", (Tensor,)): self._send_cost_fn,
-            ("Send", (type(Int64()),)): lambda op, x: {},
+            ("Send", (Int64,)): lambda op, x: {},
+            ("SGDOptimizer", tuple(Tensor for i in range(4))): self._sgd_cost_fn,
+            ("SGDOptimizer", tuple(Tensor for i in range(8))): self._sgd_cost_fn,
             ("SGDOptimizer", tuple(Tensor for i in range(16))): self._sgd_cost_fn,
             ("SGDOptimizer", tuple(Tensor for i in range(32))): self._sgd_cost_fn,
             ("SGDOptimizer", tuple(Tensor for i in range(64))): self._sgd_cost_fn,
@@ -142,7 +150,7 @@ class CostModel:
             ("Slice", (Tensor, Tensor, Tensor, Tensor)): self._slice_cost_fn,
             (
                 "Slice",
-                (Tensor, Tensor, Tensor, Tensor, type(Int64())),
+                (Tensor, Tensor, Tensor, Tensor, Int64),
             ): self._slice_cost_fn,
             ("Split", (Tensor,)): self._split_cost_fn,
             ("SplitUniform", (Tensor,)): self._split_cost_fn,
@@ -150,12 +158,12 @@ class CostModel:
             ("Softmax", (Tensor,)): self._softmax_cost_fn,
             ("Sqrt", (Tensor,)): self._elementwise_cost_fn,
             ("Squeeze", (Tensor,)): self._squeeze_cost_fn,
-            ("Sub", (type(Float32()), Tensor)): lambda op, x, y: {},
+            ("Sub", (Float32, Tensor)): lambda op, x, y: {},
             ("Sub", (Tensor, Tensor)): self._elementwise_cost_fn,
-            ("Sub", (type(Int64()), type(Int64()))): lambda op, x, y: {},
+            ("Sub", (Int64, Int64)): lambda op, x, y: {},
             ("Tanh", (Tensor,)): self._elementwise_cost_fn,
             ("Transpose", (Tensor,)): self._transpose_cost_fn,
-            ("Unsqueeze", (type(Int64()),)): self._unsqueeze_cost_fn,
+            ("Unsqueeze", (Int64,)): self._unsqueeze_cost_fn,
             ("Unsqueeze", (Tensor,)): self._unsqueeze_cost_fn,
         }
 

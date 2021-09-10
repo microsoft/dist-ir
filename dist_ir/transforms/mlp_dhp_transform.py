@@ -39,7 +39,7 @@ def _split_value(v, function, num_splits, parallelism_level, dim=0):
     return function.add_op(
         "SplitUniform",
         inputs=[v],
-        attributes={"axis": dim, "num_splits": num_splits},
+        attributes={"axis": dim, "num_splits": int(num_splits)},
         output_names=output_names,
     )
 

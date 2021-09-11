@@ -41,7 +41,6 @@ DistributedContext = NamedTuple(
     profile=bool,
     # List of op execution events
     trace=list,
-    recv_buffers=dict,
 )
 
 
@@ -171,9 +170,15 @@ def _reshape(x, y, ctx=None):
 
 def _recv(shape=None, from_d=None, group=None, dtype=None, ctx=None):
     # torch.distributed.barrier(group=ctx.groups[group])
-    allocate_buffer = (shape, type(dtype)) not in ctx.recv_buffers
-    if not allocate_buffer:
-        x = ctx.recv_buffers[(shape, type(dtype))]
+    if len(shape) == 0:
+        if isinstance(dtype, Int32):
+            x = torch.tensor(0).int()
+        if isinstance(dtype, Int64):
+            x = torch.tensor(0).long()
+        elif isinstance(dtype, Float32):
+            x = torch.tensor(0).float()
+        else:
+            raise NotImplementedError(dtype)
     else:
         if isinstance(dtype, Int32):
             x = torch.zeros(shape).int()
@@ -186,13 +191,10 @@ def _recv(shape=None, from_d=None, group=None, dtype=None, ctx=None):
 
     src_rank = ctx.device_to_rank[from_d]
     if ctx.use_gpu:
-        if allocate_buffer:
-            x = x.cuda(dist.get_rank())
+        x = x.cuda(dist.get_rank())
         dist.broadcast(x, src_rank, group=ctx.groups[group])
     else:
         dist.recv(x, src_rank)
-    if allocate_buffer:
-        ctx.recv_buffers[(shape, type(dtype))] = x
     return x
 
 
@@ -716,7 +718,6 @@ def run_pytorch(
         debug_stacktrace=debug_stacktrace,
         profile=profile,
         trace=trace,
-        recv_buffers={},
     )
 
     per_rank_inputs = [[] for _ in range(world_size)]

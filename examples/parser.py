@@ -73,7 +73,7 @@ class Parser(ArgumentParser):
         )
 
     def add_execution_mode_config_arguments(self):
-        self.add_argument("--backend", choices=["simulate", "pytorch"])
+        self.add_argument("--backend", choices=["simulate", "pytorch"], required=True)
 
     def add_simulation_output_config_arguments(self):
         self.add_argument("--trace_file", type=str, default=None, help="Trace file")

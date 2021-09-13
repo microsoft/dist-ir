@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 import csv
+import json
 import itertools
 from multiprocessing import Manager
 from os import path
@@ -260,7 +261,9 @@ def run_grid_search(args, grid_search_cls):
         args.dram_bandwidth = simulation_parameters["dram_bandwidth"]
         args.kernel_launch_overhead = simulation_parameters["kernel_launch_overhead"]
         args.network_bandwidth = simulation_parameters["network_bandwidth"]
-        args.allreduce_parameters = simulation_parameters["allreduce_parameters"]
+        args.allreduce_parameters = {
+            int(k): v for k, v in simulation_parameters["allreduce_parameters"].items()
+        }
     grid_search = grid_search_cls(
         args.backend,
         args.use_gpu,

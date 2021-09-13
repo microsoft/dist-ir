@@ -231,7 +231,7 @@ class CostModel:
         # TODO: Verify correctness
         # TODO: Add separate allgather calibration function
         if self._allreduce_parameters is not None:
-            return self._mpi_allgather_cost_fn(op, *xs)
+            return self._mpi_allreduce_cost_fn(op, *xs)
         devices = [x.device for x in xs]
         all_bandwidths = []
         for i in range(len(devices)):

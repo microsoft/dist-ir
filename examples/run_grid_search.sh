@@ -13,11 +13,11 @@ fi
 num_configs=`wc -l < $2`
 for ((i=1;i<$num_configs;i++)); do
     if [[ "$1" == "mlp" ]]; then
-        python -m examples.mlp_grid_search --backend pytorch \
+        python -m examples.mlp_grid_search --mode file --backend pytorch \
             --configs_file $2 --config_number $i \
             --output_file $3 --append_output_file
     else
-        python -m examples.gpt2_grid_search --backend pytorch \
+        python -m examples.gpt2_grid_search --mode file --backend pytorch \
             --model_path gpt2-10.onnx \
             --configs_file $2 --config_number $i \
             --output_file $3 --append_output_file

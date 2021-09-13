@@ -263,23 +263,27 @@ def run_grid_search(args, grid_search_cls):
         model_path=args.model_path if hasattr(args, "model_path") else None,
     )
 
-    # If we are not given which config(s) to run, generate them
-    if args.configs_file is None:
+    # Configs to run: given by args.mode:
+    if args.mode == "grid":
         configs = list(
             grid_search.gen_configurations(
                 args.all_world_sizes, args.all_batch_sizes, args.all_model_sizes
             )
         )
         print(f"Generated {len(configs)} configurations")
-    else:
+    elif args.mode == "file":
         if args.config_number is not None:
-            df = pd.read_csv(args.configs_file)
             # lookup and run only given config
+            df = pd.read_csv(args.configs_file)
             configs = [GridSearch._config_from_df(df, args.config_number - 1)]
         else:
-            # use all configs
+            # use all configs in file
             configs = GridSearch._read_configs(args.configs_file)
         print(f"Found {len(configs)} configurations")
+    else:
+        assert args.mode == "config" and all(isinstance(i, int) for i in args.config)
+        d, h, p, k, batch_size = args.config
+        configs = [DHPConfig(args.model_size, d, h, p, k, batch_size)]
 
     # If output file exists, skip existing configs and append results to output file
     if path.exists(args.output_file) and not args.overwrite_output_file:

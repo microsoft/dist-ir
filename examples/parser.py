@@ -5,6 +5,19 @@ from dist_ir.utils import constants
 
 
 class Parser(ArgumentParser):
+    def parse_args(self):
+        args = super().parse_args()
+
+        # Check arguments are valid:
+        assert args.mode is not None
+        if args.mode == "file":
+            assert args.configs_file is not None
+        elif args.mode == "config":
+            assert args.config is not None
+            assert args.model_size is not None
+        
+        return args
+
     def add_parallelism_config_arguments(self):
         self.add_argument(
             "-d", "--dp_degree", type=int, default=1, help="Data parallel degree"
@@ -67,6 +80,16 @@ class Parser(ArgumentParser):
         )
 
     def add_grid_search_config_arguments(self, defaults):
+        # 3 modes: generate & search grid, run from file, run single config
+        self.add_argument(
+            "--mode",
+            type=str,
+            choices=["grid", "file", "config"],
+            default=None,
+            help="Run mode: run a grid search, run a single/all configs from a"
+            "file, run a specified config from command line",
+        )
+        # grid search arguments:
         self.add_argument(
             "--all_world_sizes",
             nargs="+",
@@ -85,6 +108,7 @@ class Parser(ArgumentParser):
             type=str,
             default=defaults["all_model_sizes"],
         )
+        # config file arguments:
         self.add_argument(
             "--configs_file",
             type=str,
@@ -97,6 +121,21 @@ class Parser(ArgumentParser):
             default=None,
             help="The configuration from configs_file to run (line number, 0 = header)",
         )
+        # single config arguments:
+        self.add_argument(
+            "--model_size",
+            type=str,
+            default=None,
+            help="The model size to run when mode == config, e.g. mlp-xs or gpt3",
+        )
+        self.add_argument(
+            "--config",
+            nargs="+",
+            type=int,
+            default=None,
+            help="The configration to run (D H P K BS, e.g.: --config 1 2 2 8 128)",
+        )
+        # output file arguments:
         self.add_argument(
             "--output_file",
             type=str,

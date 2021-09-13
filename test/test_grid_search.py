@@ -29,13 +29,14 @@ def test_mlp_grid_search(backend):
             writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
             writer.writeheader()
         grid_search = MLPGridSearch(
-            backend,
-            torch.cuda.is_available(),
-            tf.name,
-            constants.DEFAULT_DEVICE_THROUGHPUT,
-            constants.DEFAULT_DRAM_BANDWIDTH,
-            constants.DEFAULT_KERNEL_LAUNCH_OVERHEAD,
-            constants.DEFAULT_NETWORK_BANDWIDTH,
+            backend=backend,
+            use_gpu=torch.cuda.is_available(),
+            output_file=tf.name,
+            device_throughput=constants.DEFAULT_DEVICE_THROUGHPUT,
+            dram_bandwidth=constants.DEFAULT_DRAM_BANDWIDTH,
+            kernel_launch_overhead=constants.DEFAULT_KERNEL_LAUNCH_OVERHEAD,
+            network_bandwidth=constants.DEFAULT_NETWORK_BANDWIDTH,
+            allreduce_parameters=None,
             max_world_size=max(all_world_sizes),
         )
         configs = list(
@@ -99,13 +100,14 @@ def test_gpt_grid_search(backend):
             writer = csv.DictWriter(f, fieldnames=FIELDNAMES)
             writer.writeheader()
         grid_search = GPTGridSearch(
-            backend,
-            torch.cuda.is_available(),
-            tf.name,
-            constants.DEFAULT_DEVICE_THROUGHPUT,
-            constants.DEFAULT_DRAM_BANDWIDTH,
-            constants.DEFAULT_KERNEL_LAUNCH_OVERHEAD,
-            constants.DEFAULT_NETWORK_BANDWIDTH,
+            backend=backend,
+            use_gpu=torch.cuda.is_available(),
+            output_file=tf.name,
+            device_throughput=constants.DEFAULT_DEVICE_THROUGHPUT,
+            dram_bandwidth=constants.DEFAULT_DRAM_BANDWIDTH,
+            kernel_launch_overhead=constants.DEFAULT_KERNEL_LAUNCH_OVERHEAD,
+            network_bandwidth=constants.DEFAULT_NETWORK_BANDWIDTH,
+            allreduce_parameters=None,
             model_path=GPT2_MODEL_PATH,
             max_world_size=max(all_world_sizes),
         )
@@ -157,8 +159,3 @@ def test_gpt_grid_search(backend):
                     & (df["num_microbatches"] == p)
                 ]["latency"].values[0]
                 assert math.isclose(latency, grid_search_latency, abs_tol=10 ** -8)
-
-
-if __name__ == "__main__":
-    test_mlp_grid_search("simulate")
-    test_gpt_grid_search("simulate")

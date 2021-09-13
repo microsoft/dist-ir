@@ -1,5 +1,5 @@
 from dist_ir.ir import Value
-from dist_ir.ir.type import Tensor, abstract_values
+from dist_ir.ir.type import Tensor
 from dist_ir.executor import infer_types, SequentialExecutor, ConcreteValue
 from dist_ir.transforms import mlp_dhp_transform
 from . import mlp
@@ -79,7 +79,14 @@ class MLPGridSearch(GridSearch):
             config.num_microbatches,
             topology.devices,
         )
-        init_fn = infer_types(init_fn, input_data)
+        if self.backend == "pytorch":
+            _, dim = self.model_params[config.model_size]
+            typed_input_values = mlp.get_typed_input_values(
+                init_fn.inputs, config.batch_size, dim, dim
+            )
+            init_fn = infer_types(init_fn, typed_input_values)
+        elif self.backend == "simulate":
+            init_fn = infer_types(init_fn, input_data)
         # init_function.outputs = transformed_function.inputs, so get types from there:
         transformed_fn = infer_types(transformed_fn, init_fn.outputs)
         transformed_fn = mlp.add_optimizer_ops(transformed_fn)

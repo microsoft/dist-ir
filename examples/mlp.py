@@ -32,6 +32,9 @@ def get_typed_input_values(inputs, batch_size, input_dim, output_dim):
             device=typed_inputs[1].type.device,
         ),
     )
+    typed_inputs[2] = Value(
+        typed_inputs[2].name, Int32(device=typed_inputs[2].type.device)
+    )
     return tuple(typed_inputs)
 
 
@@ -277,7 +280,11 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
             f"{torch.cuda.device_count()} GPUs available"
         )
     input_types = abstract_values(
-        input_data, tuple(Tensor for i in range(len(input_data) if i != 2 else Int32))
+        input_data,
+        tuple(
+            Tensor if isinstance(input_data[i].val, np.ndarray) else Int32
+            for i in range(len(input_data))
+        ),
     )
     pytorch_input_data = [torch.tensor(x.val, dtype=torch.float32) for x in input_data]
     per_rank_outputs, runtimes = torch_backend.run_pytorch(

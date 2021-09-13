@@ -241,7 +241,7 @@ class GridSearch(ABC):
     def grid_search(self, configs):
         if self.backend == "pytorch":
             for config in configs:
-                print(config)
+                print(config)  # TODO add current date/time
                 self.run(config)
         elif self.backend == "simulate":
             process_map(self.run, configs)

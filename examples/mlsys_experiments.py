@@ -1,10 +1,8 @@
+import argparse
 import pandas as pd
 
-from . import mlp
-from .mlp_grid_search import MLPGridSearch
-from dist_ir.utils import constants
 
-
+"""
 def mlp_training():
     # TODO: Get these from calibration
     device_throughput = constants.DEFAULT_DEVICE_THROUGHPUT
@@ -28,7 +26,6 @@ def mlp_training():
     grid_search.grid_search(all_world_sizes, all_batch_sizes, all_model_sizes)
 
     # TODO: Finish
-    """
     # Run sequential baseline on pytorch backend
     for i in range(10, 15):
         mlp.run_backend((model_size, 2 ** i, 1, 1, 1, 1))
@@ -78,14 +75,56 @@ def mlp_training():
     """
 
 
-def gpt_inference():
-    pass
+def prepare_best_grid_search_configs(args):
+    # TODO handle files containing multiple model(-size)s
+    df = pd.read_csv(args.simulation_file)
+    best_configs = df[df["peak_memory"] < 21e3]  # TODO make memory limit an arg
+    best_configs = best_configs.sort_values(by="throughput", ascending=False).head(10)
+    best_configs.to_csv(args.output_file)
 
 
-def main():
-    mlp_training()
-    gpt_inference()
+def prepare_accuracy_sample_configs(args):
+    df = pd.read_csv(args.simulation_file)
+    sample = df[df["peak_memory"] < 21e3]  # TODO make memory limit an arg
+    sample = sample.sample(n=20, random_state=1)
+    sample = sample.sort_values(by="peak_memory")
+    sample.to_csv(args.output_file)
 
 
 if __name__ == "__main__":
-    main()
+    # 0. Calibrate simulation params (TODO after merging simulator_accuracy)
+    # 1. Simulation grid search (use X_grid_search scripts directly?)
+    # 2. Get list of configs for backend
+    # (3. Use bash script to run backend on configs)
+    # 4. Use simulation & backend results to plot results, create tables
+    # 5. TODO run against vanilla PyTorch models
+
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["calibrate", "prep-best", "prep-sample", "plot"],
+        default=None,
+        help="Run mode",
+    )
+    parser.add_argument(
+        "--simulation_file",
+        type=str,
+        required=True,
+        help="File containing results of simulated grid search",
+    )
+    parser.add_argument(
+        "--output_file",
+        type=str,
+        required=True,
+        help="Output file",
+    )
+    args = parser.parse_args()
+    assert args.mode is not None
+
+    if args.mode == "prep-best":
+        prepare_best_grid_search_configs(args)
+    elif args.mode == "prep-sample":
+        prepare_accuracy_sample_configs(args)

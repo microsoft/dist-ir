@@ -47,6 +47,7 @@ class GridSearch(ABC):
         dram_bandwidth,
         kernel_launch_overhead,
         network_bandwidth,
+        allreduce_parameters,
         max_world_size,
         model_path=None,
     ):
@@ -58,6 +59,7 @@ class GridSearch(ABC):
         self.dram_bandwidth = dram_bandwidth
         self.kernel_launch_overhead = kernel_launch_overhead
         self.network_bandwidth = network_bandwidth
+        self.allreduce_parameters = allreduce_parameters
         self.model_path = model_path
         self.topology = get_uniform_topology(
             max_world_size,
@@ -251,6 +253,14 @@ class GridSearch(ABC):
 
 # TODO merge with grid_search? move everything there or here?
 def run_grid_search(args, grid_search_cls):
+    if args.simulation_parameters_file is not None:
+        with open(args.simulation_parameters_file, "r") as f:
+            simulation_parameters = json.load(f)
+        args.device_throughput = simulation_parameters["device_throughput"]
+        args.dram_bandwidth = simulation_parameters["dram_bandwidth"]
+        args.kernel_launch_overhead = simulation_parameters["kernel_launch_overhead"]
+        args.network_bandwidth = simulation_parameters["network_bandwidth"]
+        args.allreduce_parameters = simulation_parameters["allreduce_parameters"]
     grid_search = grid_search_cls(
         args.backend,
         args.use_gpu,
@@ -259,6 +269,7 @@ def run_grid_search(args, grid_search_cls):
         args.dram_bandwidth,
         args.kernel_launch_overhead,
         args.network_bandwidth,
+        args.allreduce_parameters,
         max(args.all_world_sizes),
         model_path=args.model_path if hasattr(args, "model_path") else None,
     )

@@ -554,8 +554,8 @@ def get_transformed_function_and_input_data(
     return transformed_function, initialized_input_data, topology
 
 
-def simulate(function, input_data, topology):
-    simulator = Simulator(CostModel(topology))
+def simulate(function, input_data, topology, allreduce_parameters=None):
+    simulator = Simulator(CostModel(topology, allreduce_parameters))
     simulation = simulator.simulate(function, input_data)
     return simulation
 

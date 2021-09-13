@@ -264,8 +264,8 @@ def get_stats(function):
     return parameter_count, model_size, parameter_count_str, model_size_str
 
 
-def simulate(function, input_types, topology):
-    simulator = Simulator(CostModel(topology))
+def simulate(function, input_types, topology, allreduce_parameters=None):
+    simulator = Simulator(CostModel(topology, allreduce_parameters))
     simulation = simulator.simulate(function, input_types)
     return simulation
 

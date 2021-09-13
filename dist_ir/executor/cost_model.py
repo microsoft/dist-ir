@@ -21,8 +21,9 @@ class CostModel:
 
     # TODO instead of passing the op, should we pass the attributes as kwargs?
 
-    def __init__(self, topology):
+    def __init__(self, topology, allreduce_parameters=None):
         self._topology = topology
+        self._allreduce_parameters = allreduce_parameters
 
         def notImplemented(*args):
             raise NotImplementedError
@@ -228,6 +229,9 @@ class CostModel:
 
     def _mpi_allgather_cost_fn(self, op, *xs):
         # TODO: Verify correctness
+        # TODO: Add separate allgather calibration function
+        if self._allreduce_parameters is not None:
+            return self._mpi_allgather_cost_fn(op, *xs)
         devices = [x.device for x in xs]
         all_bandwidths = []
         for i in range(len(devices)):
@@ -236,7 +240,7 @@ class CostModel:
                     self._topology.get_bandwidth(devices[i], devices[j])
                 )
         average_bandwidth = np.mean(all_bandwidths)
-        average_input_size = np.mean([x.size() for x in xs]) * xs[0].dtype.size()
+        average_input_size = np.mean([x.size() for x in xs])
         per_device_data = 2 * average_input_size * (len(devices) - 1) / len(devices)
         per_device_data_gb = per_device_data / BYTES_IN_Gb
         cost = per_device_data_gb / average_bandwidth
@@ -246,19 +250,24 @@ class CostModel:
         input_size = xs[0].size()
         devices = [x.device for x in xs]
         num_devices = len(devices)
-        per_device_data_gb = (2 * input_size / BYTES_IN_Gb / num_devices) * (
-            num_devices - 1
-        )
-        # 2 * input_size * (num_devices - 1) / num_devices
-        # per_device_data_gb = per_device_data / BYTES_IN_Gb
-        all_bandwidths = []
-        for i in range(len(devices)):
-            for j in range(i + 1, len(devices)):
-                all_bandwidths.append(
-                    self._topology.get_bandwidth(devices[i], devices[j])
-                )
-        average_bandwidth = np.mean(all_bandwidths)
-        cost = per_device_data_gb / average_bandwidth
+        if self._allreduce_parameters is None:
+            per_device_data_gb = (2 * input_size / BYTES_IN_Gb / num_devices) * (
+                num_devices - 1
+            )
+            all_bandwidths = []
+            for i in range(len(devices)):
+                for j in range(i + 1, len(devices)):
+                    all_bandwidths.append(
+                        self._topology.get_bandwidth(devices[i], devices[j])
+                    )
+            average_bandwidth = np.mean(all_bandwidths)
+            cost = per_device_data_gb / average_bandwidth
+        else:
+            cost = (
+                self._allreduce_parameters[num_devices][0] * input_size / BYTES_IN_Gb
+                + self._allreduce_parameters[num_devices][1] * num_devices
+                + self._allreduce_parameters[num_devices][2]
+            )
 
         return {device: cost for device in devices}
 

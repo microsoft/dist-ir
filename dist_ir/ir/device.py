@@ -11,6 +11,7 @@ class Device:
     device_type: str
     throughput: float = constants.DEFAULT_DEVICE_THROUGHPUT
     dram_bandwidth: float = constants.DEFAULT_DRAM_BANDWIDTH
+    kernel_launch_overhead: float = constants.DEFAULT_KERNEL_LAUNCH_OVERHEAD
     is_variable: bool = False
 
     device_variable_id: ClassVar[int] = 0

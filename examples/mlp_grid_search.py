@@ -17,6 +17,7 @@ class MLPGridSearch(GridSearch):
         dram_bandwidth,
         kernel_launch_overhead,
         network_bandwidth,
+        allreduce_parameters,
         max_world_size,
         model_path=None,
     ):
@@ -35,6 +36,7 @@ class MLPGridSearch(GridSearch):
             dram_bandwidth,
             kernel_launch_overhead,
             network_bandwidth,
+            allreduce_parameters,
             max_world_size,
             model_path,
         )
@@ -107,7 +109,7 @@ if __name__ == "__main__":
         "all_model_sizes": ["mlp-small", "mlp-medium", "mlp-large"],
     }
     parser = Parser(description="MLP Grid Search")
-    parser.add_simulation_topology_config_arguments()
+    parser.add_simulation_config_arguments()
     parser.add_execution_mode_config_arguments()
     parser.add_grid_search_config_arguments(defaults)
     parser.add_backend_config_arguments()

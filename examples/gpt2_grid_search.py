@@ -16,6 +16,7 @@ class GPTGridSearch(GridSearch):
         dram_bandwidth,
         kernel_launch_overhead,
         network_bandwidth,
+        allreduce_parameters,
         max_world_size,
         model_path,
     ):
@@ -43,6 +44,7 @@ class GPTGridSearch(GridSearch):
             dram_bandwidth,
             kernel_launch_overhead,
             network_bandwidth,
+            allreduce_parameters,
             max_world_size,
             model_path,
         )
@@ -133,7 +135,7 @@ if __name__ == "__main__":
         ],
     }
     parser = Parser(description="GPT2 Grid Search")
-    parser.add_simulation_topology_config_arguments()
+    parser.add_simulation_config_arguments()
     parser.add_execution_mode_config_arguments()
     parser.add_grid_search_config_arguments(defaults)
     parser.add_backend_config_arguments()

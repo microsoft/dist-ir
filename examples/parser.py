@@ -37,7 +37,7 @@ class Parser(ArgumentParser):
         )
         self.add_argument("--batch_size", type=int, default=64, help="Batch size")
 
-    def add_simulation_topology_config_arguments(self):
+    def add_simulation_config_arguments(self):
         self.add_argument(
             "--network_bandwidth",
             type=float,
@@ -61,6 +61,17 @@ class Parser(ArgumentParser):
             type=float,
             default=constants.DEFAULT_KERNEL_LAUNCH_OVERHEAD,
             help="Kernel launch overhead",
+        )
+        self.add_argument(
+            "--allreduce_parameters",
+            default=None,
+            help="Allreduce parameters"
+        )
+        self.add_argument(
+            "--simulation_parameters_file",
+            type=str,
+            default=None,
+            help="Simulation parameters file",
         )
 
     def add_execution_mode_config_arguments(self):

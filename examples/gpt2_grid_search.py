@@ -112,7 +112,9 @@ class GPTGridSearch(GridSearch):
         )
 
     def simulate(self, transformed_fn, input_data, topology):
-        return gpt2.simulate(transformed_fn, input_data, topology)
+        return gpt2.simulate(
+            transformed_fn, input_data, topology, self.allreduce_parameters
+        )
 
     def pytorch(self, transformed_fn, input_data, world_size):
         return gpt2.run_pytorch(

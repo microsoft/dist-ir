@@ -94,7 +94,9 @@ class MLPGridSearch(GridSearch):
 
     def simulate(self, transformed_fn, input_data, topology):
         input_types = (v.type for v in input_data)
-        return mlp.simulate(transformed_fn, input_types, topology)
+        return mlp.simulate(
+            transformed_fn, input_types, topology, self.allreduce_parameters
+        )
 
     def pytorch(self, transformed_fn, input_data, world_size):
         return mlp.run_pytorch(

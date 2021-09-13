@@ -63,9 +63,7 @@ class Parser(ArgumentParser):
             help="Kernel launch overhead",
         )
         self.add_argument(
-            "--allreduce_parameters",
-            default=None,
-            help="Allreduce parameters"
+            "--allreduce_parameters", default=None, help="Allreduce parameters"
         )
         self.add_argument(
             "--simulation_parameters_file",

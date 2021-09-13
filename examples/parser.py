@@ -1,10 +1,14 @@
-from argparse import ArgumentParser
+from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 import torch
 
 from dist_ir.utils import constants
 
 
 class Parser(ArgumentParser):
+    def __init__(self, *args, **kwargs):
+        kwargs["formatter_class"] = ArgumentDefaultsHelpFormatter
+        super().__init__(*args, **kwargs)
+
     def parse_args(self):
         args = super().parse_args()
 
@@ -15,7 +19,7 @@ class Parser(ArgumentParser):
         elif args.mode == "config":
             assert args.config is not None
             assert args.model_size is not None
-        
+
         return args
 
     def add_parallelism_config_arguments(self):

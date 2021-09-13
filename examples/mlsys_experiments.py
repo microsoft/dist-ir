@@ -103,7 +103,7 @@ def calibrate_parameters(args):
             kernel_launch_overhead = simulation_parameters["kernel_launch_overhead"]
         else:
             assert args.calibrate_device_parameters
-        if "network_bandwidth" in simulation_parametrs:
+        if "network_bandwidth" in simulation_parameters:
             network_bandwidth = simulation_parameters["network_bandwidth"]
         else:
             assert args.calibrate_network_bandwidth

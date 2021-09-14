@@ -4,6 +4,7 @@ import json
 import itertools
 from multiprocessing import Manager
 from os import path
+import sys
 from typing import NamedTuple
 import traceback
 
@@ -213,33 +214,38 @@ class GridSearch(ABC):
         fn, input_data = self.get_model_and_input_data(
             config.batch_size, config.model_size
         )
-        # try:
-        _, transformed_fn, input_data = self.transform(
-            fn, input_data, self.topology, config
-        )
-        if self.backend == "simulate":
-            simulation = self.simulate(transformed_fn, input_data, self.topology)
-            latency = max([simulation.timestamps[d] for d in simulation.timestamps])
-            peak_memory = max(
-                [simulation.peak_memory[d] for d in simulation.peak_memory]
-            ) / (2.0 ** 20)
-        elif self.backend == "pytorch":
-            world_size = config.dp_degree * config.hp_degree * config.pp_degree
-            _, runtimes = self.pytorch(transformed_fn, input_data, world_size)
-            latency = np.median(runtimes[-1])
-            # TODO: Measure peak memory?
-            peak_memory = 0
-        # Disabling try-catch as we now run backend configs 1 at a time
-        # except Exception as e:
-        #     print(f"Failed to run the configuration {config}:")
-        #     traceback.print_exc()
-        #     latency = -1
-        #     peak_memory = -1
-        # except RuntimeError as e:
-        #     print(e)
-        #     latency = -1
-        #     peak_memory = -1
+        try:
+            _, transformed_fn, input_data = self.transform(
+                fn, input_data, self.topology, config
+            )
+            if self.backend == "simulate":
+                simulation = self.simulate(transformed_fn, input_data, self.topology)
+                latency = max([simulation.timestamps[d] for d in simulation.timestamps])
+                peak_memory = max(
+                    [simulation.peak_memory[d] for d in simulation.peak_memory]
+                ) / (2.0 ** 20)
+            elif self.backend == "pytorch":
+                world_size = config.dp_degree * config.hp_degree * config.pp_degree
+                _, runtimes = self.pytorch(transformed_fn, input_data, world_size)
+                latency = np.median(runtimes[-1])
+                # TODO: Measure peak memory?
+                peak_memory = 0
+        except Exception as e:
+            print(f"Failed to run the configuration {config}:")
+            traceback.print_exc()
+            latency = -1
+            peak_memory = -1
+        except RuntimeError as e:
+            print(e)
+            latency = -1
+            peak_memory = -1
+
+        # Write the results even if failed, to avoid re-running OOM configs
         self._write_row(config, latency, peak_memory)
+
+        if latency == -1:
+            # Most likely OOM, so exit 1 to tell shell script this run failed
+            sys.exit(1)
 
     def grid_search(self, configs):
         if self.backend == "pytorch":

@@ -13,12 +13,13 @@ class Parser(ArgumentParser):
         args = super().parse_args()
 
         # Check arguments are valid:
-        assert args.mode is not None
-        if args.mode == "file":
-            assert args.configs_file is not None
-        elif args.mode == "config":
-            assert args.config is not None
-            assert args.model_size is not None
+        if hasattr(args, "mode"):
+            assert args.mode is not None
+            if args.mode == "file":
+                assert args.configs_file is not None
+            elif args.mode == "config":
+                assert args.config is not None
+                assert args.model_size is not None
 
         return args
 

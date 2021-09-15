@@ -299,7 +299,7 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
 
 
 def run_mlp(
-    mode,
+    phase,
     backend,
     use_gpu,
     batch_size,
@@ -327,7 +327,7 @@ def run_mlp(
         network_bandwidth,
     )
 
-    if mode == "training":
+    if phase == "training":
         fn = mlp(
             input_dim,
             hidden_dim,
@@ -335,7 +335,7 @@ def run_mlp(
             num_hidden_layers,
             topology.devices[0],
         )
-    elif mode == "inference":
+    elif phase == "inference":
         fn = mlp_inference(
             input_dim,
             hidden_dim,
@@ -365,13 +365,17 @@ def run_mlp(
         transformed_fn = infer_types(transformed_fn, init_fn.outputs)
         input_types = tuple(output.type for output in init_fn.outputs)
     else:
+        typed_inputs = get_typed_input_values(
+            fn.inputs, batch_size, input_dim, output_dim
+        )
+        fn = infer_types(fn, typed_inputs)
         transformed_fn = fn
         input_types = tuple(inp.type for inp in fn.inputs)
     transformed_fn = add_optimizer_ops(transformed_fn)
     if backend == "simulate":
         simulation = simulate(transformed_fn, input_types, topology)
         if verbose:
-            simulation.print_summary()
+            simulation.print_summary(batch_size=batch_size)
         if trace_file is not None:
             simulation.dump_chrome_trace(trace_file)
         return simulation
@@ -387,7 +391,7 @@ def run_mlp(
 
 def main(args):
     run_mlp(
-        args.mode,
+        args.phase,
         args.backend,
         args.use_gpu,
         args.batch_size,
@@ -411,13 +415,14 @@ def main(args):
 if __name__ == "__main__":
     parser = Parser(description="MLP training and inference")
     parser.add_parallelism_config_arguments()
-    parser.add_simulation_topology_config_arguments()
+    parser.add_simulation_config_arguments()
     parser.add_execution_mode_config_arguments()
     parser.add_backend_config_arguments()
     parser.add_simulation_output_config_arguments()
     parser.add_global_output_config_arguments()
-    parser.add_argument("--mode", choices=["inference", "training"])
-    parser.add_argument("--batch_size", type=int, default=256, help="Batch size")
+    parser.add_argument(
+        "--phase", choices=["inference", "training"], default="training"
+    )
     parser.add_argument("--input_dim", type=int, default=256, help="Input dim")
     parser.add_argument("--hidden_dim", type=int, default=256, help="Hidden dim")
     parser.add_argument("--output_dim", type=int, default=256, help="Output dim")

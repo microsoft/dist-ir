@@ -642,7 +642,7 @@ def main(args):
         simulation = simulate(transformed_function, initialized_input_data, topology)
         if args.trace_file is not None:
             simulation.dump_chrome_trace(args.trace_file)
-        simulation.print_summary()
+        simulation.print_summary(args.batch_size)
     elif args.backend == "pytorch":
         world_size = args.dp_degree * args.hp_degree * args.pp_degree
         per_rank_outputs, runtimes = run_pytorch(
@@ -662,10 +662,11 @@ def main(args):
 if __name__ == "__main__":
     parser = Parser("GPT2 Inference")
     parser.add_parallelism_config_arguments()
-    parser.add_simulation_topology_config_arguments()
+    parser.add_simulation_config_arguments()
     parser.add_backend_config_arguments()
     parser.add_execution_mode_config_arguments()
     parser.add_gpt2_model_path_config_arguments()
+    parser.add_simulation_output_config_arguments()
     parser.add_argument("--n_layer", type=int, default=12, help="Num hidden layers")
     parser.add_argument(
         "--n_head",

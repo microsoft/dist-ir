@@ -24,9 +24,14 @@ steps:
     verbosity: 'Verbose'
     alertWarningLevel: 'High'
 
-- task: BinSkim@4
+- task: SdtReport@2
   inputs:
-    InputType: 'Basic'
-    Function: 'analyze'
-    TargetPattern: 'guardianGlob'
-    AnalyzeTargetGlob: '$(Build.ArtifactStagingDirectory)\**.dll;$(Build.ArtifactStagingDirectory)\**.exe;'
+    GdnExportHtmlFile: true
+    GdnExportAllTools: true
+
+- task: PublishSecurityAnalysisLogs@3
+  inputs:
+    ArtifactName: 'CodeAnalysisLogs'
+    ArtifactType: 'Container'
+    AllTools: true
+    ToolLogsNotFoundAction: 'Standard'

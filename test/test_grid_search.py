@@ -54,7 +54,7 @@ def test_mlp_grid_search(backend):
             for (d, t, p) in all_degrees:
                 world_size = d * t * p
                 simulation = mlp.run_mlp(
-                    mode="training",
+                    phase="training",
                     backend="simulate",
                     use_gpu=False,
                     batch_size=all_batch_sizes[0],

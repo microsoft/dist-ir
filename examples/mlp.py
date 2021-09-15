@@ -32,6 +32,7 @@ def get_typed_input_values(inputs, batch_size, input_dim, output_dim):
             device=typed_inputs[1].type.device,
         ),
     )
+    # Add value for batch size
     typed_inputs[2] = Value(
         typed_inputs[2].name, Int32(device=typed_inputs[2].type.device)
     )

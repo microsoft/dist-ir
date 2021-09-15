@@ -519,10 +519,10 @@ def _split_prop_fn(op, x):
     for section in sections:
         output_shape = []
         for i in range(axis):
-            output_shape.append(int(x.shape[i]))
+            output_shape.append(x.shape[i])
         output_shape.append(int(section - prev_section))
         for i in range(axis + 1, len(x.shape)):
-            output_shape.append(int(x.shape[i]))
+            output_shape.append(x.shape[i])
         prev_section = section
         output_types.append(
             Tensor(shape=tuple(output_shape), device=x.device, dtype=x.dtype)

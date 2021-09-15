@@ -13,14 +13,9 @@ from dist_ir.ir.type import Float32, Tensor
 from dist_ir.ir.topology import Topology, get_uniform_topology
 
 # TODO make examples submodule of dist_ir?
-"""
-from examples.mlp_grid_search import (
-    MODEL_PARAMS,
-    #gen_configurations,
-    mlp_dist,
-)
-"""
 from examples.mlp import mlp, mlp_inference_dp
+
+torch.manual_seed(42)
 
 
 def create_owt_model(num_devices, num_layers):
@@ -196,76 +191,6 @@ def test_dp_mp_matmuls():
     per_rank_fns, groups = project(fn, tuple(v.type for v in fn.inputs))
     for per_rank_fn in per_rank_fns.values():
         cpprint(per_rank_fn)
-
-
-"""
-@pytest.mark.parametrize(
-    "use_gpu",
-    [
-        False,
-        pytest.param(
-            True,
-            marks=pytest.mark.skipif(
-                torch.cuda.device_count() < 8, reason="Not enough available GPUs"
-            ),
-        ),
-    ],
-)
-def test_mlp_grid_search(use_gpu):
-    # batch_sizes = [2 ** i for i in range(10, 15)]
-    # hidden_dims = [2 ** i for i in range(8, 13)]
-    batch_sizes = [64]
-    model_sizes = ["mlp-xs"]
-    world_sizes = [1, 2, 4]
-
-    results = []
-    for (model_size, batch_size, d, h, p, m) in gen_configurations(
-        model_sizes, world_sizes, batch_sizes
-    ):
-        num_layers, hidden_dim = MODEL_PARAMS[model_size]
-        world_size = d * h * p
-        topology = get_uniform_topology(world_size)
-        simulator = Simulator(CostModel(topology))
-        seq_executor = SequentialExecutor("numpy")
-        seq_mlp = mlp(batch_size, hidden_dim, hidden_dim, hidden_dim, num_layers, d0)
-        seq_mlp = infer_types(seq_mlp, seq_mlp.inputs)
-
-        # Create random input data
-        input_data = tuple(
-            ConcreteValue(np.random.randn(*v.type.shape).astype(np.float32), d0)
-            for v in seq_mlp.inputs
-        )
-
-        init_fn, fn = mlp_dist(seq_mlp, d, h, p, m, topology)
-        print(fn.name)
-
-        # Simulate
-        simulation = simulator.simulate(fn, (v.type for v in fn.inputs))
-        simulated_time = max([simulation.timestamps[d] for d in simulation.timestamps])
-        print(simulated_time)
-
-        # Reference-execute init_fn to get inputs for fn
-        dist_input_data = seq_executor.compute(init_fn, input_data)
-        dist_input_data = tuple(torch.tensor(t.val) for t in dist_input_data)
-        assert all(
-            t.shape == v.type.shape for (t, v) in zip(dist_input_data, fn.inputs)
-        )
-
-        # Measure actual execution time
-        # TODO check outputs match?
-        # _, runtimes = run_pytorch(world_size, fn, dist_input_data)
-        _, runtimes = run_pytorch(
-            fn,
-            dist_input_data,
-            use_gpu=use_gpu,
-            num_repetitions=1,  # TODO use 100
-            num_warmup=1,
-        )
-        # TODO or median of max?
-        actual_time = max(np.median(times) for times in runtimes)
-
-        print(fn.name, simulated_time, actual_time)
-"""
 
 
 @pytest.mark.parametrize(

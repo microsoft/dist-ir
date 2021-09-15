@@ -70,12 +70,9 @@ def get_uniform_topology(
     elif isinstance(network_bandwidth, float):
         for i in range(1, world_size + 1):
             for j in range(0, i):
-                if j == 0:
-                    topology.set_bandwidth(
-                        topology.devices[i], topology.devices[j], network_bandwidth
-                    )
-                else:
-                    topology.set_bandwidth(
-                        topology.devices[i], topology.devices[j], network_bandwidth
-                    )
+                topology.set_bandwidth(
+                    topology.devices[i], topology.devices[j], network_bandwidth
+                )
+    else:
+        raise ValueError(f"Invalid network bandwidth {network_bandwidth}")
     return topology

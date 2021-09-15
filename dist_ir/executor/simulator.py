@@ -191,18 +191,21 @@ class Simulator:
             outputs = tuple(state.env[v] for v in op.outputs)
 
             # Dispatch to find cost function for op
+            signature = None
             try:
                 signature, cost_function = dispatch(
                     self.cost_functions, op.op_type, inputs
                 )
-                # Abstract inputs if necessary
-                abstracted_inputs = abstract_values(inputs, signature)
-                costs = cost_function(op, *abstracted_inputs)
             except ValueError:
                 warn(f"Dispatch failed for op {op.op_type} on inputs {inputs}")
+            if signature is None:
                 # Use default cost function if signature not in cost_functions
                 devices = _get_all_devices(inputs + outputs)
                 costs = {device: KERNEL_LAUNCH_OVERHEAD for device in devices}
+            else:
+                # Abstract inputs if necessary
+                abstracted_inputs = abstract_values(inputs, signature)
+                costs = cost_function(op, *abstracted_inputs)
 
             _simulate_op(state, op, costs, inputs, outputs)
         return state

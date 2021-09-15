@@ -1,8 +1,4 @@
-# Starter pipeline
-
-# Start with a minimal pipeline that you can customize to build and deploy your code.
-# Add steps that build, run tests, deploy, and more:
-# https://aka.ms/yaml
+# Microsoft code quality and compliance checks
 
 trigger:
 - main
@@ -19,7 +15,7 @@ steps:
 - task: Semmle@1
   inputs:
     sourceCodeDirectory: '$(Build.SourcesDirectory)'
-    language: 'csharp'
+    language: 'python'
     querySuite: 'Recommended'
     timeout: '1800'
     ram: '16384'

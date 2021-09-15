@@ -7,9 +7,6 @@ pool:
   vmImage: windows-latest
 
 steps:
-- script: echo Hello, world!
-  displayName: 'Run a one-line script'
-
 - task: CredScan@3
 
 - task: Semmle@1

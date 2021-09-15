@@ -19,7 +19,6 @@ from dist_ir.ir import cpprint, Device, FunctionMaker, Op, Topology, Value
 from dist_ir.ir.type import Int64, Float32, Tensor, Type, abstract_values
 from dist_ir.transforms import (
     gpt2_dhp_transform,
-    update_attributes,
     sanitize_unhashable_attributes,
     restore_unhashable_attributes,
 )

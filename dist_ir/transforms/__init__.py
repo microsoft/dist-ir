@@ -1,6 +1,6 @@
 from .fifo_scheduler import FIFOScheduler
 from .filter_transform import filter_transform
-from .gpt2_dhp_transform import gpt2_dhp_transform, update_attributes
+from .gpt2_dhp_transform import gpt2_dhp_transform
 from .mlp_dhp_transform import mlp_dhp_transform
 from .pipeline_parallel_transform import PipelineParallelTransform
 from .pipedream_scheduler import PipeDreamScheduler

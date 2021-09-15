@@ -95,16 +95,6 @@ def _test(
             original_outputs[0].val, transformed_outputs[i].val, decimal=2
         )
 
-    # Test with mixed implementations
-    # TODO: Factor this out into a separate test?
-    _run_gpt(
-        dp_degree=dp_degree,
-        hp_degree=hp_degree,
-        pp_degree=pp_degree,
-        num_microbatches=num_microbatches,
-        use_real_weights=False,
-    )
-
 
 @pytest.fixture(scope="session")
 def original_outputs():

@@ -520,7 +520,7 @@ def _split_prop_fn(op, x):
         output_shape = []
         for i in range(axis):
             output_shape.append(x.shape[i])
-        output_shape.append(int(section - prev_section))
+        output_shape.append(section - prev_section)
         for i in range(axis + 1, len(x.shape)):
             output_shape.append(x.shape[i])
         prev_section = section
@@ -538,7 +538,7 @@ def _split_uniform_prop_fn(op, x):
     output_shape = list(x.shape)
     # TODO: Move this check to attribute error function?
     assert output_shape[split_dim] % num_splits == 0
-    output_shape[split_dim] //= int(num_splits)
+    output_shape[split_dim] //= num_splits
     output_shape = tuple(output_shape)
     output_types = tuple(
         Tensor(dtype=x.dtype, shape=output_shape, device=x.device)

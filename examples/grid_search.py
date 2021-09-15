@@ -101,11 +101,11 @@ class GridSearch(ABC):
         r = df.iloc[row_number]
         return DHPConfig(
             r.model_size,
-            r.dp_degree,
-            r.hp_degree,
-            r.pp_degree,
-            r.num_microbatches,
-            r.batch_size,
+            int(r.dp_degree),
+            int(r.hp_degree),
+            int(r.pp_degree),
+            int(r.num_microbatches),
+            int(r.batch_size),
         )
 
     @staticmethod

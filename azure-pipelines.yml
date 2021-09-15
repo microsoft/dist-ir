@@ -1,25 +1,19 @@
-# Starter pipeline
+# Microsoft code quality and compliance checks
 
-# Start with a minimal pipeline that you can customize to build and deploy your code.
-# Add steps that build, run tests, deploy, and more:
-# https://aka.ms/yaml
-
-trigger:
-- main
+# Do not run automatically, or require for pull requests
+trigger: none
+pr: none
 
 pool:
   vmImage: windows-latest
 
 steps:
-- script: echo Hello, world!
-  displayName: 'Run a one-line script'
-
 - task: CredScan@3
 
 - task: Semmle@1
   inputs:
     sourceCodeDirectory: '$(Build.SourcesDirectory)'
-    language: 'csharp'
+    language: 'python'
     querySuite: 'Recommended'
     timeout: '1800'
     ram: '16384'
@@ -31,9 +25,14 @@ steps:
     verbosity: 'Verbose'
     alertWarningLevel: 'High'
 
-- task: BinSkim@4
+- task: SdtReport@2
   inputs:
-    InputType: 'Basic'
-    Function: 'analyze'
-    TargetPattern: 'guardianGlob'
-    AnalyzeTargetGlob: '$(Build.ArtifactStagingDirectory)\**.dll;$(Build.ArtifactStagingDirectory)\**.exe;'
+    GdnExportHtmlFile: true
+    GdnExportAllTools: true
+
+- task: PublishSecurityAnalysisLogs@3
+  inputs:
+    ArtifactName: 'CodeAnalysisLogs'
+    ArtifactType: 'Container'
+    AllTools: true
+    ToolLogsNotFoundAction: 'Standard'

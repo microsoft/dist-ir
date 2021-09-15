@@ -1,12 +1,95 @@
 import numpy as np
 
-from dist_ir.executor import absint
+from dist_ir.executor import ConcreteValue
+from dist_ir.executor.absint import *
 from dist_ir.executor.numpy_register import NumPyRegister
 
 # NOTE: Disabling mlir_parser tests to pass GitHub automated test
 # from dist_ir.importer import mlir_parser
 from dist_ir.ir import cpprint
+from dist_ir.ir.function import FunctionMaker
 from dist_ir.ir.type import Tensor
+
+
+def _add_1_conc(op, x):
+    assert isinstance(x, ConcreteValue)
+    return ConcreteValue(x.val + x.val, x.device)
+
+
+def _add_1_abs(op, x):
+    assert isinstance(x, Tensor)
+    return x
+
+
+def _add_2_conc(op, x, y):
+    assert isinstance(x, ConcreteValue) and isinstance(y, ConcreteValue)
+    assert x.device == y.device
+    return ConcreteValue(x.val + y.val, x.device)
+
+
+def _add_2_abs(op, x, y):
+    assert isinstance(x, Tensor) and isinstance(y, Tensor)
+    assert x.device == y.device and x.shape == y.shape
+    return x
+
+
+register = {
+    # HACK: using Min instead of Add in the register because Add is not variadic
+    ("Min", (ConcreteValue,)): _add_1_conc,
+    ("Min", (Tensor, Tensor)): _add_2_abs,
+    ("Min", (ConcreteValue, ConcreteValue)): _add_2_conc,
+}
+
+semantics = {}
+update_semantics_with_register(semantics, register)
+test_interpreter = AbstractInterpreter(AbstractState, semantics)
+
+
+def _test_single_op(op_type, inputs, expected_outputs, interpreter=test_interpreter):
+    fn = FunctionMaker()
+    input_vals = [fn.add_input_value(f"x_{i}", None) for i in range(len(inputs))]
+    fn.add_op(op_type, inputs=input_vals)
+    fn = fn.finalize()
+    state = interpreter.interpret(fn, inputs)
+    outputs = tuple(state.env[v] for v in fn.outputs)
+    assert len(outputs) == len(expected_outputs)
+    assert all(x == y for x, y in zip(outputs, expected_outputs))
+
+
+def test_dispatch():
+    x = ConcreteValue(np.random.randn(4, 6), None)
+    y = ConcreteValue(np.random.randn(4, 6), None)
+
+    t = Tensor(Float64(), (4, 6), None)
+
+    # Single concrete input should call _add_1_conc
+    _test_single_op("Min", [x], [ConcreteValue(x.val + x.val, None)])
+
+    # Two concrete inputs should call _add_2_conc
+    _test_single_op("Min", [x, y], [ConcreteValue(x.val + y.val, None)])
+
+    # One concrete and one abstract input should call _add_2_abs
+    _test_single_op("Min", [x, t], [t])
+    _test_single_op("Min", [t, y], [t])
+
+    # Two abstract inputs should call _add_2_abs
+    _test_single_op("Min", [t, t], [t])
+
+
+def test_dispatch_lex():
+    register = {
+        ("Min", (Tensor,)): _add_1_abs,
+        ("Min", (ConcreteValue, ConcreteValue)): _add_2_conc,
+    }
+
+    semantics = {}
+    update_semantics_with_register(semantics, register)
+    test_interpreter = AbstractInterpreter(AbstractState, semantics)
+
+    # A single concrete input should call _add_1_abs
+    x = ConcreteValue(np.random.randn(4, 6), None)
+    t = Tensor(Float64(), (4, 6), None)
+    _test_single_op("Min", [x], [t], interpreter=test_interpreter)
 
 
 # Batch size = 8
@@ -83,4 +166,5 @@ def _test_shape_slice():
     assert state.env[fn.outputs[0]] == Tensor(shape=(1, 6))
 
 
-# TODO add some basic absint tests here
+if __name__ == "__main__":
+    test_dispatch()

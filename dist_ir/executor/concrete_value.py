@@ -3,6 +3,7 @@ import numpy as np
 from typing import Any, Callable, Dict, Tuple
 
 from ..ir import Device, Op
+from ..ir.type import Int64, Float32, Float64, Tensor
 
 
 @dataclass(frozen=True)
@@ -15,8 +16,18 @@ class ConcreteValue:
     val: Any
     device: Device
 
+    def __eq__(self, other):
+        # Use numpy's array equality checking if val is an np.ndarray
+        if isinstance(other, ConcreteValue):
+            if isinstance(self.val, np.ndarray) and isinstance(other.val, np.ndarray):
+                return self.device == other.device and (self.val == other.val).all()
+                # TODO is there a better way to check np equality?
+            else:
+                return self.device == other.device and self.val == other.val
+        return False
+
     def size(self):
-        if isinstance(self.val, np.ndarray):
+        if isinstance(self.val, (np.ndarray, np.int64, np.float32, np.float64)):
             return self.val.size
         else:
             raise NotImplementedError()

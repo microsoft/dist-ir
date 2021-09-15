@@ -18,12 +18,14 @@ most-precise-to-most-abstract order. E.g.:
         ((np.ndarray, np.ndarray, np.ndarray), add_3_conc),
     ]
 
+Ties are broken by lexicographic ordering, so the following entry would end up
+as the second element of the list:
+    ((np.ndarray, Tensor), add_mixed)
+
 TODO also assume there are no entries with duplicate signatures?
 """
 
 import networkx as nx
-import numpy as np
-import torch
 from typing import Any, Callable, Dict, List, Sequence, Tuple
 
 from .concrete_value import ConcreteValue, wrap_concrete_register
@@ -31,6 +33,8 @@ from ..ir import Function, Op, Value
 from ..ir.type import *
 from .numpy_register import NumPyRegister
 from .type_register import TypePropRegister
+from .mixed_register import MixedRegister
+from .communication_register import CommunicationRegister
 
 
 # This is a graph of types supported by the AbstractInterpreter, with an edge
@@ -39,14 +43,6 @@ from .type_register import TypePropRegister
 _type_abstraction_graph: nx.DiGraph = nx.transitive_closure(
     nx.DiGraph(
         [
-            (bool, Bool),
-            (np.float32, Float32),
-            (np.float64, Float64),
-            (np.int32, Int32),
-            (np.int64, Int64),
-            (np.ndarray, Tensor),
-            (torch.Tensor, Tensor),
-            (tuple, TupleType),
             # TODO (if needed) have ConcreteBool, ConcreteFloat, etc
             (ConcreteValue, Bool),
             (ConcreteValue, Float32),
@@ -65,7 +61,10 @@ _type_index = {t: i for i, t in enumerate(nx.topological_sort(_type_abstraction_
 
 
 def _abstracts(type1: type, type2: type):
-    assert type1 in _type_abstraction_graph and type2 in _type_abstraction_graph
+    if type1 not in _type_abstraction_graph:
+        raise ValueError(f"type1 ({type1}) not in type_abstraction_graph")
+    if type2 not in _type_abstraction_graph:
+        raise ValueError(f"type2 ({type2}) not in type_abstraction_graph")
     return type1 == type2 or _type_abstraction_graph.has_edge(type1, type2)
 
 
@@ -114,7 +113,7 @@ def update_semantics_with_register(
 def dispatch(
     semantics: Dict[str, List[Tuple[Tuple[type, ...], Callable]]],
     op_type: str,
-    inputs: Sequence[Any],
+    inputs: Tuple[Any],
 ) -> Callable:
     """Function dispatch. Looks at the types of `inputs` and finds the appropriate
     implementation function in `semantics`.
@@ -131,7 +130,7 @@ def dispatch(
     # TODO do binary search?
     for (signature, implementation) in implementations:
         if _abstractable_types(input_types, signature):
-            return implementation
+            return signature, implementation
 
     raise ValueError(f"Could not dispatch {op_type} with input types {input_types}")
 
@@ -144,6 +143,8 @@ class AbstractState:
     def __init__(self, function: Function, inputs: Sequence[Any]):
         self.env: Dict[Value, Any] = dict(zip(function.inputs, inputs))
         self.function = function
+
+    # TODO a function that looks up multiple values in self.env?
 
 
 class AbstractInterpreter:
@@ -214,6 +215,22 @@ class AbstractInterpreter:
         From this, the abstract values output by the function can be extracted,
         but the state can also be used to build, e.g., a trace.
         """
+        # Check that all concrete values are wrapped
+        allowed_types = (
+            ConcreteValue,
+            Bool,
+            Float32,
+            Float64,
+            Int32,
+            Int64,
+            Tensor,
+            TupleType,
+        )  # TODO use _type_abstraction_graph instead (needs ConcreteFloat etc?)
+        inputs = tuple(inputs)  # TODO
+        for v in inputs:
+            if not isinstance(v, allowed_types):
+                raise ValueError(f"interpret given value of type {type(v)}")
+
         if state is None:
             state = self.AbstractState(function, inputs)
         else:
@@ -228,9 +245,10 @@ class AbstractInterpreter:
                 inputs = tuple(state.env[v] for v in op.inputs)
 
                 # Execute this op's semantics on the state
-                implementation = dispatch(self.semantics, op.op_type, inputs)
-                # TODO abstract inputs as necessary
-                outputs = implementation(op, *inputs)
+                signature, implementation = dispatch(self.semantics, op.op_type, inputs)
+                # Abstract inputs if necessary
+                abstracted_inputs = abstract_values(inputs, signature)
+                outputs = implementation(op, *abstracted_inputs)
 
                 # Put the outputs back into the state's environment
                 if not isinstance(outputs, tuple):
@@ -246,4 +264,6 @@ class AbstractInterpreter:
 _semantics = {}
 update_semantics_with_register(_semantics, TypePropRegister)
 update_semantics_with_register(_semantics, wrap_concrete_register(NumPyRegister))
+update_semantics_with_register(_semantics, MixedRegister)
+update_semantics_with_register(_semantics, CommunicationRegister)
 interpreter = AbstractInterpreter(AbstractState, _semantics)

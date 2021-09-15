@@ -1,10 +1,11 @@
 from copy import deepcopy
 from collections import defaultdict
 import json
-from typing import Any, Callable, Dict, Sequence, Set, Tuple
+from typing import Any, Dict, Sequence, Set, Tuple
+from warnings import warn
 
 from ..ir import Function, Device, Op
-from ..ir.type import Type
+from ..ir.type import Type, abstract_values
 from .absint import (
     AbstractState,
     interpreter,
@@ -44,6 +45,8 @@ class SimulatorState(AbstractState):
         self._function_inputs_set = set(function.inputs)
 
         for inp in function.inputs:
+            if inp.type is None or inp.type.device is None:
+                continue
             self.peak_memory[inp.type.device] += inp.type.size()
         for device in self.peak_memory:
             self.live_memory[device][0] = (0, self.peak_memory[device])
@@ -140,9 +143,10 @@ def _simulate_op(
             )
         state.consumers[in_edge] -= 1
         if state.consumers[in_edge] == 0:
-            input_devices = in_edge.type.get_all_devices()
-            for input_device in input_devices:
-                live_memory_deltas[input_device] -= in_edge.type.size()
+            if in_edge.type is not None:
+                input_devices = in_edge.type.get_all_devices()
+                for input_device in input_devices:
+                    live_memory_deltas[input_device] -= in_edge.type.size()
     state.update_live_memory(live_memory_deltas)
 
 
@@ -156,7 +160,13 @@ class Simulator:
         self.cost_functions = {}
         update_semantics_with_register(self.cost_functions, cost_model.cost_functions)
 
-    def simulate(self, function: Function, inputs: Sequence[Any]) -> SimulatorState:
+    def simulate(self, function: Function, inputs: Tuple[Any]) -> SimulatorState:
+        """Simulate `function` on `inputs`.
+
+        `inputs` is a tuple of abstract interpreter values (abstract or concrete).
+
+        Returns a SimulatorState containing timestamps, memory profiles, etc.
+        """
         state = SimulatorState(function, inputs)
 
         # First, interpret the function on inputs to get all values
@@ -170,9 +180,14 @@ class Simulator:
 
             # Dispatch to find cost function for op
             try:
-                cost_function = dispatch(self.cost_functions, op.op_type, inputs)
-                costs = cost_function(op, *inputs)
+                signature, cost_function = dispatch(
+                    self.cost_functions, op.op_type, inputs
+                )
+                # Abstract inputs if necessary
+                abstracted_inputs = abstract_values(inputs, signature)
+                costs = cost_function(op, *abstracted_inputs)
             except ValueError:
+                warn(f"Dispatch failed for op {op.op_type} on inputs {inputs}")
                 # Use default cost function if signature not in cost_functions
                 devices = _get_all_devices(inputs + outputs)
                 costs = {device: KERNEL_LAUNCH_OVERHEAD for device in devices}

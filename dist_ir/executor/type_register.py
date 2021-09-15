@@ -119,6 +119,20 @@ def _expand_prop_fn(op, x, y):
     return Tensor(dtype=x.dtype, device=x.device)
 
 
+def _gather_prop_fn(op, x, y):
+    if not (isinstance(x, Tensor) and isinstance(y, Tensor)):
+        _raise_type_error(op, x, y)
+    if "axis" in op.attributes:
+        axis = op.attributes["axis"]
+    else:
+        axis = 0
+    if axis != 0:
+        raise NotImplementedError("abstract Gather function only supports axis 0")
+
+    new_shape = y.shape + x.shape[1:]
+    return Tensor(shape=new_shape, device=x.device, dtype=x.dtype)
+
+
 def _gemm_prop_fn(op, x, y, z):
     if not (
         isinstance(x, Tensor)
@@ -178,7 +192,7 @@ def _matmul_prop_fn(op, x, y):
     if not (
         isinstance(x, Tensor)
         and isinstance(y, Tensor)
-        and x.dtype == y.dtype
+        and type(x.dtype) == type(y.dtype)
         and x.device == y.device
         and len(x.shape) == len(y.shape)
         and x.shape[len(x.shape) - 1] == y.shape[len(y.shape) - 2]
@@ -219,7 +233,7 @@ def _min_prop_fn(op, x, y):
 
 def _mpi_allgather_prop_fn(op, *xs):
     devices = tuple(x.device for x in xs)
-    dtypes = tuple(x.dtype for x in xs)
+    dtypes = tuple(type(x.dtype) for x in xs)
     if not (
         all(isinstance(x, Tensor) for x in xs)
         and len(xs) > 0
@@ -231,12 +245,12 @@ def _mpi_allgather_prop_fn(op, *xs):
     shape = list(xs[0].shape)
     for x in xs[1:]:
         shape[dim] += x.shape[dim]
-    return tuple(Tensor(shape=tuple(shape), dtype=dtypes[0], device=d) for d in devices)
+    return tuple(Tensor(shape=tuple(shape), dtype=x.dtype, device=x.device) for x in xs)
 
 
 def _mpi_allreduce_prop_fn(op, *xs):
     devices = tuple(x.device for x in xs)
-    dtypes = tuple(x.dtype for x in xs)
+    dtypes = tuple(type(x.dtype) for x in xs)
     if not (
         all(isinstance(x, Tensor) for x in xs)
         and len(xs) > 0
@@ -428,13 +442,12 @@ def _relu_grad_prop_fn(op, x, y):
     if not (
         isinstance(x, Tensor)
         and isinstance(y, Tensor)
-        and x.dtype == y.dtype
+        and type(x.dtype) == type(y.dtype)
         and x.device == y.device
         and x.shape[0] == y.shape[0]
     ):
         _raise_type_error(op, x, y)
     return x
-    # return Tensor(dtype=x.dtype, shape=(x.shape[1], y.shape[1]), device=x.device)
 
 
 def _select_prop_fn(op, x):
@@ -452,9 +465,10 @@ def _select_prop_fn(op, x):
 
 def _send_prop_fn(op, x):
     device = op.attributes["device"]
-    if not isinstance(x, Tensor) or device == x.device:
+    if not isinstance(x, Tensor) or device == x.device or x.dtype is None:
         _raise_type_error(op, x)
-    return Tensor(dtype=x.dtype, shape=x.shape, device=device)
+    dtype = type(x.dtype)(device=device)
+    return Tensor(dtype=dtype, shape=x.shape, device=device)
 
 
 def _split_prop_fn(op, x):
@@ -579,6 +593,7 @@ TypePropRegister = {
     ("Div", (Tensor, Tensor)): _elementwise_tensor_op_prop_fn,
     ("Dropout", (Tensor, Tensor, type(Bool()))): _dropout_prop_fn,
     ("Expand", (Tensor, Tensor)): _expand_prop_fn,
+    ("Gather", (Tensor, Tensor)): _gather_prop_fn,
     ("Gemm", (Tensor, Tensor, Tensor)): _gemm_prop_fn,
     ("Identity", (Tensor,)): _identity_prop_fn,
     (

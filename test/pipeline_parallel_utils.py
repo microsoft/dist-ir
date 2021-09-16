@@ -1,7 +1,7 @@
 from collections import OrderedDict
 
 from dist_ir.ir import Device, FunctionMaker
-from dist_ir.ir.type import Float32, Tensor
+from dist_ir.ir.type import Int32, Float32, Tensor
 
 
 def construct_function_and_partition_map():
@@ -16,6 +16,7 @@ def construct_function_and_partition_map():
     z = function.add_input_value(
         "z", Tensor(dtype=Float32(), shape=(batch_size, 1), device=d0)
     )
+    n = function.add_input_value("n", Int32(device=d0))
     wA = function.add_input_value(
         "wA", Tensor(dtype=Float32(), shape=(4, 2), device=d0)
     )
@@ -24,14 +25,11 @@ def construct_function_and_partition_map():
     )
     a = function.add_op("MatMul", "MatMul0", inputs=[x, wA], output_names=["a"])
     y = function.add_op("MatMul", "MatMul1", inputs=[a, wB], output_names=["y"])
-    l = function.add_op(
-        "Loss", "Loss", inputs=[y, z], attributes={"N": batch_size}, output_names=["l"]
-    )
+    l = function.add_op("Loss", "Loss", inputs=[y, z, n], output_names=["l"])
     dl = function.add_op(
         "LossGrad",
         "LossGrad",
-        inputs=[y, z],
-        attributes={"N": batch_size},
+        inputs=[y, z, n],
         output_names=["dl"],
     )
     da, dwB = function.add_op(

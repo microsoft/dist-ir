@@ -120,7 +120,15 @@ def _expand_prop_fn(op, x, y):
 
 
 def _gather_prop_fn(op, x, y):
-    if not (isinstance(x, Tensor) and isinstance(y, Tensor)):
+    if not (
+        isinstance(x, Tensor)
+        and isinstance(y, Tensor)
+        and x.shape is not None
+        and y.shape is not None
+        and x.device is not None
+        and y.device is not None
+        and x.device == y.device
+    ):
         _raise_type_error(op, x, y)
     if "axis" in op.attributes:
         axis = op.attributes["axis"]
@@ -166,23 +174,27 @@ def _layer_norm_prop_fn(op, x, y, z):
     return Tensor(dtype=x.dtype, device=x.device)
 
 
-def _loss_prop_fn(op, x, y):
+def _loss_prop_fn(op, x, y, n):
     if not (
         isinstance(x, Tensor)
         and isinstance(y, Tensor)
+        and isinstance(n, Int32)
         and x.shape == y.shape
         and x.device == y.device
+        and x.device == n.device
     ):
-        _raise_type_error(op, x, y)
+        _raise_type_error(op, x, y, n)
     return x
 
 
-def _loss_grad_prop_fn(op, x, y):
+def _loss_grad_prop_fn(op, x, y, n):
     if not (
         isinstance(x, Tensor)
         and isinstance(y, Tensor)
+        and isinstance(n, Int32)
         and x.shape == y.shape
         and x.device == y.device
+        and x.device == n.device
     ):
         _raise_type_error(op, x, y)
     return x
@@ -276,20 +288,19 @@ def _mpi_allreduce_from_tuple_type_prop_fn(op, xs):
 
 
 def _mpi_broadcast_prop_fn(op, x, to_tuple_type=False):
-    if not isinstance(x, Tensor):
-        _raise_type_error(op, x)
     devices = op.attributes["devices"]
-    if to_tuple_type:
-        return TupleType(
-            tuple(
-                Tensor(dtype=x.dtype, shape=x.shape, device=device)
-                for device in devices
-            )
-        )
-    else:
-        return tuple(
+    if isinstance(x, Tensor):
+        tuple_ = tuple(
             Tensor(dtype=x.dtype, shape=x.shape, device=device) for device in devices
         )
+    elif isinstance(x, Int32):
+        tuple_ = tuple(Int32(device=device) for device in devices)
+    else:
+        _raise_type_error(op, x)
+    if to_tuple_type:
+        return TupleType(tuple_)
+    else:
+        return tuple_
 
 
 def _mpi_broadcast_v2_prop_fn(op, x):
@@ -415,6 +426,8 @@ def _mul_prop_fn(op, x, y):
 
 
 def _reduce_mean_prop_fn(op, x):
+    if not isinstance(x, Tensor):
+        _raise_type_error(op, x)
     if "keepdims" in op.attributes:
         keepdims = op.attributes["keepdims"]
     else:
@@ -465,10 +478,31 @@ def _select_prop_fn(op, x):
 
 def _send_prop_fn(op, x):
     device = op.attributes["device"]
-    if not isinstance(x, Tensor) or device == x.device or x.dtype is None:
+    if device == x.device:
         _raise_type_error(op, x)
-    dtype = type(x.dtype)(device=device)
-    return Tensor(dtype=dtype, shape=x.shape, device=device)
+    if isinstance(x, Tensor):
+        if x.dtype is None:
+            _raise_type_error(op, x)
+        dtype = type(x.dtype)(device=device)
+        return Tensor(dtype=dtype, shape=x.shape, device=device)
+    elif isinstance(x, Int32):
+        return Int32(device=device)
+    else:
+        raise_type_error(op, x)
+
+
+def _sgd_prop_fn(op, *xs):
+    weights = xs[: (len(xs) // 2)]
+    gradients = xs[(len(xs) // 2) :]
+    for (w, dw) in zip(weights, gradients):
+        if not (
+            isinstance(w, Tensor)
+            and isinstance(dw, Tensor)
+            and w.shape == dw.shape
+            and w.device == dw.device
+        ):
+            _raise_type_error(op, weights, gradients)
+    return weights
 
 
 def _split_prop_fn(op, x):
@@ -640,6 +674,7 @@ TypePropRegister = {
     ("MPIAllreduce", (Tensor,) * 4096): _mpi_allreduce_prop_fn,
     ("MPIAllreduce", (Tensor,) * 8192): _mpi_allreduce_prop_fn,
     ("MPIBroadcast", (Tensor,)): _mpi_broadcast_prop_fn,
+    ("MPIBroadcast", (Int32,)): _mpi_broadcast_prop_fn,
     ("MPIBroadcastToTupleType", (Tensor,)): lambda op, x: _mpi_broadcast_prop_fn(
         op, x, True
     ),
@@ -675,8 +710,8 @@ TypePropRegister = {
         op, x, True
     ),
     ("MPIReduce_v2", (TupleType,)): _mpi_reduce_v2_prop_fn,
-    ("Loss", (Tensor, Tensor)): _loss_prop_fn,
-    ("LossGrad", (Tensor, Tensor)): _loss_grad_prop_fn,
+    ("Loss", (Tensor, Tensor, Int32)): _loss_prop_fn,
+    ("LossGrad", (Tensor, Tensor, Int32)): _loss_grad_prop_fn,
     ("LayerNormalization", (Tensor, Tensor, Tensor)): _layer_norm_prop_fn,
     ("MatMul", (Tensor, Tensor)): _matmul_prop_fn,
     ("MatMulGrad", (Tensor, Tensor, Tensor)): _matmul_grad_prop_fn,
@@ -687,6 +722,21 @@ TypePropRegister = {
     ("ReluGrad", (Tensor, Tensor)): _relu_grad_prop_fn,
     ("Select", (TupleType,)): _select_prop_fn,
     ("Send", (Tensor,)): _send_prop_fn,
+    ("Send", (Int32,)): _send_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(4)))): _sgd_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(8)))): _sgd_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(16)))): _sgd_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(32)))): _sgd_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(64)))): _sgd_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(128)))): _sgd_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(256)))): _sgd_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(512)))): _sgd_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(1024)))): _sgd_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(2048)))): _sgd_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(4096)))): _sgd_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(8192)))): _sgd_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(16384)))): _sgd_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(32768)))): _sgd_prop_fn,
     ("SplitUniform", (Tensor,)): _split_uniform_prop_fn,
     ("SplitUniformToTupleType", (Tensor,)): _split_uniform_prop_fn,
     ("Split", (Tensor,)): _split_prop_fn,

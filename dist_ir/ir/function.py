@@ -144,6 +144,15 @@ class Function:
         subfunction.set_outputs(outputs)
         return subfunction.finalize()
 
+    def to_function_maker(self):
+        """Returns a mutable (FunctionMaker) version of this function."""
+        return FunctionMaker(
+            name=self.name,
+            ops=list(self.ops),
+            inputs=list(self.inputs),
+            outputs=list(self.outputs),
+        )
+
 
 @dataclass
 class FunctionMaker:
@@ -160,7 +169,7 @@ class FunctionMaker:
         op_type,
         name=None,
         inputs: List[Value] = None,
-        attributes: Dict[str, Any] = None,
+        attributes: Dict[str, Any] = frozendict({}),
         subfunctions: List["Function"] = None,
         output_names: List[str] = None,
     ) -> Union[None, Value, Tuple[Value, ...]]:

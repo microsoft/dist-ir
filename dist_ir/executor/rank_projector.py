@@ -174,6 +174,7 @@ _ProjectorRegister = {
     "Reshape": _identity_projector,
     "Shape": _identity_projector,
     "Send": _send_projector,
+    "SGDOptimizer": _identity_projector,
     "Slice": _identity_projector,
     "Softmax": _identity_projector,
     "Split": _identity_projector,

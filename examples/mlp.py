@@ -1,17 +1,70 @@
-from dist_ir.ir import FunctionMaker
-from dist_ir.ir.type import Float32, Tensor
+import argparse
+from collections import defaultdict
+import numpy as np
+import re
+import torch
+
+from dist_ir.ir import FunctionMaker, Topology, get_uniform_topology, Value
+from dist_ir.ir.type import Int32, Float32, Tensor, abstract_values
+from dist_ir.executor import CostModel, Simulator, infer_types
+from dist_ir.transforms import mlp_dhp_transform
+from .parser import Parser
+import dist_ir.backend.torch as torch_backend
 
 
-def mlp(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, device):
+def get_typed_input_values(inputs, batch_size, input_dim, output_dim):
+    # TODO: Add types for weights as well?
+    typed_inputs = list(inputs)
+    # Update x and z to use the selected batch size
+    typed_inputs[0] = Value(
+        typed_inputs[0].name,
+        Tensor(
+            shape=(batch_size, input_dim),
+            dtype=typed_inputs[0].type.dtype,
+            device=typed_inputs[0].type.device,
+        ),
+    )
+    typed_inputs[1] = Value(
+        typed_inputs[1].name,
+        Tensor(
+            shape=(batch_size, output_dim),
+            dtype=typed_inputs[1].type.dtype,
+            device=typed_inputs[1].type.device,
+        ),
+    )
+    # Add value for batch size
+    typed_inputs[2] = Value(
+        typed_inputs[2].name, Int32(device=typed_inputs[2].type.device)
+    )
+    return tuple(typed_inputs)
+
+
+def get_input_data(batch_size, dim, num_layers):
+    x = np.random.normal(size=(batch_size, dim))
+    z = np.random.normal(size=(batch_size, dim))
+    n = batch_size
+    weights = [np.random.normal(size=(dim, dim))]
+    for i in range(1, num_layers - 1):
+        weights.append(np.random.normal(size=(dim, dim)))
+    weights.append(np.random.normal(size=(dim, dim)))
+    input_data = [x, z, n] + weights
+    input_data = [
+        v.astype(np.float32) if i != 2 else v for i, v in enumerate(input_data)
+    ]
+    return input_data
+
+
+def mlp(input_dim, hidden_dim, output_dim, num_hidden_layers, device):
     function = FunctionMaker(name="mlp")
     x = function.add_input_value(
         "x",
-        Tensor(dtype=Float32(), shape=(batch_size, input_dim), device=device),
+        Tensor(dtype=Float32(), shape=None, device=device),
     )
     z = function.add_input_value(
         "z",
-        Tensor(dtype=Float32(), shape=(batch_size, output_dim), device=device),
+        Tensor(dtype=Float32(), shape=None, device=device),
     )
+    n = function.add_input_value("n", Int32(device=device))
     weights = []
     for i in range(num_hidden_layers - 1):
         w = function.add_input_value(
@@ -30,13 +83,10 @@ def mlp(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, device
         y = function.add_op("MatMul", inputs=[a, weight], output_names=[f"y{i}"])
         a = function.add_op("Relu", inputs=[y], output_names=[f"a{i}"])
 
-    l = function.add_op(
-        "Loss", inputs=[a, z], attributes={"N": batch_size}, output_names=["l"]
-    )
+    l = function.add_op("Loss", inputs=[a, z, n], output_names=["l"])
     dl = function.add_op(
         "LossGrad",
-        inputs=[a, z],
-        attributes={"N": batch_size},
+        inputs=[a, z, n],
         output_names=["dl"],
     )
 
@@ -123,3 +173,262 @@ def mlp_inference_dp(
             )
 
     return function.finalize()
+
+
+def add_optimizer_ops(function):
+    function = function.to_function_maker()
+    hp_group_pattern = r"hp\_(.+?(?=\_))"
+
+    all_hp_groups = []
+    for output in function.outputs:
+        if "dw" in output.name:
+            match = re.search(hp_group_pattern, output.name)
+            if match is not None and match.group(1) != "all":
+                hp_group = tuple([int(x) for x in match.group(1).split(",")])
+                all_hp_groups.append(hp_group)
+    if len(all_hp_groups) > 1:
+        all_hp_groups = sorted(set(all_hp_groups), key=lambda x: x[0])
+
+    weight_map = defaultdict(lambda: {})
+    for inp in function.inputs:
+        if inp.name[0] != "w":
+            continue
+        w = inp
+        name = w.name.split("_")[0]
+        match = re.search(r"dp_(\d+)", w.name)
+        dp = int(match.group(1)) if match is not None else 0
+        match = re.search(r"hp_(\d+)", w.name)
+        hp = int(match.group(1)) if match is not None else 0
+        pp = w.type.device.device_id
+        weight_map[(dp, hp, pp)][name] = w
+
+    gradient_map = defaultdict(lambda: {})
+    for output in function.outputs:
+        if "dw" not in output.name:
+            continue
+        dw = output
+        name = dw.name.split("_")[0][1:]
+        dp = 0 if "dp_all" not in dw.name else int(dw.name.split("_")[-1])
+        match = re.search(hp_group_pattern, dw.name)
+        if match is not None and match.group(1) != "all":
+            hp_group = tuple([int(x) for x in match.group(1).split(",")])
+            hp = all_hp_groups.index(hp_group)
+        else:
+            hp = 0
+        pp = dw.type.device.device_id
+        gradient_map[(dp, hp, pp)][name] = dw
+
+    if sorted(weight_map.keys()) != sorted(gradient_map.keys()):
+        raise ValueError(f"Devices do not match for weights and gradients")
+
+    for device in weight_map:
+        weight_keys = sorted(weight_map[device].keys())
+        gradient_keys = sorted(gradient_map[device].keys())
+        assert weight_keys == gradient_keys
+        weights = [weight_map[device][k] for k in weight_keys]
+        gradients = [gradient_map[device][k] for k in gradient_keys]
+
+        function.add_op(
+            op_type="SGDOptimizer",
+            inputs=(weights + gradients),
+            attributes={"lr": 1e-3},
+            output_names=[f"{w.name}'" for w in weights],
+        )
+
+    return function.finalize()
+
+
+# TODO: De-duplicate this function with examples/gpt2.py
+def get_stats(function):
+    parameter_count = 0
+    model_size = 0
+    for inp in function.inputs:
+        if "w" in inp.name:
+            parameter_count += np.prod(inp.type.shape)
+            model_size += inp.type.size()
+
+    if parameter_count >= 1e3 and parameter_count < 1e6:
+        parameter_count_str = f"{parameter_count / 1e3:.2f}K"
+    elif parameter_count >= 1e6 and parameter_count < 1e9:
+        parameter_count_str = f"{parameter_count / 1e6:.2f}M"
+    elif parameter_count >= 1e9:
+        parameter_count_str = f"{parameter_count / 1e9:.2f}B"
+    else:
+        parameter_count_str = str(parameter_count)
+
+    if model_size >= 1e3 and model_size < 1e6:
+        model_size_str = f"{model_size / 1e3:.2f} KB"
+    elif model_size >= 1e6 and model_size < 1e9:
+        model_size_str = f"{model_size / 1e6:.2f} MB"
+    elif model_size >= 1e9:
+        model_size_str = f"{model_size / 1e9:.2f} GB"
+    else:
+        model_size_str = str(model_size)
+
+    return parameter_count, model_size, parameter_count_str, model_size_str
+
+
+def simulate(function, input_types, topology, allreduce_parameters=None):
+    simulator = Simulator(CostModel(topology, allreduce_parameters))
+    simulation = simulator.simulate(function, input_types)
+    return simulation
+
+
+def run_pytorch(function, input_data, world_size, use_gpu=True):
+    if use_gpu and world_size > torch.cuda.device_count():
+        raise ValueError(
+            f"Specified world size is {world_size}, but only "
+            f"{torch.cuda.device_count()} GPUs available"
+        )
+    input_types = abstract_values(
+        input_data,
+        tuple(
+            Tensor if isinstance(input_data[i].val, np.ndarray) else Int32
+            for i in range(len(input_data))
+        ),
+    )
+    pytorch_input_data = [torch.tensor(x.val, dtype=torch.float32) for x in input_data]
+    per_rank_outputs, runtimes = torch_backend.run_pytorch(
+        function,
+        pytorch_input_data,
+        input_types=input_types,
+        use_gpu=use_gpu,
+        num_warmup=5,
+        num_repetitions=10,
+    )
+    return per_rank_outputs, runtimes
+
+
+def run_mlp(
+    phase,
+    backend,
+    use_gpu,
+    batch_size,
+    input_dim,
+    hidden_dim,
+    output_dim,
+    num_hidden_layers,
+    dp_degree,
+    hp_degree,
+    pp_degree,
+    num_microbatches,
+    device_throughput,
+    dram_bandwidth,
+    kernel_launch_overhead,
+    network_bandwidth,
+    trace_file,
+    verbose=False,
+):
+    world_size = dp_degree * hp_degree * pp_degree
+    topology = get_uniform_topology(
+        world_size,
+        device_throughput,
+        dram_bandwidth,
+        kernel_launch_overhead,
+        network_bandwidth,
+    )
+
+    if phase == "training":
+        fn = mlp(
+            input_dim,
+            hidden_dim,
+            output_dim,
+            num_hidden_layers,
+            topology.devices[0],
+        )
+    elif phase == "inference":
+        fn = mlp_inference(
+            input_dim,
+            hidden_dim,
+            output_dim,
+            num_hidden_layers,
+            topology.devices[0],
+        )
+
+    if verbose:
+        parameter_count, model_size, parameter_count_str, model_size_str = get_stats(fn)
+        print("Parameter count:", parameter_count_str)
+        print("Model size:", model_size_str)
+
+    if world_size > 1:
+        init_fn, transformed_fn = mlp_dhp_transform(
+            fn,
+            dp_degree,
+            hp_degree,
+            pp_degree,
+            num_microbatches,
+            topology.devices,
+        )
+        typed_inputs = get_typed_input_values(
+            init_fn.inputs, batch_size, input_dim, output_dim
+        )
+        init_fn = infer_types(init_fn, typed_inputs)
+        transformed_fn = infer_types(transformed_fn, init_fn.outputs)
+        input_types = tuple(output.type for output in init_fn.outputs)
+    else:
+        typed_inputs = get_typed_input_values(
+            fn.inputs, batch_size, input_dim, output_dim
+        )
+        fn = infer_types(fn, typed_inputs)
+        transformed_fn = fn
+        input_types = tuple(inp.type for inp in fn.inputs)
+    transformed_fn = add_optimizer_ops(transformed_fn)
+    if backend == "simulate":
+        simulation = simulate(transformed_fn, input_types, topology)
+        if verbose:
+            simulation.print_summary(batch_size=batch_size)
+        if trace_file is not None:
+            simulation.dump_chrome_trace(trace_file)
+        return simulation
+    elif backend == "pytorch":
+        input_data = [
+            ConcreteValue(
+                np.random.normal(size=typ.size).astype(np.float32), device=typ.device
+            )
+            for typ in input_types
+        ]
+        return run_pytorch(fn, input_data, world_size, use_gpu)
+
+
+def main(args):
+    run_mlp(
+        args.phase,
+        args.backend,
+        args.use_gpu,
+        args.batch_size,
+        args.input_dim,
+        args.hidden_dim,
+        args.output_dim,
+        args.num_hidden_layers,
+        args.dp_degree,
+        args.hp_degree,
+        args.pp_degree,
+        args.num_microbatches,
+        args.device_throughput,
+        args.dram_bandwidth,
+        args.kernel_launch_overhead,
+        args.network_bandwidth,
+        args.trace_file,
+        args.verbose,
+    )
+
+
+if __name__ == "__main__":
+    parser = Parser(description="MLP training and inference")
+    parser.add_parallelism_config_arguments()
+    parser.add_simulation_config_arguments()
+    parser.add_execution_mode_config_arguments()
+    parser.add_backend_config_arguments()
+    parser.add_simulation_output_config_arguments()
+    parser.add_global_output_config_arguments()
+    parser.add_argument(
+        "--phase", choices=["inference", "training"], default="training"
+    )
+    parser.add_argument("--input_dim", type=int, default=256, help="Input dim")
+    parser.add_argument("--hidden_dim", type=int, default=256, help="Hidden dim")
+    parser.add_argument("--output_dim", type=int, default=256, help="Output dim")
+    parser.add_argument(
+        "--num_hidden_layers", type=int, default=16, help="# hidden layers"
+    )
+    args = parser.parse_args()
+    main(args)

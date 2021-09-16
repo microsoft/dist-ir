@@ -1,4 +1,5 @@
-from collections import defaultdict, Hashable
+from collections import defaultdict
+from collections.abc import Hashable
 from frozendict import frozendict
 from itertools import chain
 import math
@@ -411,7 +412,7 @@ def check_params(
             "Embedding dimension must be divisible by number of attention heads"
         )
     elif hp_degree > n_head:
-        raise ValueError("# of attention heads must be > horizontal parallel degree")
+        raise ValueError("# of attention heads must be >= horizontal parallel degree")
 
 
 def update_attributes(
@@ -728,7 +729,7 @@ def gpt2_dhp_transform(
                                 mb_k_output = intermediate_value_map[j][k][
                                     microbatch_id
                                 ][output]
-                                match = re.search("hp\_(.*)\_pp", mb_k_output.name)
+                                match = re.search(r"hp\_(.*)\_pp", mb_k_output.name)
                                 hp_level = match.group(1)
                                 if microbatch_id == 0:
                                     # We clone the output from the first microbatch to create
@@ -758,7 +759,7 @@ def gpt2_dhp_transform(
                                     ]
                                     assert (
                                         re.search(
-                                            "hp\_(.*)\_pp", mb_all_output.name
+                                            r"hp\_(.*)\_pp", mb_all_output.name
                                         ).group(1)
                                         == hp_level
                                     )

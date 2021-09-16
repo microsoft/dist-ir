@@ -358,16 +358,11 @@ def import_function_and_get_input_data(
         parse_input_data=True,
     )
 
-    if not use_real_weights:
-        for inp in input_data_map:
-            if "input" in inp.name or "weight" in inp.name or "bias" in inp.name:
-                input_data_map[inp] = inp.type
-
     function = _filter_extra_outputs(function)
 
     if not use_real_weights:
         for inp in input_data_map:
-            if "weight" in inp.name or "bias" in inp.name:
+            if "input" in inp.name or "weight" in inp.name or "bias" in inp.name:
                 input_data_map[inp] = inp.type
     input_data = list(input_data_map.values())
 

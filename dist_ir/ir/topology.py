@@ -12,7 +12,6 @@ class Topology:
     def devices(self):
         return self._devices
 
-    # TODO: Move throughput and dram_bandwidth to common constants file
     def add_device(
         self,
         device_type,

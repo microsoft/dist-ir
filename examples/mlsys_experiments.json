@@ -1,0 +1,9 @@
+[
+    {
+        "model": "mlp",
+        "model_size": "mlp-xs",
+        "max_world_size": 4,
+        "min_batch_size": 16,
+        "max_batch_size": 64
+    }
+]

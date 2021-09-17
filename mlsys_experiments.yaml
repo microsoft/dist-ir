@@ -1,0 +1,29 @@
+description: Run DistIR MLSys experiments
+
+
+
+target:
+  service: amlk8s
+  name: v100-32gb-eus
+  vc: aml-ds
+
+
+environment:
+  image: pytorch/pytorch:1.9.0-cuda10.2-cudnn7-devel
+  registry: docker.io
+  setup:
+    - pip install -r requirements.txt
+
+
+code:
+  # local directory of the code. this will be uploaded to the server.
+  # $CONFIG_DIR is expanded to the directory of this config file
+  local_dir: $CONFIG_DIR
+
+
+jobs:
+  - name: dist_ir_mlsys_experiments
+    sku: G4
+    command:
+      - python -m examples.mlsys_experiments --mode calibrate --output_file v100.simulation_parameters.json --calibrate_device_parameters --calibrate_allreduce_parameters --calibrate_network_bandwidth 
+      - mv v100.simulation_parameters.json $$AMLT_OUTPUT_DIR/

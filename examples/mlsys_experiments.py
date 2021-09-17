@@ -1,5 +1,7 @@
 import argparse
+from itertools import count, takewhile
 import json
+import math
 import os
 import pandas as pd
 
@@ -8,6 +10,9 @@ from dist_ir.executor import (
     calibrate_network_bandwidth,
     calibrate_allreduce_parameters,
 )
+from .mlp_grid_search import MLPGridSearch
+from .gpt2_grid_search import GPTGridSearch
+from .grid_search import run_grid_search
 
 
 def calibrate_parameters(args):
@@ -71,7 +76,47 @@ def calibrate_parameters(args):
             json.dump(simulation_parameters, f)
 
 
+def simulate_from_file(args):
+    with open(args.experiments_file, "r") as f:
+        experiments = json.load(f)
+
+    for experiment in experiments:
+        grid_search_class = {
+            "mlp": MLPGridSearch,
+            "gpt": GPTGridSearch,
+        }
+
+        all_model_sizes = [experiment["model_size"]]
+        # 1, 2, 4, ... experiment['max_world_size']
+        all_world_sizes = list(
+            takewhile(
+                lambda x: x <= experiment["max_world_size"], (2 ** i for i in count())
+            )
+        )
+        # experiment['min_batch_size'], 2**i, 2**(i+1), .., experiment['max_batch_size']
+        all_batch_sizes = list(
+            takewhile(
+                lambda x: x <= experiment["max_batch_size"],
+                (2 ** i for i in count(int(math.log(experiment["min_batch_size"], 2)))),
+            )
+        )
+        grid_search_args = argparse.Namespace(
+            simulation_parameters_file=args.simulation_parameters_file,
+            backend="simulate",
+            mode="grid",
+            all_model_sizes=all_model_sizes,
+            all_world_sizes=all_world_sizes,
+            all_batch_sizes=all_batch_sizes,
+            output_file=args.output_file,
+        )
+        if experiment["model"] == "gpt":
+            grid_search_args.model_path = "gpt2-10.onnx"
+
+        run_grid_search(grid_search_args, grid_search_class[experiment["model"]])
+
+
 def prepare_best_grid_search_configs(args):
+    # TODO for both these, remove throughput/latency columns so it's clear they are input files
     if args.simulation_file is None:
         raise ValueError("Simulation file must be provided")
     # TODO handle files containing multiple model(-size)s
@@ -82,6 +127,7 @@ def prepare_best_grid_search_configs(args):
 
 
 def prepare_accuracy_sample_configs(args):
+    # TODO generate configs again from experiments file to avoid having to simulate
     if args.simulation_file is None:
         raise ValueError("Simulation file must be provided")
     df = pd.read_csv(args.simulation_file)

@@ -474,12 +474,9 @@ def run_function(
             value_map[op.outputs[0]] = output
 
         # Free tensors that are not used again
-        # TODO: Add this back after resolving recv buffers
-        """
         for v in op.inputs:
             if v in value_map and fn.last_use(v) == op and not (v in fn.outputs):
                 del value_map[v]
-        """
 
     if record_op_runtimes:
         trace = []

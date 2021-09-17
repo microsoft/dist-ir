@@ -5,8 +5,9 @@ import pytest
 import re
 
 from examples import mlp
-from dist_ir.executor import infer_types, SequentialExecutor, ConcreteValue
-from dist_ir.ir import get_uniform_topology
+from dist_ir.ir import FunctionMaker, get_uniform_topology
+from dist_ir.executor import infer_types, sequentially_execute, ConcreteValue
+from dist_ir.ir.type import Float32, Tensor
 from dist_ir.transforms import mlp_dhp_transform
 
 BATCH_SIZE = 64
@@ -96,10 +97,9 @@ def test_mlp_dhp_transform(
         )
         for i, inp in enumerate(typed_inputs)
     ]
-    ex = SequentialExecutor("numpy")
-    outputs = ex.compute(function, input_data)
-    dist_input_data = ex.compute(init_function, input_data)
-    transformed_outputs = ex.compute(transformed_function, dist_input_data)
+    outputs = sequentially_execute(function, input_data)
+    dist_input_data = sequentially_execute(init_function, input_data)
+    transformed_outputs = sequentially_execute(transformed_function, dist_input_data)
 
     outputs = [v.val for v in outputs]
     # Verify that transformed_outputs are on expected devices

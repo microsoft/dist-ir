@@ -1,0 +1,38 @@
+# Microsoft code quality and compliance checks
+
+# Do not run automatically, or require for pull requests
+trigger: none
+pr: none
+
+pool:
+  vmImage: windows-latest
+
+steps:
+- task: CredScan@3
+
+- task: Semmle@1
+  inputs:
+    sourceCodeDirectory: '$(Build.SourcesDirectory)'
+    language: 'python'
+    querySuite: 'Recommended'
+    timeout: '1800'
+    ram: '16384'
+    addProjectDirToScanningExclusionList: true
+
+- task: ComponentGovernanceComponentDetection@0
+  inputs:
+    scanType: 'Register'
+    verbosity: 'Verbose'
+    alertWarningLevel: 'High'
+
+- task: SdtReport@2
+  inputs:
+    GdnExportHtmlFile: true
+    GdnExportAllTools: true
+
+- task: PublishSecurityAnalysisLogs@3
+  inputs:
+    ArtifactName: 'CodeAnalysisLogs'
+    ArtifactType: 'Container'
+    AllTools: true
+    ToolLogsNotFoundAction: 'Standard'

@@ -12,13 +12,12 @@ class Topology:
     def devices(self):
         return self._devices
 
-    # TODO: Move throughput and dram_bandwidth to common constants file
     def add_device(
         self,
         device_type,
-        throughput=1.0e14,
-        dram_bandwidth=1.2e12,
-        kernel_launch_overhead=1e-5,
+        throughput=constants.DEFAULT_DEVICE_THROUGHPUT,
+        dram_bandwidth=constants.DEFAULT_DRAM_BANDWIDTH,
+        kernel_launch_overhead=constants.DEFAULT_KERNEL_LAUNCH_OVERHEAD,
     ):
         device_id = self._device_id_counter
         self._device_id_counter += 1
@@ -56,20 +55,27 @@ def get_uniform_topology(
     kernel_launch_overhead=constants.DEFAULT_KERNEL_LAUNCH_OVERHEAD,
     network_bandwidth=constants.DEFAULT_NETWORK_BANDWIDTH,
 ):
-    # TODO: Add kernel launch overhead to Device definition
     topology = Topology()
-    d0 = topology.add_device("gpu")
+    d0 = topology.add_device("cpu")
     for i in range(1, world_size + 1):
         topology.add_device(
-            "gpu", throughput=device_throughput, dram_bandwidth=dram_bandwidth
+            "gpu",
+            throughput=device_throughput,
+            dram_bandwidth=dram_bandwidth,
+            kernel_launch_overhead=kernel_launch_overhead,
         )
-        for j in range(0, i):
-            if j == 0:
+
+    if isinstance(network_bandwidth, list):
+        for (src_rank, dst_rank, bandwidth) in network_bandwidth:
+            topology.set_bandwidth(
+                topology.devices[src_rank], topology.devices[dst_rank], bandwidth
+            )
+    elif isinstance(network_bandwidth, float):
+        for i in range(1, world_size + 1):
+            for j in range(0, i):
                 topology.set_bandwidth(
                     topology.devices[i], topology.devices[j], network_bandwidth
                 )
-            else:
-                topology.set_bandwidth(
-                    topology.devices[i], topology.devices[j], network_bandwidth
-                )
+    else:
+        raise ValueError(f"Invalid network bandwidth {network_bandwidth}")
     return topology

@@ -3,19 +3,6 @@ from collections import defaultdict
 import numpy as np
 import re
 import torch
-import os
-import pickle
-
-from dist_ir.ir import FunctionMaker, Topology, cpprint
-from dist_ir.ir.type import Float32, Tensor
-from dist_ir.executor import (
-    CostModel,
-    Simulator,
-    infer_types,
-    calibrate_device_parameters,
-    calibrate_network_bandwidth,
-    calibrate_allreduce_parameters,
-)
 
 from dist_ir.ir import FunctionMaker, Topology, get_uniform_topology, Value
 from dist_ir.ir.type import Int32, Float32, Tensor, abstract_values
@@ -44,6 +31,10 @@ def get_typed_input_values(inputs, batch_size, input_dim, output_dim):
             dtype=typed_inputs[1].type.dtype,
             device=typed_inputs[1].type.device,
         ),
+    )
+    # Add value for batch size
+    typed_inputs[2] = Value(
+        typed_inputs[2].name, Int32(device=typed_inputs[2].type.device)
     )
     return tuple(typed_inputs)
 
@@ -75,19 +66,12 @@ def mlp(input_dim, hidden_dim, output_dim, num_hidden_layers, device):
     )
     n = function.add_input_value("n", Int32(device=device))
     weights = []
-    w = function.add_input_value(
-        f"w{chr(ord('A'))}",
-        Tensor(dtype=Float32(), shape=(input_dim, hidden_dim), device=device),
-    )
-    weights.append(w)
-    for i in range(1, num_hidden_layers - 1):
+    for i in range(num_hidden_layers - 1):
         w = function.add_input_value(
             f"w{chr(ord('A')+i)}",
-            Tensor(dtype=Float32(), shape=(hidden_dim, hidden_dim), device=device),
+            Tensor(dtype=Float32(), shape=(input_dim, hidden_dim), device=device),
         )
         weights.append(w)
-    if num_hidden_layers == 1:
-        i = 0
     w = function.add_input_value(
         f"w{chr(ord('A')+i+1)}",
         Tensor(dtype=Float32(), shape=(hidden_dim, output_dim), device=device),
@@ -191,34 +175,6 @@ def mlp_inference_dp(
     return function.finalize()
 
 
-def mlp_inference_no_relu(
-    batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, device
-):
-    fn = FunctionMaker(name="mlp")
-    x = fn.add_input_value(
-        "x", Tensor(shape=(batch_size, input_dim), dtype=Float32(), device=device)
-    )
-    weights = []
-    w = fn.add_input_value(
-        "w0", Tensor(shape=(input_dim, hidden_dim), dtype=Float32(), device=device)
-    )
-    weights.append(w)
-    for i in range(1, num_hidden_layers - 1):
-        w = fn.add_input_value(
-            f"w{i}",
-            Tensor(shape=(hidden_dim, hidden_dim), dtype=Float32(), device=device),
-        )
-        weights.append(w)
-    w = fn.add_input_value(
-        f"w{num_hidden_layers}",
-        Tensor(shape=(hidden_dim, output_dim), dtype=Float32(), device=device),
-    )
-    weights.append(w)
-    for i, w in enumerate(weights):
-        x = fn.add_op(op_type="MatMul", inputs=[x, w], output_names=[f"y{i}"])
-    return fn.finalize()
-
-
 def add_optimizer_ops(function):
     function = function.to_function_maker()
     hp_group_pattern = r"hp\_(.+?(?=\_))"
@@ -312,91 +268,8 @@ def get_stats(function):
     return parameter_count, model_size, parameter_count_str, model_size_str
 
 
-def simulate(
-    function, input_types, topology, allreduce_parameters=None, trace_file=None
-):
+def simulate(function, input_types, topology, allreduce_parameters=None):
     simulator = Simulator(CostModel(topology, allreduce_parameters))
-    simulation = simulator.interpret(function, input_types)
-    latency = max([simulation.timestamps[d] for d in simulation.timestamps])
-    peak_memory = max([simulation.peak_memory[d] for d in simulation.peak_memory])
-    if trace_file is not None:
-        simulation.dump_chrome_trace(trace_file)
-    return latency, peak_memory
-
-
-def run_pytorch(function, input_types, use_gpu, profile=False):
-    inputs = tuple(
-        torch.randn(size=typ.shape, dtype=torch.float32) for typ in input_types
-    )
-    if profile:
-        num_warmup = 25
-        num_repetitions = 1
-    else:
-        num_warmup = 5
-        num_repetitions = 10
-    _, runtimes = torch_backend.run_pytorch(
-        function,
-        inputs,
-        use_gpu=use_gpu,
-        num_warmup=num_warmup,
-        num_repetitions=num_repetitions,
-        profile=profile,
-    )
-    latency = np.max(np.median(list(runtimes[i] for i in range(len(runtimes)))))
-    return latency
-
-
-def calibrate_parameters(args):
-    if args.simulation_parameters_file is not None and os.path.exists(
-        args.simulation_parameters_file
-    ):
-        with open(args.simulation_parameters_file, "rb") as f:
-            simulation_parameters = pickle.load(f)
-        print(
-            f"Reading simulation parameters from {args.simulation_parameters_file}..."
-        )
-        args.device_throughput = simulation_parameters["device_throughput"]
-        args.dram_bandwidth = simulation_parameters["dram_bandwidth"]
-        args.kernel_launch_overhead = simulation_parameters["kernel_launch_overhead"]
-        args.network_bandwidth = simulation_parameters["network_bandwidth"]
-        if "allreduce_parameters" in simulation_parameters:
-            args.allreduce_parameters = simulation_parameters["allreduce_parameters"]
-        else:
-            assert args.calibrate_allreduce_parameters
-    else:
-        simulation_parameters = {}
-    update_simulation_parameters = False
-    if args.calibrate_device_parameters and args.backend == "simulate":
-        print("Calibrating device parameters...")
-        (
-            args.dram_bandwidth,
-            args.device_throughput,
-            args.kernel_launch_overhead,
-        ) = calibrate_device_parameters()
-        update_simulation_parameters = True
-        print(f"DRAM bandwidth: {args.dram_bandwidth:.2e}")
-        print(f"Device throughput: {args.device_throughput:.2e}")
-        print(f"Kernel launch overhead: {args.kernel_launch_overhead:.2e}")
-    if args.calibrate_network_bandwidth and args.backend == "simulate":
-        args.network_bandwidth = calibrate_network_bandwidth()
-        update_simulation_parameters = True
-        print(f"Network bandwidth: {args.network_bandwidth}")
-    if args.calibrate_allreduce_parameters and args.backend == "simulate":
-        args.allreduce_parameters = calibrate_allreduce_parameters()
-        update_simulation_parameters = True
-        print(f"Allreduce parameters: {args.allreduce_parameters}")
-    if update_simulation_parameters and args.simulation_parameters_file is not None:
-        simulation_parameters["dram_bandwidth"] = args.dram_bandwidth
-        simulation_parameters["device_throughput"] = args.device_throughput
-        simulation_parameters["kernel_launch_overhead"] = args.kernel_launch_overhead
-        simulation_parameters["network_bandwidth"] = args.network_bandwidth
-        simulation_parameters["allreduce_parameters"] = args.allreduce_parameters
-        with open(args.simulation_parameters_file, "wb") as f:
-            pickle.dump(simulation_parameters, f)
-
-
-def simulate(function, input_types, topology):
-    simulator = Simulator(CostModel(topology))
     simulation = simulator.simulate(function, input_types)
     return simulation
 
@@ -408,7 +281,11 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
             f"{torch.cuda.device_count()} GPUs available"
         )
     input_types = abstract_values(
-        input_data, tuple(Tensor for i in range(len(input_data) if i != 2 else Int32))
+        input_data,
+        tuple(
+            Tensor if isinstance(input_data[i].val, np.ndarray) else Int32
+            for i in range(len(input_data))
+        ),
     )
     pytorch_input_data = [torch.tensor(x.val, dtype=torch.float32) for x in input_data]
     per_rank_outputs, runtimes = torch_backend.run_pytorch(
@@ -423,7 +300,7 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
 
 
 def run_mlp(
-    mode,
+    phase,
     backend,
     use_gpu,
     batch_size,
@@ -451,7 +328,7 @@ def run_mlp(
         network_bandwidth,
     )
 
-    if mode == "training":
+    if phase == "training":
         fn = mlp(
             input_dim,
             hidden_dim,
@@ -459,7 +336,7 @@ def run_mlp(
             num_hidden_layers,
             topology.devices[0],
         )
-    elif mode == "inference":
+    elif phase == "inference":
         fn = mlp_inference(
             input_dim,
             hidden_dim,
@@ -482,18 +359,24 @@ def run_mlp(
             num_microbatches,
             topology.devices,
         )
-        typed_inputs = get_typed_input_values(init_fn.inputs, batch_size, input_dim, output_dim)
+        typed_inputs = get_typed_input_values(
+            init_fn.inputs, batch_size, input_dim, output_dim
+        )
         init_fn = infer_types(init_fn, typed_inputs)
-        input_types = tuple(output.type for output in init_fn.outputs)
         transformed_fn = infer_types(transformed_fn, init_fn.outputs)
+        input_types = tuple(output.type for output in init_fn.outputs)
     else:
-        transformed_fn = infer_types(fn, fn.inputs)
+        typed_inputs = get_typed_input_values(
+            fn.inputs, batch_size, input_dim, output_dim
+        )
+        fn = infer_types(fn, typed_inputs)
+        transformed_fn = fn
         input_types = tuple(inp.type for inp in fn.inputs)
     transformed_fn = add_optimizer_ops(transformed_fn)
     if backend == "simulate":
         simulation = simulate(transformed_fn, input_types, topology)
         if verbose:
-            simulation.print_summary()
+            simulation.print_summary(batch_size=batch_size)
         if trace_file is not None:
             simulation.dump_chrome_trace(trace_file)
         return simulation
@@ -508,9 +391,8 @@ def run_mlp(
 
 
 def main(args):
-    calibrate_parameters(args)
     run_mlp(
-        args.mode,
+        args.phase,
         args.backend,
         args.use_gpu,
         args.batch_size,
@@ -534,13 +416,14 @@ def main(args):
 if __name__ == "__main__":
     parser = Parser(description="MLP training and inference")
     parser.add_parallelism_config_arguments()
-    parser.add_simulation_topology_config_arguments()
+    parser.add_simulation_config_arguments()
     parser.add_execution_mode_config_arguments()
     parser.add_backend_config_arguments()
     parser.add_simulation_output_config_arguments()
     parser.add_global_output_config_arguments()
-    parser.add_argument("--mode", choices=["inference", "training"])
-    parser.add_argument("--batch_size", type=int, default=256, help="Batch size")
+    parser.add_argument(
+        "--phase", choices=["inference", "training"], default="training"
+    )
     parser.add_argument("--input_dim", type=int, default=256, help="Input dim")
     parser.add_argument("--hidden_dim", type=int, default=256, help="Hidden dim")
     parser.add_argument("--output_dim", type=int, default=256, help="Output dim")

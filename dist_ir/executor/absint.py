@@ -32,7 +32,6 @@ from .concrete_value import ConcreteValue, wrap_concrete_register
 from ..ir import Function, Op, Value
 from ..ir.type import *
 from .numpy_register import NumPyRegister
-from .torch_register import TorchRegister
 from .type_register import TypePropRegister
 from .mixed_register import MixedRegister
 from .communication_register import CommunicationRegister
@@ -265,7 +264,6 @@ class AbstractInterpreter:
 _semantics = {}
 update_semantics_with_register(_semantics, TypePropRegister)
 update_semantics_with_register(_semantics, wrap_concrete_register(NumPyRegister))
-update_semantics_with_register(_semantics, wrap_concrete_register(TorchRegister))
 update_semantics_with_register(_semantics, MixedRegister)
 update_semantics_with_register(_semantics, CommunicationRegister)
 interpreter = AbstractInterpreter(AbstractState, _semantics)

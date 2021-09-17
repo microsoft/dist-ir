@@ -279,7 +279,6 @@ def _partition_inputs_pp(
                 else:
                     # If not using pipeline parallelism, no action necessary here.
                     pp_inputs[hp_input][0] = [hp_input]
-
     return pp_inputs
 
 

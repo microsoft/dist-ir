@@ -7,9 +7,9 @@ import torch
 import dist_ir.backend.torch as torch_backend
 from dist_ir.executor import (
     CostModel,
-    Simulator,
-    SequentialExecutor,
     infer_types,
+    sequentially_execute,
+    Simulator,
     ConcreteValue,
 )
 from dist_ir.importer import import_from_onnx
@@ -358,16 +358,11 @@ def import_function_and_get_input_data(
         parse_input_data=True,
     )
 
-    if not use_real_weights:
-        for inp in input_data_map:
-            if "input" in inp.name or "weight" in inp.name or "bias" in inp.name:
-                input_data_map[inp] = inp.type
-
     function = _filter_extra_outputs(function)
 
     if not use_real_weights:
         for inp in input_data_map:
-            if "weight" in inp.name or "bias" in inp.name:
+            if "input" in inp.name or "weight" in inp.name or "bias" in inp.name:
                 input_data_map[inp] = inp.type
     input_data = list(input_data_map.values())
 
@@ -481,14 +476,13 @@ def transform(
         d_embd,
         n_head,
     )
-    ex = SequentialExecutor("numpy")
     wrapped_input_data = []
     for v in input_data:
         if isinstance(v, Type):
             wrapped_input_data.append(v)
         else:
             wrapped_input_data.append(ConcreteValue(v, topology.devices[0]))
-    initialized_input_data = ex.compute(init_function, wrapped_input_data)
+    initialized_input_data = sequentially_execute(init_function, wrapped_input_data)
     return init_function, transformed_function, initialized_input_data
 
 
@@ -554,8 +548,8 @@ def get_transformed_function_and_input_data(
     return transformed_function, initialized_input_data, topology
 
 
-def simulate(function, input_data, topology):
-    simulator = Simulator(CostModel(topology))
+def simulate(function, input_data, topology, allreduce_parameters=None):
+    simulator = Simulator(CostModel(topology, allreduce_parameters))
     simulation = simulator.simulate(function, input_data)
     return simulation
 
@@ -642,7 +636,7 @@ def main(args):
         simulation = simulate(transformed_function, initialized_input_data, topology)
         if args.trace_file is not None:
             simulation.dump_chrome_trace(args.trace_file)
-        simulation.print_summary()
+        simulation.print_summary(args.batch_size)
     elif args.backend == "pytorch":
         world_size = args.dp_degree * args.hp_degree * args.pp_degree
         per_rank_outputs, runtimes = run_pytorch(
@@ -662,10 +656,11 @@ def main(args):
 if __name__ == "__main__":
     parser = Parser("GPT2 Inference")
     parser.add_parallelism_config_arguments()
-    parser.add_simulation_topology_config_arguments()
+    parser.add_simulation_config_arguments()
     parser.add_backend_config_arguments()
     parser.add_execution_mode_config_arguments()
     parser.add_gpt2_model_path_config_arguments()
+    parser.add_simulation_output_config_arguments()
     parser.add_argument("--n_layer", type=int, default=12, help="Num hidden layers")
     parser.add_argument(
         "--n_head",

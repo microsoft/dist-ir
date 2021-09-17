@@ -10,7 +10,6 @@ from dist_ir.ir import FunctionMaker, Topology, cpprint
 from dist_ir.ir.type import Device, Float32, Tensor
 from dist_ir.backend.torch import run_pytorch
 from .type_inference import infer_types
-from .sequential_executor import SequentialExecutor
 from .cost_model import CostModel
 from .simulator import Simulator
 
@@ -131,7 +130,7 @@ def network_bandwidth_debug():
 
 
 def calibrate_network_bandwidth():
-    bandwidths = {}
+    bandwidths = []
     all_sizes = [1024, 2048, 4096, 8192]
     n = len(all_sizes)
     X = np.zeros(shape=(n, 2))
@@ -139,7 +138,8 @@ def calibrate_network_bandwidth():
     params = {}
     devices = [Device(i + 1, "gpu") for i in range(torch.cuda.device_count())]
     for src in devices:
-        bandwidths[(0, src.device_id)] = 64
+        # TODO: Calibrate CPU to GPU transfer time properly
+        bandwidths.append([0, src.device_id, 64])
         for dst in devices:
             if src == dst:
                 continue
@@ -159,15 +159,12 @@ def calibrate_network_bandwidth():
                     num_repetitions=10,
                     num_warmup=5,
                 )
-                print(
-                    f"src={src.device_id}, dst={dst.device_id}, size={size}: {np.median(runtimes[0])} ({np.std(runtimes[0])})"
-                )
                 pytorch_latency = np.median(runtimes[0])
                 Y[i] = pytorch_latency
 
             reg = LinearRegression(positive=True, fit_intercept=False).fit(X, Y)
             bandwidth = 1.0 / reg.coef_[0]
-            bandwidths[(src.device_id, dst.device_id)] = bandwidth
+            bandwidths.append([src.device_id, dst.device_id, bandwidth])
             print(f"bandwidth[({src.device_id}, {dst.device_id})] = {bandwidth} Gbps")
 
     return bandwidths

@@ -1,10 +1,28 @@
-from argparse import ArgumentParser
+from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 import torch
 
 from dist_ir.utils import constants
 
 
 class Parser(ArgumentParser):
+    def __init__(self, *args, **kwargs):
+        kwargs["formatter_class"] = ArgumentDefaultsHelpFormatter
+        super().__init__(*args, **kwargs)
+
+    def parse_args(self):
+        args = super().parse_args()
+
+        # Check arguments are valid:
+        if hasattr(args, "mode"):
+            assert args.mode is not None
+            if args.mode == "file":
+                assert args.configs_file is not None
+            elif args.mode == "config":
+                assert args.config is not None
+                assert args.model_size is not None
+
+        return args
+
     def add_parallelism_config_arguments(self):
         self.add_argument(
             "-d", "--dp_degree", type=int, default=1, help="Data parallel degree"
@@ -20,7 +38,7 @@ class Parser(ArgumentParser):
         )
         self.add_argument("--batch_size", type=int, default=64, help="Batch size")
 
-    def add_simulation_topology_config_arguments(self):
+    def add_simulation_config_arguments(self):
         self.add_argument(
             "--network_bandwidth",
             type=float,
@@ -45,9 +63,18 @@ class Parser(ArgumentParser):
             default=constants.DEFAULT_KERNEL_LAUNCH_OVERHEAD,
             help="Kernel launch overhead",
         )
+        self.add_argument(
+            "--allreduce_parameters", default=None, help="Allreduce parameters"
+        )
+        self.add_argument(
+            "--simulation_parameters_file",
+            type=str,
+            default=None,
+            help="Simulation parameters file",
+        )
 
     def add_execution_mode_config_arguments(self):
-        self.add_argument("--backend", choices=["simulate", "pytorch"])
+        self.add_argument("--backend", choices=["simulate", "pytorch"], required=True)
 
     def add_simulation_output_config_arguments(self):
         self.add_argument("--trace_file", type=str, default=None, help="Trace file")
@@ -67,6 +94,16 @@ class Parser(ArgumentParser):
         )
 
     def add_grid_search_config_arguments(self, defaults):
+        # 3 modes: generate & search grid, run from file, run single config
+        self.add_argument(
+            "--mode",
+            type=str,
+            choices=["grid", "file", "config"],
+            default=None,
+            help="Run mode: run a grid search, run a single/all configs from a"
+            "file, run a specified config from command line",
+        )
+        # grid search arguments:
         self.add_argument(
             "--all_world_sizes",
             nargs="+",
@@ -85,6 +122,7 @@ class Parser(ArgumentParser):
             type=str,
             default=defaults["all_model_sizes"],
         )
+        # config file arguments:
         self.add_argument(
             "--configs_file",
             type=str,
@@ -97,6 +135,21 @@ class Parser(ArgumentParser):
             default=None,
             help="The configuration from configs_file to run (line number, 0 = header)",
         )
+        # single config arguments:
+        self.add_argument(
+            "--model_size",
+            type=str,
+            default=None,
+            help="The model size to run when mode == config, e.g. mlp-xs or gpt3",
+        )
+        self.add_argument(
+            "--config",
+            nargs="+",
+            type=int,
+            default=None,
+            help="The configration to run (D H P K BS, e.g.: --config 1 2 2 8 128)",
+        )
+        # output file arguments:
         self.add_argument(
             "--output_file",
             type=str,

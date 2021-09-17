@@ -1,8 +1,10 @@
 from abc import ABC, abstractmethod
 import csv
+import json
 import itertools
 from multiprocessing import Manager
 from os import path
+import sys
 from typing import NamedTuple
 import traceback
 
@@ -47,6 +49,7 @@ class GridSearch(ABC):
         dram_bandwidth,
         kernel_launch_overhead,
         network_bandwidth,
+        allreduce_parameters,
         max_world_size,
         model_path=None,
     ):
@@ -58,6 +61,7 @@ class GridSearch(ABC):
         self.dram_bandwidth = dram_bandwidth
         self.kernel_launch_overhead = kernel_launch_overhead
         self.network_bandwidth = network_bandwidth
+        self.allreduce_parameters = allreduce_parameters
         self.model_path = model_path
         self.topology = get_uniform_topology(
             max_world_size,
@@ -97,11 +101,11 @@ class GridSearch(ABC):
         r = df.iloc[row_number]
         return DHPConfig(
             r.model_size,
-            r.dp_degree,
-            r.hp_degree,
-            r.pp_degree,
-            r.num_microbatches,
-            r.batch_size,
+            int(r.dp_degree),
+            int(r.hp_degree),
+            int(r.pp_degree),
+            int(r.num_microbatches),
+            int(r.batch_size),
         )
 
     @staticmethod
@@ -227,21 +231,27 @@ class GridSearch(ABC):
                 # TODO: Measure peak memory?
                 peak_memory = 0
         except Exception as e:
+            # TODO: Move this after excepting RuntimeError or remove catch block for RuntimeError?
             print(f"Failed to run the configuration {config}:")
             traceback.print_exc()
-
             latency = -1
             peak_memory = -1
         except RuntimeError as e:
             print(e)
             latency = -1
             peak_memory = -1
+
+        # Write the results even if failed, to avoid re-running OOM configs
         self._write_row(config, latency, peak_memory)
+
+        if latency == -1:
+            # Most likely OOM, so exit 1 to tell shell script this run failed
+            sys.exit(1)
 
     def grid_search(self, configs):
         if self.backend == "pytorch":
             for config in configs:
-                print(config)
+                print(config)  # TODO add current date/time
                 self.run(config)
         elif self.backend == "simulate":
             process_map(self.run, configs)
@@ -251,6 +261,16 @@ class GridSearch(ABC):
 
 # TODO merge with grid_search? move everything there or here?
 def run_grid_search(args, grid_search_cls):
+    if args.simulation_parameters_file is not None:
+        with open(args.simulation_parameters_file, "r") as f:
+            simulation_parameters = json.load(f)
+        args.device_throughput = simulation_parameters["device_throughput"]
+        args.dram_bandwidth = simulation_parameters["dram_bandwidth"]
+        args.kernel_launch_overhead = simulation_parameters["kernel_launch_overhead"]
+        args.network_bandwidth = simulation_parameters["network_bandwidth"]
+        args.allreduce_parameters = {
+            int(k): v for k, v in simulation_parameters["allreduce_parameters"].items()
+        }
     grid_search = grid_search_cls(
         args.backend,
         args.use_gpu,
@@ -259,27 +279,32 @@ def run_grid_search(args, grid_search_cls):
         args.dram_bandwidth,
         args.kernel_launch_overhead,
         args.network_bandwidth,
+        args.allreduce_parameters,
         max(args.all_world_sizes),
         model_path=args.model_path if hasattr(args, "model_path") else None,
     )
 
-    # If we are not given which config(s) to run, generate them
-    if args.configs_file is None:
+    # Configs to run: given by args.mode:
+    if args.mode == "grid":
         configs = list(
             grid_search.gen_configurations(
                 args.all_world_sizes, args.all_batch_sizes, args.all_model_sizes
             )
         )
         print(f"Generated {len(configs)} configurations")
-    else:
+    elif args.mode == "file":
         if args.config_number is not None:
-            df = pd.read_csv(args.configs_file)
             # lookup and run only given config
+            df = pd.read_csv(args.configs_file)
             configs = [GridSearch._config_from_df(df, args.config_number - 1)]
         else:
-            # use all configs
+            # use all configs in file
             configs = GridSearch._read_configs(args.configs_file)
         print(f"Found {len(configs)} configurations")
+    else:
+        assert args.mode == "config" and all(isinstance(i, int) for i in args.config)
+        d, h, p, k, batch_size = args.config
+        configs = [DHPConfig(args.model_size, d, h, p, k, batch_size)]
 
     # If output file exists, skip existing configs and append results to output file
     if path.exists(args.output_file) and not args.overwrite_output_file:

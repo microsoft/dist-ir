@@ -1,6 +1,6 @@
 from dist_ir.ir import Value
-from dist_ir.ir.type import Tensor, abstract_values
-from dist_ir.executor import infer_types, SequentialExecutor, ConcreteValue
+from dist_ir.ir.type import Tensor
+from dist_ir.executor import infer_types, sequentially_execute, ConcreteValue
 from dist_ir.transforms import mlp_dhp_transform
 from . import mlp
 from .grid_search import DHPConfig, GridSearch, run_grid_search
@@ -17,6 +17,7 @@ class MLPGridSearch(GridSearch):
         dram_bandwidth,
         kernel_launch_overhead,
         network_bandwidth,
+        allreduce_parameters,
         max_world_size,
         model_path=None,
     ):
@@ -35,6 +36,7 @@ class MLPGridSearch(GridSearch):
             dram_bandwidth,
             kernel_launch_overhead,
             network_bandwidth,
+            allreduce_parameters,
             max_world_size,
             model_path,
         )
@@ -77,14 +79,20 @@ class MLPGridSearch(GridSearch):
             config.num_microbatches,
             topology.devices,
         )
-        init_fn = infer_types(init_fn, input_data)
+        if self.backend == "pytorch":
+            _, dim = self.model_params[config.model_size]
+            typed_input_values = mlp.get_typed_input_values(
+                init_fn.inputs, config.batch_size, dim, dim
+            )
+            init_fn = infer_types(init_fn, typed_input_values)
+        elif self.backend == "simulate":
+            init_fn = infer_types(init_fn, input_data)
         # init_function.outputs = transformed_function.inputs, so get types from there:
         transformed_fn = infer_types(transformed_fn, init_fn.outputs)
         transformed_fn = mlp.add_optimizer_ops(transformed_fn)
         if self.backend == "pytorch":
             if len(topology.devices) > 1:
-                ex = SequentialExecutor("numpy")
-                input_data = ex.compute(init_fn, input_data)
+                input_data = sequentially_execute(init_fn, input_data)
         else:
             input_data = transformed_fn.inputs
 
@@ -92,7 +100,9 @@ class MLPGridSearch(GridSearch):
 
     def simulate(self, transformed_fn, input_data, topology):
         input_types = (v.type for v in input_data)
-        return mlp.simulate(transformed_fn, input_types, topology)
+        return mlp.simulate(
+            transformed_fn, input_types, topology, self.allreduce_parameters
+        )
 
     def pytorch(self, transformed_fn, input_data, world_size):
         return mlp.run_pytorch(
@@ -107,7 +117,7 @@ if __name__ == "__main__":
         "all_model_sizes": ["mlp-small", "mlp-medium", "mlp-large"],
     }
     parser = Parser(description="MLP Grid Search")
-    parser.add_simulation_topology_config_arguments()
+    parser.add_simulation_config_arguments()
     parser.add_execution_mode_config_arguments()
     parser.add_grid_search_config_arguments(defaults)
     parser.add_backend_config_arguments()

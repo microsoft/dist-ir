@@ -1,7 +1,7 @@
 from pathlib import Path
 import numpy as np
 
-from dist_ir.executor import SequentialExecutor
+from dist_ir.executor import sequentially_execute
 
 # NOTE: Disabling mlir_parser tests to pass GitHub automated test
 # from dist_ir.importer import import_from_onnx, mlir_parser, parse_tensor_from_file
@@ -47,10 +47,9 @@ def _test_parser():
     function = functions[0]
     cpprint(function)
 
-    ex = SequentialExecutor("numpy")
     _wA = np.ones((4, 6))
     _x = np.arange(8 * 4).reshape((8, 4))
-    res = ex.compute(function, [_wA, _x])
+    res = sequentially_execute(function, [_wA, _x])
 
     # TODO fix concat's implementation in numpy register for this:
     # assert np.array_equal(res["%var4"], np.matmul(_x, _wA))

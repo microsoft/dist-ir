@@ -457,11 +457,6 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
         else:
             events.append(perf_counter())
 
-    if ctx.profile:
-        num_wait_steps = 0
-    else:
-        num_wait_steps = num_warmup_steps + num_repetitions
-
     if ctx.debug_stacktrace:
         try:
             outputs = run_function(ctx, fn, inputs, rank)
@@ -473,27 +468,35 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
         dist.destroy_process_group()
         return None, None
 
-    # Time a bunch of executions, then execute once for output values
-    with torch.profiler.profile(
-        activities=[
-            torch.profiler.ProfilerActivity.CPU,
-            torch.profiler.ProfilerActivity.CUDA,
-        ],
-        schedule=torch.profiler.schedule(
-            wait=num_wait_steps, warmup=num_warmup_steps, active=num_repetitions
-        ),
-        on_trace_ready=torch.profiler.tensorboard_trace_handler(
-            f"{fn.name}_{rank}_profile"
-        ),
-    ) as p:
-        for i in range(num_warmup_steps + num_repetitions):
+    def run(p=None):
+        for _ in range(num_warmup_steps + num_repetitions):
             add_event()
             # TODO: Handle failures here?
             outputs = run_function(ctx, fn, inputs, rank)
             if ctx.world_size > 1:
                 torch.distributed.barrier()
+            # TODO do we need a torch.cuda.synchronize here?
             add_event()
-            p.step()
+            if p is not None:
+                p.step()
+        return outputs
+
+    if ctx.profile:
+        with torch.profiler.profile(
+            activities=[
+                torch.profiler.ProfilerActivity.CPU,
+                torch.profiler.ProfilerActivity.CUDA,
+            ],
+            schedule=torch.profiler.schedule(
+                wait=0, warmup=num_warmup_steps, active=num_repetitions
+            ),
+            on_trace_ready=torch.profiler.tensorboard_trace_handler(
+                f"{fn.name}_{rank}_profile"
+            ),
+        ) as p:
+            outputs = run(p)
+    else:
+        outputs = run()
 
     if ctx.use_gpu:
         # Move outputs back to cpu

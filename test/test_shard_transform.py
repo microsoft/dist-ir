@@ -4,7 +4,7 @@ import pytest
 from dist_ir.ir import cpprint, Device, FunctionMaker
 from dist_ir.ir.type import Float32, Tensor
 from dist_ir.transforms import shard_transform
-from dist_ir.executor import ConcreteValue, SequentialExecutor, infer_types
+from dist_ir.executor import ConcreteValue, sequentially_execute, infer_types
 
 # TODO skipping these tests as shard transform is unused for now
 # To fix tests, add ConcreteValue support to AbstractInterpreter.interpret_pmap
@@ -45,13 +45,12 @@ def test_single_variable_data_parallel():
     print("-" * 88)
     cpprint(transformed_function)
 
-    ex = SequentialExecutor("numpy")
     _a = np.ones((4, 4))
     _b = np.ones((4, 4))
     inputs = [ConcreteValue(v, None) for v in [_a, _b]]
-    orig_res = ex.compute(function, inputs)
+    orig_res = sequentially_execute(function, inputs)
 
-    transformed_res = ex.compute(transformed_function, inputs)
+    transformed_res = sequentially_execute(transformed_function, inputs)
 
     print("-" * 88)
     print("Original function results")
@@ -98,13 +97,12 @@ def test_double_variable_data_parallel():
     print("-" * 88)
     cpprint(transformed_function)
 
-    ex = SequentialExecutor("numpy")
     _a = np.ones((4, 4))
     _b = np.ones((4, 4))
     _c = np.ones((4, 4))
-    orig_res = ex.compute(function, [_a, _b, _c])
+    orig_res = sequentially_execute(function, [_a, _b, _c])
 
-    transformed_res = ex.compute(transformed_function, [_a, _b, _c])
+    transformed_res = sequentially_execute(transformed_function, [_a, _b, _c])
 
     print("-" * 88)
     print("Original function results")
@@ -161,13 +159,12 @@ def test_single_variable_horizontal_parallel():
     print("-" * 88)
     cpprint(transformed_function)
 
-    ex = SequentialExecutor("numpy")
     _x = np.random.normal(size=(batch_size, input_dim))
     _wA = np.random.normal(size=(input_dim, hidden_dim))
     _wB = np.random.normal(size=(hidden_dim, output_dim))
-    orig_res = ex.compute(function, [_x, _wA, _wB])
+    orig_res = sequentially_execute(function, [_x, _wA, _wB])
 
-    transformed_res = ex.compute(transformed_function, [_x, _wA, _wB])
+    transformed_res = sequentially_execute(transformed_function, [_x, _wA, _wB])
 
     print("-" * 88)
     print("Original function results")
@@ -221,12 +218,11 @@ def test_double_variable_horizontal_parallel():
     print("-" * 88)
     cpprint(transformed_function)
 
-    ex = SequentialExecutor("numpy")
     _x = np.random.normal(size=(batch_size, input_dim))
     _wA = np.random.normal(size=(input_dim, hidden_dim))
     _wB = np.random.normal(size=(hidden_dim, output_dim))
-    orig_res = ex.compute(function, [_x, _wA, _wB])
-    transformed_res = ex.compute(transformed_function, [_x, _wA, _wB])
+    orig_res = sequentially_execute(function, [_x, _wA, _wB])
+    transformed_res = sequentially_execute(transformed_function, [_x, _wA, _wB])
 
     print("-" * 88)
     print("Original function results")
@@ -295,14 +291,13 @@ def test_mnist_data_parallel():
     print("-" * 88)
     cpprint(transformed_function)
 
-    ex = SequentialExecutor("numpy")
     _x = np.arange(batch_size * 4).reshape((batch_size, 4))
     _z = np.ones((batch_size, 1))
     _wA = np.ones((4, 2))
     _wB = np.ones((2, 1))
-    orig_res = ex.compute(function, [_x, _z, _wA, _wB])
+    orig_res = sequentially_execute(function, [_x, _z, _wA, _wB])
 
-    transformed_res = ex.compute(transformed_function, [_x, _z, _wA, _wB])
+    transformed_res = sequentially_execute(transformed_function, [_x, _z, _wA, _wB])
 
     print("-" * 88)
     print("Original function results")

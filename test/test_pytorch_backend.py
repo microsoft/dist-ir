@@ -3,7 +3,7 @@ import pytest
 import torch
 
 from dist_ir.backend.torch import run_pytorch
-from dist_ir.executor import SequentialExecutor
+from dist_ir.executor import sequentially_execute
 from dist_ir.executor.concrete_value import ConcreteValue
 from dist_ir.executor.cost_model import CostModel
 from dist_ir.executor.simulator import Simulator
@@ -138,8 +138,7 @@ def test_owt(num_devices, num_layers, use_gpu):
             input_arrays += np.split(weights[l], num_devices, axis=1)
     input_arrays += np.split(x, num_devices)
     inputs = [ConcreteValue(v, None) for v in input_arrays]
-    ex = SequentialExecutor("numpy")
-    outputs = ex.compute(fn, inputs)
+    outputs = sequentially_execute(fn, inputs)
     output_arrays = [v.val for v in outputs]
 
     # Expected results

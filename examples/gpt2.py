@@ -7,9 +7,9 @@ import torch
 import dist_ir.backend.torch as torch_backend
 from dist_ir.executor import (
     CostModel,
-    Simulator,
-    SequentialExecutor,
     infer_types,
+    sequentially_execute,
+    Simulator,
     ConcreteValue,
 )
 from dist_ir.importer import import_from_onnx
@@ -476,14 +476,13 @@ def transform(
         d_embd,
         n_head,
     )
-    ex = SequentialExecutor("numpy")
     wrapped_input_data = []
     for v in input_data:
         if isinstance(v, Type):
             wrapped_input_data.append(v)
         else:
             wrapped_input_data.append(ConcreteValue(v, topology.devices[0]))
-    initialized_input_data = ex.compute(init_function, wrapped_input_data)
+    initialized_input_data = sequentially_execute(init_function, wrapped_input_data)
     return init_function, transformed_function, initialized_input_data
 
 

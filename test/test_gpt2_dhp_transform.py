@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from dist_ir.executor import SequentialExecutor, ConcreteValue
+from dist_ir.executor import sequentially_execute, ConcreteValue
 from dist_ir.ir import cpprint
 from examples.gpt2 import get_transformed_function_and_input_data, run_pytorch
 from dist_ir.utils import constants
@@ -71,8 +71,7 @@ def _run_gpt(
                 )
             )
         else:
-            ex = SequentialExecutor("numpy")
-            outputs = ex.compute(transformed_function, initialized_input_data)
+            outputs = sequentially_execute(transformed_function, initialized_input_data)
         return outputs
 
 

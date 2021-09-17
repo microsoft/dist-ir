@@ -10,7 +10,6 @@ from dist_ir.ir import FunctionMaker, Topology, cpprint
 from dist_ir.ir.type import Device, Float32, Tensor
 from dist_ir.backend.torch import run_pytorch
 from .type_inference import infer_types
-from .sequential_executor import SequentialExecutor
 from .cost_model import CostModel
 from .simulator import Simulator
 

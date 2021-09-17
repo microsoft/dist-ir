@@ -1,6 +1,6 @@
 from dist_ir.ir import Value
 from dist_ir.ir.type import Tensor
-from dist_ir.executor import infer_types, SequentialExecutor, ConcreteValue
+from dist_ir.executor import infer_types, sequentially_execute, ConcreteValue
 from dist_ir.transforms import mlp_dhp_transform
 from . import mlp
 from .grid_search import DHPConfig, GridSearch, run_grid_search
@@ -92,8 +92,7 @@ class MLPGridSearch(GridSearch):
         transformed_fn = mlp.add_optimizer_ops(transformed_fn)
         if self.backend == "pytorch":
             if len(topology.devices) > 1:
-                ex = SequentialExecutor("numpy")
-                input_data = ex.compute(init_fn, input_data)
+                input_data = sequentially_execute(init_fn, input_data)
         else:
             input_data = transformed_fn.inputs
 

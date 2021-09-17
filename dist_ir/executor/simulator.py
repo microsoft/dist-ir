@@ -13,7 +13,7 @@ from .absint import (
     dispatch,
 )
 from .concrete_value import ConcreteValue
-from .cost_model import CostModel, KERNEL_LAUNCH_OVERHEAD
+from .cost_model import CostModel
 
 SECONDS_TO_MICROSECONDS = 1e6
 
@@ -201,7 +201,7 @@ class Simulator:
             if signature is None:
                 # Use default cost function if signature not in cost_functions
                 devices = _get_all_devices(inputs + outputs)
-                costs = {device: KERNEL_LAUNCH_OVERHEAD for device in devices}
+                costs = {device: device.kernel_launch_overhead for device in devices}
             else:
                 # Abstract inputs if necessary
                 abstracted_inputs = abstract_values(inputs, signature)

@@ -538,7 +538,7 @@ def _split_uniform_prop_fn(op, x):
     output_shape = list(x.shape)
     # TODO: Move this check to attribute error function?
     assert output_shape[split_dim] % num_splits == 0
-    output_shape[split_dim] //= num_splits
+    output_shape[split_dim] //= int(num_splits)
     output_shape = tuple(output_shape)
     output_types = tuple(
         Tensor(dtype=x.dtype, shape=output_shape, device=x.device)

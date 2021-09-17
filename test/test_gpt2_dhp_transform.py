@@ -30,6 +30,7 @@ def _run_gpt(
     n_embd=768,
     use_real_weights=True,
     use_pytorch_backend=False,
+    debug_stacktrace=False,
     verbose=False,
 ):
     (
@@ -62,6 +63,7 @@ def _run_gpt(
                 initialized_input_data,
                 world_size,
                 use_gpu=torch.cuda.device_count() >= world_size,
+                debug_stacktrace=debug_stacktrace,
             )
             outputs = tuple(
                 ConcreteValue(v.numpy(), None if t.type is None else t.type.device)
@@ -82,6 +84,7 @@ def _test(
     pp_degree=1,
     num_microbatches=1,
     use_pytorch_backend=False,
+    debug_stacktrace=False,
 ):
 
     # Test with real weights
@@ -91,6 +94,7 @@ def _test(
         pp_degree=pp_degree,
         num_microbatches=num_microbatches,
         use_pytorch_backend=use_pytorch_backend,
+        debug_stacktrace=debug_stacktrace,
     )
     assert len(transformed_outputs) == dp_degree * hp_degree
     for i in range(len(transformed_outputs)):
@@ -120,9 +124,15 @@ def test_reference_execution(original_outputs, dp_degree, hp_degree, pp_degree):
 
 @pytest.mark.parametrize(
     ("dp_degree", "hp_degree", "pp_degree"),
-    list(itertools.product([1, 2], [1, 2], [1, 2])),
+    [
+        x
+        for x in list(itertools.product([1, 2], [1, 2], [1, 2]))
+        if (x[0] * x[1] * x[2]) <= torch.cuda.device_count()
+    ],
 )
-def test_pytorch_backend(original_outputs, dp_degree, hp_degree, pp_degree):
+def test_pytorch_backend(
+    original_outputs, dp_degree, hp_degree, pp_degree, debug_stacktrace=False
+):
     _test(
         original_outputs,
         dp_degree=dp_degree,
@@ -130,6 +140,7 @@ def test_pytorch_backend(original_outputs, dp_degree, hp_degree, pp_degree):
         pp_degree=pp_degree,
         num_microbatches=pp_degree,
         use_pytorch_backend=True,
+        debug_stacktrace=debug_stacktrace,
     )
 
 

@@ -22,7 +22,11 @@ class Topology:
         device_id = self._device_id_counter
         self._device_id_counter += 1
         device = Device(
-            device_id, device_type, throughput, dram_bandwidth, kernel_launch_overhead
+            device_id,
+            device_type,
+            throughput=throughput,
+            dram_bandwidth=dram_bandwidth,
+            kernel_launch_overhead=kernel_launch_overhead,
         )
         self._devices.append(device)
         self._bandwidths[device] = {}
@@ -52,7 +56,7 @@ def get_uniform_topology(
     network_bandwidth=constants.DEFAULT_NETWORK_BANDWIDTH,
 ):
     topology = Topology()
-    d0 = topology.add_device("gpu")
+    d0 = topology.add_device("cpu")
     for i in range(1, world_size + 1):
         topology.add_device(
             "gpu",

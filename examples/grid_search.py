@@ -231,6 +231,7 @@ class GridSearch(ABC):
                 # TODO: Measure peak memory?
                 peak_memory = 0
         except Exception as e:
+            # TODO: Move this after excepting RuntimeError or remove catch block for RuntimeError?
             print(f"Failed to run the configuration {config}:")
             traceback.print_exc()
             latency = -1

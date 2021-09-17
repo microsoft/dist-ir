@@ -1,193 +1,128 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-import csv
-from itertools import product
-import numpy as np
-from multiprocessing import Pool
-
-from dist_ir.ir import Topology
-from dist_ir.executor import infer_types, Simulator
-from dist_ir.executor.cost_model import CostModel
+from dist_ir.ir import Value
+from dist_ir.ir.type import Tensor
+from dist_ir.executor import infer_types, sequentially_execute, ConcreteValue
 from dist_ir.transforms import mlp_dhp_transform
-from .mlp import mlp
-
-DGX_BANDWIDTH_GBPS = 200
-
-
-def add_devices_to_topology(topology, num_devices):
-    for i in range(num_devices):
-        topology.add_device("gpu")
-    devices = topology.devices
-    for i in range(0, len(devices)):
-        for j in range(i + 1, len(devices)):
-            topology.set_bandwidth(devices[i], devices[j], DGX_BANDWIDTH_GBPS)
+from . import mlp
+from .grid_search import DHPConfig, GridSearch, run_grid_search
+from .parser import Parser
 
 
-def get_all_degrees(n):
-    all_degrees = []
-    d = 1
-    h = 1
-    p = 1
-    while d <= n:
-        h = 1
-        p = 1
-        if d * h * p == n:
-            all_degrees.append((d, h, p))
-            break
-        while h <= n:
-            p = 1
-            if d * h * p == n:
-                all_degrees.append((d, h, p))
-                break
-            while p <= n:
-                if d * h * p == n:
-                    all_degrees.append((d, h, p))
-                    break
-                p *= 2
-            h *= 2
-        d *= 2
-    return all_degrees
-
-
-def run_experiment(config):
-    (
-        batch_size,
-        input_dim,
-        num_hidden_layers,
-        dp_degree,
-        hp_degree,
-        pp_degree,
-        num_microbatches,
-    ) = config
-    hidden_dim = input_dim
-    output_dim = hidden_dim
-    topology = Topology()
-    d0 = topology.add_device("gpu")
-    function = mlp(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, d0)
-    function = infer_types(function, function.inputs)
-    world_size = dp_degree * hp_degree * pp_degree
-    add_devices_to_topology(topology, world_size)
-
-    transformed_function = mlp_dhp_transform(
-        function,
-        dp_degree,
-        hp_degree,
-        pp_degree,
-        topology.devices,
-        num_microbatches,
-    )
-    transformed_function = infer_types(
-        transformed_function, transformed_function.inputs
-    )
-    simulator = Simulator(CostModel(topology))
-    simulation = simulator.interpret(
-        transformed_function,
-        (v.type for v in transformed_function.inputs),
-    )
-    distributed_running_time = max(
-        [simulation.timestamps[d] for d in simulation.timestamps]
-    )
-    throughput = batch_size / distributed_running_time
-    return throughput
-
-
-def mlp_dist(
-    mlp_fn,
-    dp_degree,
-    hp_degree,
-    pp_degree,
-    num_microbatches,
-    topology,
-):
-    init_function, transformed_function = mlp_dhp_transform(
-        mlp_fn,
-        dp_degree,
-        hp_degree,
-        pp_degree,
-        topology.devices,
-        num_microbatches,
-    )
-    init_function = infer_types(init_function, init_function.inputs)
-    # init_function.outputs = transformed_function.inputs, so get types from there:
-    transformed_function = infer_types(transformed_function, init_function.outputs)
-    return init_function, transformed_function
-
-
-def gen_configurations(hidden_dims, cluster_sizes, all_num_layers, all_batch_sizes):
-    for hidden_dim, num_hidden_layers, batch_size, cluster_size in product(
-        hidden_dims, all_num_layers, all_batch_sizes, cluster_sizes
+class MLPGridSearch(GridSearch):
+    def __init__(
+        self,
+        backend,
+        use_gpu,
+        output_file,
+        device_throughput,
+        dram_bandwidth,
+        kernel_launch_overhead,
+        network_bandwidth,
+        allreduce_parameters,
+        max_world_size,
+        model_path=None,
     ):
-        all_degrees = get_all_degrees(cluster_size)
-        for (dp_degree, hp_degree, pp_degree) in all_degrees:
-            if num_hidden_layers % pp_degree != 0:
-                continue
-            dp_batch_size = batch_size // dp_degree
-            if pp_degree == 1:
-                all_num_microbatches = [1]
-            else:
-                all_num_microbatches = [
-                    int(2 ** k)
-                    for k in range(1, int(np.floor(np.log2(dp_batch_size) / 2)))
-                ]
-            for num_microbatches in all_num_microbatches:
-                if pp_degree == 1:
-                    num_microbatches == 1
-                yield (
-                    batch_size,
-                    hidden_dim,
-                    num_hidden_layers,
-                    dp_degree,
-                    hp_degree,
-                    pp_degree,
-                    num_microbatches,
-                )
+        model_params = {
+            "mlp-xs": (8, 512),
+            "mlp-small": (16, 8192),
+            "mlp-medium": (64, 16384),
+            "mlp-large": (128, 32768),
+        }
+        super().__init__(
+            model_params,
+            backend,
+            use_gpu,
+            output_file,
+            device_throughput,
+            dram_bandwidth,
+            kernel_launch_overhead,
+            network_bandwidth,
+            allreduce_parameters,
+            max_world_size,
+            model_path,
+        )
+        self.models = {}
 
-
-def grid_search(hidden_dims, cluster_sizes, all_num_layers, all_batch_sizes):
-    configs = list(
-        gen_configurations(hidden_dims, cluster_sizes, all_num_layers, all_batch_sizes)
-    )
-
-    with Pool() as p:
-        results = p.map(run_experiment, configs)
-
-    with open("grid_search_results.csv", "w", newline="") as f:
-        fieldnames = [
-            "dp_degree",
-            "hp_degree",
-            "pp_degree",
-            "num_microbatches",
-            "throughput",
-        ]
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        for config, throughput in zip(configs, results):
-            (
-                batch_size,
-                input_dim,
-                num_hidden_layers,
-                dp_degree,
-                hp_degree,
-                pp_degree,
-                num_microbatches,
-            ) = config
-            writer.writerow(
-                {
-                    "dp_degree": dp_degree,
-                    "hp_degree": hp_degree,
-                    "pp_degree": pp_degree,
-                    "num_microbatches": num_microbatches,
-                    "throughput": throughput,
-                }
+    def get_model_and_input_data(self, batch_size, model_size):
+        if model_size not in self.models:
+            num_layers, dim = self.model_params[model_size]
+            self.models[model_size] = mlp.mlp(
+                dim, dim, dim, num_layers, self.topology.devices[0]
             )
+
+        fn = self.models[model_size]
+        num_layers, dim = self.model_params[model_size]
+        if self.backend == "pytorch":
+            input_data = mlp.get_input_data(batch_size, dim, num_layers)
+            input_data = tuple(
+                ConcreteValue(t, inp.type.device)
+                for t, inp in zip(input_data, fn.inputs)
+            )
+        else:
+            input_data = mlp.get_typed_input_values(fn.inputs, batch_size, dim, dim)
+        return fn, input_data
+
+    def verify_config(self, config: DHPConfig):
+        pass
+
+    def transform(
+        self,
+        fn,
+        input_data,
+        topology,
+        config: DHPConfig,
+    ):
+        init_fn, transformed_fn = mlp_dhp_transform(
+            fn,
+            config.dp_degree,
+            config.hp_degree,
+            config.pp_degree,
+            config.num_microbatches,
+            topology.devices,
+        )
+        if self.backend == "pytorch":
+            _, dim = self.model_params[config.model_size]
+            typed_input_values = mlp.get_typed_input_values(
+                init_fn.inputs, config.batch_size, dim, dim
+            )
+            init_fn = infer_types(init_fn, typed_input_values)
+        elif self.backend == "simulate":
+            init_fn = infer_types(init_fn, input_data)
+        # init_function.outputs = transformed_function.inputs, so get types from there:
+        transformed_fn = infer_types(transformed_fn, init_fn.outputs)
+        transformed_fn = mlp.add_optimizer_ops(transformed_fn)
+        if self.backend == "pytorch":
+            if len(topology.devices) > 1:
+                input_data = sequentially_execute(init_fn, input_data)
+        else:
+            input_data = transformed_fn.inputs
+
+        return init_fn, transformed_fn, input_data
+
+    def simulate(self, transformed_fn, input_data, topology):
+        input_types = (v.type for v in input_data)
+        return mlp.simulate(
+            transformed_fn, input_types, topology, self.allreduce_parameters
+        )
+
+    def pytorch(self, transformed_fn, input_data, world_size):
+        return mlp.run_pytorch(
+            transformed_fn, input_data, world_size, use_gpu=self.use_gpu
+        )
 
 
 if __name__ == "__main__":
-    # grid_search(
-    #     hidden_dims=[8192],
-    #     cluster_sizes=[1, 2, 4, 8, 16, 32],
-    #     all_num_layers=[64],
-    #     all_batch_sizes=[8192],
-    # )
-    pass
+    defaults = {
+        "all_world_sizes": [1, 2, 4],
+        "all_batch_sizes": [2 ** i for i in range(16)],
+        "all_model_sizes": ["mlp-small", "mlp-medium", "mlp-large"],
+    }
+    parser = Parser(description="MLP Grid Search")
+    parser.add_simulation_config_arguments()
+    parser.add_execution_mode_config_arguments()
+    parser.add_grid_search_config_arguments(defaults)
+    parser.add_backend_config_arguments()
+    args = parser.parse_args()
+    run_grid_search(args, MLPGridSearch)

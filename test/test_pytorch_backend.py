@@ -6,22 +6,19 @@ import pytest
 import torch
 
 from dist_ir.backend.torch import run_pytorch
-from dist_ir.executor import SequentialExecutor
+from dist_ir.executor import sequentially_execute
 from dist_ir.executor.concrete_value import ConcreteValue
 from dist_ir.executor.cost_model import CostModel
 from dist_ir.executor.simulator import Simulator
 from dist_ir.executor.type_inference import infer_types
 from dist_ir.ir import Device, FunctionMaker, cpprint, Value
 from dist_ir.ir.type import Float32, Tensor
-from dist_ir.ir.topology import Topology
+from dist_ir.ir.topology import Topology, get_uniform_topology
 
 # TODO make examples submodule of dist_ir?
-from examples.mlp_grid_search import (
-    add_devices_to_topology,
-    gen_configurations,
-    mlp_dist,
-)
 from examples.mlp import mlp, mlp_inference_dp
+
+torch.manual_seed(42)
 
 
 def create_owt_model(num_devices, num_layers):
@@ -144,8 +141,7 @@ def test_owt(num_devices, num_layers, use_gpu):
             input_arrays += np.split(weights[l], num_devices, axis=1)
     input_arrays += np.split(x, num_devices)
     inputs = [ConcreteValue(v, None) for v in input_arrays]
-    ex = SequentialExecutor("numpy")
-    outputs = ex.compute(fn, inputs)
+    outputs = sequentially_execute(fn, inputs)
     output_arrays = [v.val for v in outputs]
 
     # Expected results
@@ -197,77 +193,6 @@ def test_dp_mp_matmuls():
     per_rank_fns, groups = project(fn, tuple(v.type for v in fn.inputs))
     for per_rank_fn in per_rank_fns.values():
         cpprint(per_rank_fn)
-
-
-@pytest.mark.parametrize(
-    "use_gpu",
-    [
-        False,
-        pytest.param(
-            True,
-            marks=pytest.mark.skipif(
-                torch.cuda.device_count() < 8, reason="Not enough available GPUs"
-            ),
-        ),
-    ],
-)
-def test_mlp_grid_search(use_gpu):
-    # batch_sizes = [2 ** i for i in range(10, 15)]
-    # hidden_dims = [2 ** i for i in range(8, 13)]
-    batch_sizes = [32]
-    hidden_dims = [32]
-    world_sizes = [1, 2, 4, 8]
-    all_num_layers = [8]
-
-    results = []
-    for (batch_size, hidden_dim, num_layers, d, h, p, m) in gen_configurations(
-        hidden_dims, world_sizes, all_num_layers, batch_sizes
-    ):
-        world_size = d * h * p
-        # TODO reuse seq_mlp
-        topology = Topology()
-        d0 = topology.add_device("gpu")
-        add_devices_to_topology(topology, world_size)
-        simulator = Simulator(CostModel(topology))
-        seq_executor = SequentialExecutor("numpy")
-        seq_mlp = mlp(batch_size, hidden_dim, hidden_dim, hidden_dim, num_layers, d0)
-        seq_mlp = infer_types(seq_mlp, seq_mlp.inputs)
-
-        # Create random input data
-        input_data = tuple(
-            ConcreteValue(np.random.randn(*v.type.shape).astype(np.float32), d0)
-            for v in seq_mlp.inputs
-        )
-
-        init_fn, fn = mlp_dist(seq_mlp, d, h, p, m, topology)
-        print(fn.name)
-
-        # Simulate
-        simulation = simulator.simulate(fn, (v.type for v in fn.inputs))
-        simulated_time = max([simulation.timestamps[d] for d in simulation.timestamps])
-        print(simulated_time)
-
-        # Reference-execute init_fn to get inputs for fn
-        dist_input_data = seq_executor.compute(init_fn, input_data)
-        dist_input_data = tuple(torch.tensor(t.val) for t in dist_input_data)
-        assert all(
-            t.shape == v.type.shape for (t, v) in zip(dist_input_data, fn.inputs)
-        )
-
-        # Measure actual execution time
-        # TODO check outputs match?
-        # _, runtimes = run_pytorch(world_size, fn, dist_input_data)
-        _, runtimes = run_pytorch(
-            fn,
-            dist_input_data,
-            use_gpu=use_gpu,
-            num_repetitions=1,  # TODO use 100
-            num_warmup=1,
-        )
-        # TODO or median of max?
-        actual_time = max(np.median(times) for times in runtimes)
-
-        print(fn.name, simulated_time, actual_time)
 
 
 @pytest.mark.parametrize(
@@ -404,9 +329,9 @@ def test_separate_projection_types():
 
 
 if __name__ == "__main__":
-    # test_owt(2, 4)
-    # test_dp_mlp()
-    test_send_recv(False)
-    # test_single_device()
-    # test_dp_mp_matmuls()
-    # test_mlp_grid_search()
+    # test_owt(2, 4, use_gpu=False)
+    # test_dp_mlp(use_gpu=False)
+    # test_send_recv(use_gpu=False)
+    # test_single_device(use_gpu=False)
+    test_dp_mp_matmuls()
+    test_mlp_grid_search(use_gpu=False)

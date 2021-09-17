@@ -41,8 +41,8 @@ OpRegister = {
     "LambOptimizer": OpRegisterEntry(variadic_inputs=True, variadic_outputs=True),
     "LayerNormalization": OpRegisterEntry(num_inputs=3, num_outputs=3),
     "LayerNormalizationGrad": OpRegisterEntry(num_inputs=5, num_outputs=3),
-    "Loss": OpRegisterEntry(num_inputs=2, num_outputs=1),
-    "LossGrad": OpRegisterEntry(num_inputs=2, num_outputs=1),
+    "Loss": OpRegisterEntry(num_inputs=3, num_outputs=1),
+    "LossGrad": OpRegisterEntry(num_inputs=3, num_outputs=1),
     # TODO support variadic number of inputs
     "Min": OpRegisterEntry(num_inputs=2, num_outputs=1),
     "MatMul": OpRegisterEntry(num_inputs=2, num_outputs=1),
@@ -76,7 +76,7 @@ OpRegister = {
     # TODO call the combined one SendRecv?
     "Send": OpRegisterEntry(num_inputs=1, num_outputs=1),
     "SendP2P": OpRegisterEntry(num_inputs=1, num_outputs=0),
-    "SGDOptimizer": OpRegisterEntry(num_inputs=3, num_outputs=2),
+    "SGDOptimizer": OpRegisterEntry(variadic_inputs=True, variadic_outputs=True),
     "Shape": OpRegisterEntry(num_inputs=1, num_outputs=1),
     # TODO allow optional inputs for things like slice
     # "Slice": OpRegisterEntry(num_inputs=4, num_outputs=1),

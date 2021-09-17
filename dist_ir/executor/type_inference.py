@@ -17,7 +17,6 @@ from typing import Dict, List
 from ..ir import Function, FunctionMaker, Op, Value
 from ..ir.type import Type, Tensor
 from .absint import interpreter
-from .type_register import TypePropRegister  # TODO remove this later
 
 
 def _type_function(function: Function, type_map: Dict[Value, Type]) -> Function:

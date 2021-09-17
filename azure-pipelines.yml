@@ -1,7 +1,8 @@
 # Microsoft code quality and compliance checks
 
-trigger:
-- main
+# Do not run automatically, or require for pull requests
+trigger: none
+pr: none
 
 pool:
   vmImage: windows-latest

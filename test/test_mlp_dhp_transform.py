@@ -2,11 +2,14 @@
 # Licensed under the MIT License.
 
 from collections import defaultdict
+import itertools
 import numpy as np
+import pytest
 import re
 
-from dist_ir.ir import FunctionMaker, Topology
-from dist_ir.executor import infer_types, SequentialExecutor, ConcreteValue
+from examples import mlp
+from dist_ir.ir import FunctionMaker, get_uniform_topology
+from dist_ir.executor import infer_types, sequentially_execute, ConcreteValue
 from dist_ir.ir.type import Float32, Tensor
 from dist_ir.transforms import mlp_dhp_transform
 
@@ -15,73 +18,6 @@ INPUT_DIM = 64
 DGX_BANDWIDTH_GBPS = 200
 
 np.random.seed(42)
-
-
-def mlp(batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, device):
-    function = FunctionMaker(name="mlp")
-    x = function.add_input_value(
-        "x",
-        Tensor(dtype=Float32(), shape=(batch_size, input_dim), device=device),
-    )
-    z = function.add_input_value(
-        "z",
-        Tensor(dtype=Float32(), shape=(batch_size, output_dim), device=device),
-    )
-    weights = []
-    input_dim = input_dim
-    hidden_dim = hidden_dim
-    for i in range(num_hidden_layers - 1):
-        w = function.add_input_value(
-            f"w{chr(ord('A')+i)}",
-            Tensor(dtype=Float32(), shape=(input_dim, hidden_dim), device=device),
-        )
-        input_dim = hidden_dim
-        weights.append(w)
-    w = function.add_input_value(
-        f"w{chr(ord('A')+i+1)}",
-        Tensor(dtype=Float32(), shape=(hidden_dim, output_dim), device=device),
-    )
-    weights.append(w)
-
-    a = x
-    for i, weight in enumerate(weights):
-        y = function.add_op("MatMul", inputs=[a, weight], output_names=[f"y{i}"])
-        a = function.add_op("Relu", inputs=[y], output_names=[f"a{i}"])
-
-    l = function.add_op(
-        "Loss", inputs=[a, z], attributes={"N": batch_size}, output_names=["l"]
-    )
-    dl = function.add_op(
-        "LossGrad",
-        inputs=[a, z],
-        attributes={"N": batch_size},
-        output_names=["dl"],
-    )
-
-    dy = dl
-    for i, weight in enumerate(weights[::-1]):
-        i = len(weights) - i - 1
-        da = function.add_op(
-            "ReluGrad",
-            inputs=[function.ops[2 * i + 1].inputs[0], dy],
-            output_names=[f"da{i}"],
-        )
-        dy, dw = function.add_op(
-            "MatMulGrad",
-            inputs=[function.ops[2 * i].inputs[0], weights[i], da],
-            output_names=[f"dy{i}", f"dw{chr(ord('A')+i)}"],
-        )
-    return function.finalize()
-
-
-def add_devices_to_topology(topology, num_devices):
-    for i in range(num_devices):
-        topology.add_device("gpu")
-    devices = topology.devices
-    for i in range(0, len(devices)):
-        for j in range(i + 1, len(devices)):
-            topology.set_bandwidth(devices[i], devices[j], DGX_BANDWIDTH_GBPS)
-    return topology
 
 
 def _verify_no_hp(outputs, transformed_outputs, dp=False):
@@ -117,42 +53,56 @@ def _verify_hp(function, transformed_function, outputs, transformed_outputs, dp=
         )
 
 
-def _test_helper(
+@pytest.mark.parametrize(
+    ("dp_degree", "hp_degree", "pp_degree"),
+    list(itertools.product([1, 2], [1, 2], [1, 2])),
+)
+def test_mlp_dhp_transform(
+    dp_degree,
+    hp_degree,
+    pp_degree,
     batch_size=BATCH_SIZE,
     num_hidden_layers=8,
     input_dim=INPUT_DIM,
-    dp_degree=1,
-    hp_degree=1,
-    pp_degree=1,
-    num_microbatches=1,
 ):
-    topology = Topology()
-    d0 = topology.add_device("gpu")
-    function = mlp(batch_size, input_dim, input_dim, input_dim, num_hidden_layers, d0)
-    function = infer_types(function, function.inputs)
+    num_microbatches = pp_degree
     world_size = dp_degree * hp_degree * pp_degree
-    add_devices_to_topology(topology, world_size)
+    topology = get_uniform_topology(world_size)
+    function = mlp.mlp(
+        input_dim,
+        input_dim,
+        input_dim,
+        num_hidden_layers,
+        topology.devices[0],
+    )
+    typed_inputs = mlp.get_typed_input_values(
+        function.inputs, batch_size, input_dim, input_dim
+    )
+    function = infer_types(function, typed_inputs)
 
     init_function, transformed_function = mlp_dhp_transform(
         function,
         dp_degree,
         hp_degree,
         pp_degree,
-        topology.devices,
         num_microbatches,
+        topology.devices,
     )
     init_function = infer_types(init_function, init_function.inputs)
     # init_function.outputs = transformed_function.inputs, so get types from there:
     transformed_function = infer_types(transformed_function, init_function.outputs)
+    transformed_function = mlp.add_optimizer_ops(transformed_function)
 
     input_data = [
-        ConcreteValue(np.random.normal(size=inp.type.shape), d0)
-        for inp in function.inputs
+        ConcreteValue(
+            np.random.normal(size=inp.type.shape) if i != 2 else batch_size,
+            topology.devices[0],
+        )
+        for i, inp in enumerate(typed_inputs)
     ]
-    ex = SequentialExecutor("numpy")
-    outputs = ex.compute(function, input_data)
-    dist_input_data = ex.compute(init_function, input_data)
-    transformed_outputs = ex.compute(transformed_function, dist_input_data)
+    outputs = sequentially_execute(function, input_data)
+    dist_input_data = sequentially_execute(init_function, input_data)
+    transformed_outputs = sequentially_execute(transformed_function, dist_input_data)
 
     outputs = [v.val for v in outputs]
     # Verify that transformed_outputs are on expected devices
@@ -168,35 +118,3 @@ def _test_helper(
         )
     else:
         _verify_no_hp(outputs, transformed_outputs, dp_degree > 1)
-
-
-def test_dp_only():
-    _test_helper(dp_degree=2)
-
-
-def test_hp_only():
-    _test_helper(hp_degree=2)
-
-
-def test_pp_only():
-    _test_helper(pp_degree=2, num_microbatches=2)
-
-
-def test_dp_hp():
-    _test_helper(dp_degree=2, hp_degree=2)
-
-
-def test_dp_pp():
-    _test_helper(dp_degree=2, pp_degree=2, num_microbatches=2)
-
-
-def test_hp_pp():
-    _test_helper(hp_degree=2, pp_degree=2, num_microbatches=2)
-
-
-def test_dp_hp_pp():
-    _test_helper(dp_degree=2, hp_degree=2, pp_degree=2, num_microbatches=2)
-
-
-if __name__ == "__main__":
-    test_dp_hp_pp()

@@ -7,9 +7,10 @@ from pathlib import Path
 import pytest
 import torch
 
-from dist_ir.executor import SequentialExecutor, ConcreteValue
+from dist_ir.executor import sequentially_execute, ConcreteValue
 from dist_ir.ir import cpprint
 from examples.gpt2 import get_transformed_function_and_input_data, run_pytorch
+from dist_ir.utils import constants
 
 # Assume the onnx file is stored in the repository root
 MODEL_PATH = (Path(__file__).parent.parent / "gpt2-10.onnx").absolute()
@@ -18,9 +19,10 @@ np.random.seed(42)
 
 
 def _run_gpt(
-    device_throughput=1.4e13,
-    dram_bandwidth=9e11,
-    network_bandwidth=64,
+    device_throughput=constants.DEFAULT_DEVICE_THROUGHPUT,
+    dram_bandwidth=constants.DEFAULT_DRAM_BANDWIDTH,
+    kernel_launch_overhead=constants.DEFAULT_KERNEL_LAUNCH_OVERHEAD,
+    network_bandwidth=constants.DEFAULT_NETWORK_BANDWIDTH,
     batch_size=256,
     dp_degree=1,
     hp_degree=1,
@@ -41,6 +43,7 @@ def _run_gpt(
         MODEL_PATH,
         device_throughput,
         dram_bandwidth,
+        kernel_launch_overhead,
         network_bandwidth,
         batch_size,
         dp_degree,
@@ -71,8 +74,7 @@ def _run_gpt(
                 )
             )
         else:
-            ex = SequentialExecutor("numpy")
-            outputs = ex.compute(transformed_function, initialized_input_data)
+            outputs = sequentially_execute(transformed_function, initialized_input_data)
         return outputs
 
 

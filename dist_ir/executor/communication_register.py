@@ -20,7 +20,7 @@ def mpi_allgather(op, *xs):
 
 
 def mpi_allreduce(op, *xs):
-    sum_ = np.sum((x.val for x in xs), axis=0)
+    sum_ = np.sum(tuple(x.val for x in xs), axis=0)
     return tuple(ConcreteValue(sum_, x.device) for x in xs)
 
 
@@ -35,7 +35,7 @@ def mpi_gather(op, *xs):
 
 
 def mpi_reduce(op, *xs):
-    v = np.sum((x.val for x in xs), axis=0)
+    v = np.sum(tuple(x.val for x in xs), axis=0)
     return ConcreteValue(v, op.attributes["device"])
 
 

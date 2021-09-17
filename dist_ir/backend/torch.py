@@ -126,12 +126,12 @@ def _identity(x, ctx=None):
     return x
 
 
-def _loss(x, y, N=None, ctx=None):
-    return torch.square(x - y) / N
+def _loss(x, y, n, ctx=None):
+    return torch.square(x - y) / n
 
 
-def _loss_grad(x, y, N=None, ctx=None):
-    return 2 * (x - y) / N
+def _loss_grad(x, y, n, ctx=None):
+    return 2 * (x - y) / n
 
 
 def _matmul(x, y, ctx=None):
@@ -202,6 +202,15 @@ def _send(x, to_d=None, group=None, ctx=None):
         dist.send(x, dst_rank)
     # Note: in a proper backend, might want to concatenate multiple tensors into
     # a single buffer and call a single send op
+
+
+def _sgd(*xs, lr=None, ctx=None):
+    weights = xs[: (len(xs) // 2)]
+    gradients = xs[(len(xs) // 2) :]
+    updated_weights = []
+    for w, dw in zip(weights, gradients):
+        updated_weights.append(w - lr * dw)
+    return tuple(updated_weights)
 
 
 def _shape(x, ctx=None):
@@ -293,6 +302,7 @@ _op_to_torch = {
     "ReluGrad": _relu_grad,
     "Reshape": _reshape,
     "SendP2P": _send,
+    "SGDOptimizer": _sgd,
     "Shape": _shape,
     "Slice": _slice,
     "Softmax": _softmax,
@@ -376,6 +386,7 @@ def run_function(
     ctx: DistributedContext,
     fn: Function,
     inputs: List[Any],
+    rank: int,
     debug_mock=False,
 ):
     """Runs DistIR Function `fn` on `inputs` in a distributed context `ctx` by
@@ -414,9 +425,6 @@ def run_function(
         for v in op.inputs:
             if v in value_map and fn.last_use(v) == op and not (v in fn.outputs):
                 del value_map[v]
-
-        # print(f"{rank}: {op_str}")
-        # sys.stdout.flush()
 
     # Return outputs
     return tuple(value_map[v] for v in fn.outputs)
@@ -459,12 +467,12 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
 
     if ctx.debug_stacktrace:
         try:
-            outputs = run_function(ctx, fn, inputs)
+            outputs = run_function(ctx, fn, inputs, rank)
             if ctx.world_size > 1:
                 torch.distributed.barrier()
         except Exception as e:
             print_exc()
-        print("PyTorch backend exiting after 1 run in debug mode.")
+        print(f"{rank}: PyTorch backend exiting after 1 run in debug mode.")
         dist.destroy_process_group()
         return None, None
 
@@ -483,7 +491,8 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
     ) as p:
         for i in range(num_warmup_steps + num_repetitions):
             add_event()
-            outputs = run_function(ctx, fn, inputs)
+            # TODO: Handle failures here?
+            outputs = run_function(ctx, fn, inputs, rank)
             if ctx.world_size > 1:
                 torch.distributed.barrier()
             add_event()
@@ -543,8 +552,10 @@ def run_multiprocesses(
     mp = torch.multiprocessing.get_context("spawn")
     with mp.Pool(ctx.world_size) as p:
         outputs = p.starmap(per_rank_runner, args)
+
     if ctx.debug_stacktrace:
         sys.exit(1)
+
     per_rank_outputs, runtimes = zip(*outputs)
     return per_rank_outputs, runtimes
 

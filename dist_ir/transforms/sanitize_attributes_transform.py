@@ -1,7 +1,7 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
-from collections import Hashable
+from collections.abc import Hashable
 from frozendict import frozendict
 import numpy as np
 

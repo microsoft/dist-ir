@@ -51,10 +51,23 @@ class SimulatorState(AbstractState):
         for device in self.peak_memory:
             self.live_memory[device][0] = (0, self.peak_memory[device])
 
+    def get_latency(self):
+        return max([self.timestamps[d] for d in self.timestamps])
+
+    def get_throughput(self, batch_size):
+        return batch_size / self.get_latency()
+
+    def get_peak_memory(self):
+        return max([self.peak_memory[d] for d in self.peak_memory])
+
+    def print_summary(self, batch_size):
+        print(f"Latency: {self.get_latency()} seconds")
+        print(f"Throughput: {self.get_throughput(batch_size):.2f} samples / second")
+        print(f"Peak memory: {self.get_peak_memory() / 1e9:.2f} GB")
+
     def add_trace_event(self, op_type, device, start_time, duration):
         if device is None:
             raise ValueError(f"No device specified for {op_type} op trace event")
-
         self.trace.append(
             {
                 "name": op_type,
@@ -131,7 +144,7 @@ def _simulate_op(
 
     # Update the live memory to reflect any freed activations.
     live_memory_deltas = defaultdict(lambda: 0)
-    for in_edge in op.inputs:
+    for inp, in_edge in zip(inputs, op.inputs):
         # We don't free live memory for function inputs as these could be for weights
         # or input data buffers that are active for the entire duration of execution.
         if in_edge in state._function_inputs_set:
@@ -143,10 +156,9 @@ def _simulate_op(
             )
         state.consumers[in_edge] -= 1
         if state.consumers[in_edge] == 0:
-            if in_edge.type is not None:
-                input_devices = in_edge.type.get_all_devices()
-                for input_device in input_devices:
-                    live_memory_deltas[input_device] -= in_edge.type.size()
+            input_devices = _get_all_devices([inp])
+            for input_device in input_devices:
+                live_memory_deltas[input_device] -= inp.size()
     state.update_live_memory(live_memory_deltas)
 
 
@@ -179,18 +191,21 @@ class Simulator:
             outputs = tuple(state.env[v] for v in op.outputs)
 
             # Dispatch to find cost function for op
+            signature = None
             try:
                 signature, cost_function = dispatch(
                     self.cost_functions, op.op_type, inputs
                 )
-                # Abstract inputs if necessary
-                abstracted_inputs = abstract_values(inputs, signature)
-                costs = cost_function(op, *abstracted_inputs)
             except ValueError:
                 warn(f"Dispatch failed for op {op.op_type} on inputs {inputs}")
+            if signature is None:
                 # Use default cost function if signature not in cost_functions
                 devices = _get_all_devices(inputs + outputs)
                 costs = {device: KERNEL_LAUNCH_OVERHEAD for device in devices}
+            else:
+                # Abstract inputs if necessary
+                abstracted_inputs = abstract_values(inputs, signature)
+                costs = cost_function(op, *abstracted_inputs)
 
             _simulate_op(state, op, costs, inputs, outputs)
         return state

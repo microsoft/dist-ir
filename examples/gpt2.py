@@ -1,6 +1,4 @@
-import argparse
 from collections import defaultdict
-from frozendict import frozendict
 import numpy as np
 import re
 from transformers import GPT2Tokenizer
@@ -15,14 +13,16 @@ from dist_ir.executor import (
     ConcreteValue,
 )
 from dist_ir.importer import import_from_onnx
-from dist_ir.ir import cpprint, Device, FunctionMaker, Op, Topology, Value
-from dist_ir.ir.type import Int64, Float32, Tensor, Type, abstract_values
+from dist_ir.ir import FunctionMaker, Op, get_uniform_topology
+from dist_ir.ir.type import Tensor, Type, abstract_values
 from dist_ir.transforms import (
     gpt2_dhp_transform,
     sanitize_unhashable_attributes,
     restore_unhashable_attributes,
 )
 from dist_ir.transforms.gpt2_dhp_transform import check_params, update_attributes
+
+from .parser import Parser
 
 
 def _to_numpy(x):
@@ -184,7 +184,7 @@ def _set_model_size(function, n_layer, n_head, d_embd):
     for i in range(min(n_layer, len(blocks))):
         cur_block = []
         for k, op in enumerate(blocks[i]):
-            max_op_id = max(max_op_id, int(re.match(".*_(\d+)", op.name).group(1)))
+            max_op_id = max(max_op_id, int(re.match(r".*_(\d+)", op.name).group(1)))
             inputs = tuple(value_map[inp] for inp in op.inputs)
             if op.op_type == "Split" or op.op_type == "Constant":
                 attributes = update_attributes(
@@ -215,7 +215,8 @@ def _set_model_size(function, n_layer, n_head, d_embd):
                     and "value" not in orig_output.name
                 ):
                     max_output_id = max(
-                        max_output_id, int(re.match("(\d+)", orig_output.name).group(1))
+                        max_output_id,
+                        int(re.match(r"(\d+)", orig_output.name).group(1)),
                     )
                 value_map[orig_output] = new_output
                 producer_map[new_output] = (new_op, k)
@@ -232,7 +233,7 @@ def _set_model_size(function, n_layer, n_head, d_embd):
             for inp in op.inputs:
                 if inp in transformed_function.inputs:
                     if "weight" in inp.name or "bias" in inp.name:
-                        block_id = re.search("h\.(\d+)\.", inp.name).group(1)
+                        block_id = re.search(r"h\.(\d+)\.", inp.name).group(1)
                         new_name = inp.name.replace(block_id, str(j))
                         inputs.append(
                             transformed_function.add_input_value(new_name, inp.type)
@@ -345,26 +346,6 @@ def _get_stats(function):
     return parameter_count, model_size, parameter_count_str, model_size_str
 
 
-# TODO: Move this to dist_ir/ir/topology (perhaps as uniform_topology)
-def get_topology(world_size, device_throughput, dram_bandwidth, network_bandwidth):
-    topology = Topology()
-    d0 = topology.add_device("gpu")
-    for i in range(1, world_size + 1):
-        topology.add_device(
-            "gpu", throughput=device_throughput, dram_bandwidth=dram_bandwidth
-        )
-        for j in range(0, i):
-            if j == 0:
-                topology.set_bandwidth(
-                    topology.devices[i], topology.devices[j], network_bandwidth
-                )
-            else:
-                topology.set_bandwidth(
-                    topology.devices[i], topology.devices[j], network_bandwidth
-                )
-    return topology
-
-
 def import_function_and_get_input_data(
     model_path,
     default_device,
@@ -377,16 +358,11 @@ def import_function_and_get_input_data(
         parse_input_data=True,
     )
 
-    if not use_real_weights:
-        for inp in input_data_map:
-            if "input" in inp.name or "weight" in inp.name or "bias" in inp.name:
-                input_data_map[inp] = inp.type
-
     function = _filter_extra_outputs(function)
 
     if not use_real_weights:
         for inp in input_data_map:
-            if "weight" in inp.name or "bias" in inp.name:
+            if "input" in inp.name or "weight" in inp.name or "bias" in inp.name:
                 input_data_map[inp] = inp.type
     input_data = list(input_data_map.values())
 
@@ -434,10 +410,10 @@ def resize_function_and_input_data(function, input_data, n_layer, n_head, d_embd
     if len(input_data) < len(function.inputs) - 1:
         extra_weight_map = {}
         for i, inp in enumerate(function.inputs[1 : 1 + len(input_data)]):
-            base_input_name = re.sub("h\.(\d+)", "", inp.name)
+            base_input_name = re.sub(r"h\.(\d+)", "", inp.name)
             extra_weight_map[base_input_name] = input_data[i]
         input_data += [
-            extra_weight_map[re.sub("h\.(\d+)", "", inp.name)]
+            extra_weight_map[re.sub(r"h\.(\d+)", "", inp.name)]
             for inp in function.inputs[1 + len(input_data) :]
         ]
     return function, input_data
@@ -514,6 +490,7 @@ def get_transformed_function_and_input_data(
     model_path,
     device_throughput,
     dram_bandwidth,
+    kernel_launch_overhead,
     network_bandwidth,
     batch_size,
     dp_degree,
@@ -527,8 +504,12 @@ def get_transformed_function_and_input_data(
     print_stats=False,
 ):
     world_size = dp_degree * hp_degree * pp_degree
-    topology = get_topology(
-        world_size, device_throughput, dram_bandwidth, network_bandwidth
+    topology = get_uniform_topology(
+        world_size,
+        device_throughput,
+        dram_bandwidth,
+        kernel_launch_overhead,
+        network_bandwidth,
     )
 
     function, input_data = import_function_and_get_input_data(
@@ -567,13 +548,13 @@ def get_transformed_function_and_input_data(
     return transformed_function, initialized_input_data, topology
 
 
-def simulate(function, input_data, topology):
-    simulator = Simulator(CostModel(topology))
+def simulate(function, input_data, topology, allreduce_parameters=None):
+    simulator = Simulator(CostModel(topology, allreduce_parameters))
     simulation = simulator.simulate(function, input_data)
     return simulation
 
 
-def run_pytorch(function, input_data, world_size, use_gpu=True):
+def run_pytorch(function, input_data, world_size, use_gpu=True, debug_stacktrace=False):
     # TODO: Move this to a utils file
     def _resolve_dtype(dtype):
         if dtype == np.int32:
@@ -610,6 +591,7 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
         use_gpu=use_gpu,
         num_warmup=5,
         num_repetitions=10,
+        debug_stacktrace=debug_stacktrace,
     )
     return per_rank_outputs, runtimes
 
@@ -636,6 +618,7 @@ def main(args):
         args.model_path,
         args.device_throughput,
         args.dram_bandwidth,
+        args.kernel_launch_overhead,
         args.network_bandwidth,
         args.batch_size,
         args.dp_degree,
@@ -653,18 +636,15 @@ def main(args):
         simulation = simulate(transformed_function, initialized_input_data, topology)
         if args.trace_file is not None:
             simulation.dump_chrome_trace(args.trace_file)
-        distributed_running_time = max(
-            [simulation.timestamps[d] for d in simulation.timestamps]
-        )
-        print(f"Latency: {distributed_running_time*1000:.2f} ms")
-        print(
-            f"Throughput: {args.batch_size / distributed_running_time:.2f} "
-            f"samples/second"
-        )
+        simulation.print_summary(args.batch_size)
     elif args.backend == "pytorch":
         world_size = args.dp_degree * args.hp_degree * args.pp_degree
         per_rank_outputs, runtimes = run_pytorch(
-            transformed_function, initialized_input_data, world_size, args.use_gpu
+            transformed_function,
+            initialized_input_data,
+            world_size,
+            use_gpu=args.use_gpu,
+            debug_stacktrace=args.debug_stacktrace,
         )
         print(f"Latency: {np.median(runtimes[-1])*1000:.2f} ms")
         print(
@@ -674,28 +654,13 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="GPT-2 Inference")
-    parser.add_argument(
-        "--model_path",
-        type=str,
-        required=True,
-        help="Path to GPT-2 ONNX model "
-        "(downloaded from https://github.com/onnx/models/blob/master/"
-        "text/machine_comprehension/gpt-2/model/gpt2-10.onnx?raw=true)",
-    )
-    parser.add_argument("--batch_size", type=int, default=64, help="Batch size")
-    parser.add_argument(
-        "-d", "--dp_degree", type=int, default=1, help="Data parallel degree"
-    )
-    parser.add_argument(
-        "-t", "--hp_degree", type=int, default=1, help="Horizontal parallel degree"
-    )
-    parser.add_argument(
-        "-p", "--pp_degree", type=int, default=1, help="Pipeline parallel degree"
-    )
-    parser.add_argument(
-        "-k", "--num_microbatches", type=int, default=1, help="Num microbatches"
-    )
+    parser = Parser("GPT2 Inference")
+    parser.add_parallelism_config_arguments()
+    parser.add_simulation_config_arguments()
+    parser.add_backend_config_arguments()
+    parser.add_execution_mode_config_arguments()
+    parser.add_gpt2_model_path_config_arguments()
+    parser.add_simulation_output_config_arguments()
     parser.add_argument("--n_layer", type=int, default=12, help="Num hidden layers")
     parser.add_argument(
         "--n_head",
@@ -705,32 +670,10 @@ if __name__ == "__main__":
     )
     parser.add_argument("--d_embd", type=int, default=768, help="Embedding dimension")
     parser.add_argument(
-        "--backend",
-        choices=["simulate", "pytorch"],
-        default="simulate",
-        help="Operation to run",
-    )
-    parser.add_argument(
-        "--use-gpu",
-        action="store_true",
-        default=False,
-        help="Use GPU with PyTorch backend",
-    )
-    parser.add_argument(
         "--use_real_weights",
         action="store_true",
         default=False,
         help="Use real weights",
     )
-    parser.add_argument(
-        "--network_bandwidth", type=float, default=64, help="Network bandwidth in Gbps"
-    )
-    parser.add_argument(
-        "--device_throughput", type=float, default=1.4e13, help="Device throughput"
-    )
-    parser.add_argument(
-        "--dram_bandwidth", type=float, default=9e11, help="DRAM Bandwidth"
-    )
-    parser.add_argument("--trace_file", type=str, default=None, help="Trace file")
     args = parser.parse_args()
     main(args)

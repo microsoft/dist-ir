@@ -268,14 +268,12 @@ def layer_norm_grad(op, y_grad, x, scale, mean, inv_std_var):
     return x_grad, bias_grad, scale_grad
 
 
-def loss(op, x, y):
-    N = op.attributes["N"]
-    return np.square(x - y) / N
+def loss(op, x, y, n):
+    return np.square(x - y) / n
 
 
-def loss_grad(op, x, y):
-    N = op.attributes["N"]
-    return 2 * (x - y) / N
+def loss_grad(op, x, y, n):
+    return 2 * (x - y) / n
 
 
 def matmul(op, x, y):
@@ -341,6 +339,16 @@ def reshape(op, x, new_shape):
 def select(op, xs):
     index = op.attributes["index"]
     return xs[index]
+
+
+def sgd(op, *xs):
+    weights = xs[: (len(xs) // 2)]
+    gradients = xs[(len(xs) // 2) :]
+    lr = op.attributes["lr"]
+    updated_weights = []
+    for w, dw in zip(weights, gradients):
+        updated_weights.append(w - lr * dw)
+    return tuple(updated_weights)
 
 
 def shape(op, x):
@@ -682,8 +690,8 @@ NumPyRegister = {
         "LayerNormalizationGrad",
         (np.ndarray, np.ndarray, np.ndarray, np.float32, np.float32),
     ): layer_norm_grad,
-    ("Loss", (np.ndarray, np.ndarray)): loss,
-    ("LossGrad", (np.ndarray, np.ndarray)): loss_grad,
+    ("Loss", (np.ndarray, np.ndarray, int)): loss,
+    ("LossGrad", (np.ndarray, np.ndarray, int)): loss_grad,
     ("MatMul", (np.ndarray, np.ndarray)): matmul,
     ("MatMulGrad", (np.ndarray, np.ndarray, np.ndarray)): matmul_grad,
     ("Min", (np.ndarray, np.ndarray)): lambda op, x, y: np.minimum(x, y),
@@ -704,6 +712,20 @@ NumPyRegister = {
     ("Reshape", (np.ndarray, np.ndarray)): reshape,
     ("Select", (tuple,)): select,
     ("Select", (np.ndarray,)): select,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(4))): sgd,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(8))): sgd,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(16))): sgd,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(32))): sgd,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(64))): sgd,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(128))): sgd,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(256))): sgd,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(512))): sgd,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(1024))): sgd,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(2048))): sgd,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(4096))): sgd,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(8192))): sgd,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(16384))): sgd,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(32768))): sgd,
     ("Shape", (np.ndarray,)): shape,
     ("Slice", (np.ndarray, np.ndarray, np.ndarray, np.ndarray)): slice_conc,
     ("Slice", (np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.int64)): slice_conc,

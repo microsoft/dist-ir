@@ -45,12 +45,12 @@ def test_mnist_fw_bw():
     batch_size = 16
     _x = np.arange(batch_size * 4).reshape((batch_size, 4))
     _z = np.ones((batch_size, 1))
+    _n = (batch_size,)
     _wA = np.ones((4, 2))
     _wB = np.ones((2, 1))
     # TODO output devices are correct
-    inputs = [ConcreteValue(v, None) for v in [_x, _z, _wA, _wB]]
+    inputs = [ConcreteValue(v, None) for v in [_x, _z, _n, _wA, _wB]]
     orig_res = sequentially_execute(function, inputs)
-
     transformed_res = sequentially_execute(transformed_function, inputs)
 
     print("-" * 88)

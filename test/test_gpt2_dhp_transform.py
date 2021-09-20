@@ -168,11 +168,16 @@ def test_mixed_simulation(dtype, dp_degree, hp_degree, pp_degree):
         use_real_weights=False,
     )
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     original_outputs = {
         "fp16": _run_gpt(dtype="fp16", use_pytorch_backend=True),
         "fp32": _run_gpt(dtype="fp32", use_pytorch_backend=True),
     }
-    for dtype, dp_degree, hp_degree, pp_degree in list(itertools.product(["fp16", "fp32"], [1, 2], [1, 2], [1, 2])):
-        print(f"dtype={dtype}, dp_degree={dp_degree}, hp_degree={hp_degree}, pp_degree={pp_degree}")
+    for dtype, dp_degree, hp_degree, pp_degree in list(
+        itertools.product(["fp16", "fp32"], [1, 2], [1, 2], [1, 2])
+    ):
+        print(
+            f"dtype={dtype}, dp_degree={dp_degree}, hp_degree={hp_degree}, pp_degree={pp_degree}"
+        )
         test_pytorch_backend(original_outputs, dtype, dp_degree, hp_degree, pp_degree)

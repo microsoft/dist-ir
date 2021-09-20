@@ -90,7 +90,7 @@ class Parser(ArgumentParser):
         self.add_argument(
             "--use_gpu",
             action="store_true",
-            default=torch.cuda.is_available(),
+            default=False,
             help="Use GPU with PyTorch backend",
         )
 

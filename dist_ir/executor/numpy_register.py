@@ -1,4 +1,5 @@
 import numpy as np
+import scipy
 
 
 def _handle_negative_axis(axis, tensor_rank):
@@ -372,8 +373,7 @@ def slice_conc(op, x, starts, ends, axes, steps=None):
 
 def softmax(op, x):
     axis = op.attributes["axis"]
-    exp = np.exp(x)
-    return exp / np.sum(exp, axis=axis, keepdims=True)
+    return scipy.special.softmax(x, axis=axis)
 
 
 def softmax_grad(op, dY, Y):

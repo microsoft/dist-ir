@@ -16,6 +16,7 @@ np.random.seed(42)
 
 
 def _run_gpt(
+    dtype="fp32",
     device_throughput=constants.DEFAULT_DEVICE_THROUGHPUT,
     dram_bandwidth=constants.DEFAULT_DRAM_BANDWIDTH,
     kernel_launch_overhead=constants.DEFAULT_KERNEL_LAUNCH_OVERHEAD,
@@ -38,6 +39,7 @@ def _run_gpt(
         topology,
     ) = get_transformed_function_and_input_data(
         MODEL_PATH,
+        dtype,
         device_throughput,
         dram_bandwidth,
         kernel_launch_overhead,
@@ -77,6 +79,7 @@ def _run_gpt(
 
 def _test(
     original_outputs,
+    dtype,
     dp_degree=1,
     hp_degree=1,
     pp_degree=1,
@@ -86,6 +89,7 @@ def _test(
 
     # Test with real weights
     transformed_outputs = _run_gpt(
+        dtype=dtype,
         dp_degree=dp_degree,
         hp_degree=hp_degree,
         pp_degree=pp_degree,
@@ -95,13 +99,18 @@ def _test(
     assert len(transformed_outputs) == dp_degree * hp_degree
     for i in range(len(transformed_outputs)):
         np.testing.assert_array_almost_equal(
-            original_outputs[0].val, transformed_outputs[i].val, decimal=2
+            original_outputs[0].val,
+            transformed_outputs[i].val,
+            decimal=(2 if dtype == "fp32" else 1),
         )
 
 
 @pytest.fixture(scope="session")
 def original_outputs():
-    return _run_gpt()
+    return {
+        "fp16": _run_gpt(dtype="fp16", use_pytorch_backend=True),
+        "fp32": _run_gpt(dtype="fp32", use_pytorch_backend=True),
+    }
 
 
 @pytest.mark.parametrize(
@@ -110,7 +119,8 @@ def original_outputs():
 )
 def test_reference_execution(original_outputs, dp_degree, hp_degree, pp_degree):
     _test(
-        original_outputs,
+        original_outputs["fp32"],
+        dtype="fp32",
         dp_degree=dp_degree,
         hp_degree=hp_degree,
         pp_degree=pp_degree,
@@ -119,12 +129,23 @@ def test_reference_execution(original_outputs, dp_degree, hp_degree, pp_degree):
 
 
 @pytest.mark.parametrize(
-    ("dp_degree", "hp_degree", "pp_degree"),
-    list(itertools.product([1, 2], [1, 2], [1, 2])),
+    ("dtype", "dp_degree", "hp_degree", "pp_degree"),
+    list(
+        itertools.product(
+            ["fp16", "fp32"] if torch.cuda.is_available() else ["fp32"],
+            [1, 2],
+            [1, 2],
+            [1, 2],
+        )
+    ),
 )
-def test_pytorch_backend(original_outputs, dp_degree, hp_degree, pp_degree):
+def test_pytorch_backend(original_outputs, dtype, dp_degree, hp_degree, pp_degree):
+    world_size = dp_degree * hp_degree * pp_degree
+    if dtype == "fp16" and world_size > torch.cuda.device_count():
+        pytest.skip("Not enough GPUs available")
     _test(
-        original_outputs,
+        original_outputs[dtype],
+        dtype,
         dp_degree=dp_degree,
         hp_degree=hp_degree,
         pp_degree=pp_degree,
@@ -134,14 +155,24 @@ def test_pytorch_backend(original_outputs, dp_degree, hp_degree, pp_degree):
 
 
 @pytest.mark.parametrize(
-    ("dp_degree", "hp_degree", "pp_degree"),
-    list(itertools.product([1, 2], [1, 2], [1, 2])),
+    ("dtype", "dp_degree", "hp_degree", "pp_degree"),
+    list(itertools.product(["fp16", "fp32"], [1, 2], [1, 2], [1, 2])),
 )
-def test_mixed_simulation(dp_degree, hp_degree, pp_degree):
+def test_mixed_simulation(dtype, dp_degree, hp_degree, pp_degree):
     _run_gpt(
+        dtype=dtype,
         dp_degree=dp_degree,
         hp_degree=hp_degree,
         pp_degree=pp_degree,
         num_microbatches=pp_degree,
         use_real_weights=False,
     )
+
+if __name__=="__main__":
+    original_outputs = {
+        "fp16": _run_gpt(dtype="fp16", use_pytorch_backend=True),
+        "fp32": _run_gpt(dtype="fp32", use_pytorch_backend=True),
+    }
+    for dtype, dp_degree, hp_degree, pp_degree in list(itertools.product(["fp16", "fp32"], [1, 2], [1, 2], [1, 2])):
+        print(f"dtype={dtype}, dp_degree={dp_degree}, hp_degree={hp_degree}, pp_degree={pp_degree}")
+        test_pytorch_backend(original_outputs, dtype, dp_degree, hp_degree, pp_degree)

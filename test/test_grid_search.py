@@ -156,6 +156,7 @@ def test_gpt_grid_search(backend, dtype):
                     topology,
                 ) = gpt2.get_transformed_function_and_input_data(
                     model_path=GPT2_MODEL_PATH,
+                    dtype=dtype,
                     device_throughput=constants.DEFAULT_DEVICE_THROUGHPUT,
                     dram_bandwidth=constants.DEFAULT_DRAM_BANDWIDTH,
                     kernel_launch_overhead=constants.DEFAULT_KERNEL_LAUNCH_OVERHEAD,

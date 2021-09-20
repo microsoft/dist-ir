@@ -53,6 +53,7 @@ class GPTGridSearch(GridSearch):
         self.base_model, self.base_input_data = gpt2.import_function_and_get_input_data(
             self.model_path,
             self.topology.devices[0],
+            self.dtype,
             use_real_weights=(self.backend == "pytorch"),
         )
         self.models_and_input_data = {}

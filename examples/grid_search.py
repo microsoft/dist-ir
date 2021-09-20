@@ -43,6 +43,7 @@ class GridSearch(ABC):
         self,
         model_params,
         backend,
+        dtype,
         use_gpu,
         output_file,
         device_throughput,
@@ -55,6 +56,7 @@ class GridSearch(ABC):
     ):
         self.model_params = model_params
         self.backend = backend
+        self.dtype = dtype
         self.use_gpu = use_gpu
         self.output_file = output_file
         self.device_throughput = device_throughput
@@ -272,6 +274,7 @@ def run_grid_search(args, grid_search_cls):
         }
     grid_search = grid_search_cls(
         args.backend,
+        args.dtype,
         args.use_gpu,
         args.output_file,
         args.device_throughput,

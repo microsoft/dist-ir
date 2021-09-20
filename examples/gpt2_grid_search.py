@@ -10,6 +10,7 @@ class GPTGridSearch(GridSearch):
     def __init__(
         self,
         backend,
+        dtype,
         use_gpu,
         output_file,
         device_throughput,
@@ -38,6 +39,7 @@ class GPTGridSearch(GridSearch):
         super().__init__(
             model_params,
             backend,
+            dtype,
             use_gpu,
             output_file,
             device_throughput,

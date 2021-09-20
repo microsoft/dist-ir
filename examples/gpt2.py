@@ -561,6 +561,8 @@ def run_pytorch(function, input_data, world_size, use_gpu=True, debug_stacktrace
             return torch.int32
         elif dtype == np.int64:
             return torch.int64
+        elif dtype == np.float16:
+            return torch.float16
         elif dtype == np.float32:
             return torch.float32
         else:

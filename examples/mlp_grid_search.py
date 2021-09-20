@@ -1,5 +1,7 @@
+import numpy as np
+
 from dist_ir.ir import Value
-from dist_ir.ir.type import Tensor
+from dist_ir.ir.type import Tensor, Float32, Float16
 from dist_ir.executor import infer_types, sequentially_execute, ConcreteValue
 from dist_ir.transforms import mlp_dhp_transform
 from . import mlp
@@ -11,6 +13,7 @@ class MLPGridSearch(GridSearch):
     def __init__(
         self,
         backend,
+        dtype,
         use_gpu,
         output_file,
         device_throughput,
@@ -30,6 +33,7 @@ class MLPGridSearch(GridSearch):
         super().__init__(
             model_params,
             backend,
+            dtype,
             use_gpu,
             output_file,
             device_throughput,
@@ -46,16 +50,25 @@ class MLPGridSearch(GridSearch):
         if model_size not in self.models:
             num_layers, dim = self.model_params[model_size]
             self.models[model_size] = mlp.mlp(
-                dim, dim, dim, num_layers, self.topology.devices[0]
+                dim,
+                dim,
+                dim,
+                num_layers,
+                self.topology.devices[0],
+                Float32 if self.dtype == "fp32" else Float16,
             )
 
         fn = self.models[model_size]
         num_layers, dim = self.model_params[model_size]
         if self.backend == "pytorch":
-            input_data = mlp.get_input_data(batch_size, dim, num_layers)
-            input_data = tuple(
-                ConcreteValue(t, inp.type.device)
-                for t, inp in zip(input_data, fn.inputs)
+            dtype = np.float32 if self.dtype == "fp32" else np.float16
+            input_data = mlp.get_input_data(
+                fn.inputs,
+                batch_size,
+                dim,
+                dim,
+                self.topology.devices[0],
+                dtype,
             )
         else:
             input_data = mlp.get_typed_input_values(fn.inputs, batch_size, dim, dim)

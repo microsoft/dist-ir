@@ -14,7 +14,7 @@ from torch import fx
 from ..executor.rank_projector import project
 from ..ir import Function, cpprint
 from ..ir.device import Device
-from ..ir.type import Int32, Int64, Float32, Type
+from ..ir.type import Int32, Int64, Float16, Float32, Type
 
 # NOTE: The code currently suffers from this issue, more investigation needed:
 # https://github.com/pytorch/pytorch/issues/11201
@@ -166,6 +166,8 @@ def _recv(shape=None, from_d=None, group=None, dtype=None, ctx=None):
         x = torch.zeros(shape).int()
     elif isinstance(dtype, Int64):
         x = torch.zeros(shape).long()
+    elif isinstance(dtype, Float16):
+        x = torch.zeros(shape).half()
     elif isinstance(dtype, Float32):
         x = torch.zeros(shape).float()
     else:

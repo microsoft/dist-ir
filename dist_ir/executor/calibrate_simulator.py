@@ -177,9 +177,9 @@ def calibrate_network_bandwidth(dtype):
 def calibrate_device_parameters(dtype):
     dist_ir_dtype = Float32 if dtype == "fp32" else Float16
     pytorch_dtype = torch.float32 if dtype == "fp32" else torch.float16
-    all_batch_sizes = [2**i for i in range(14, 16)]
-    all_input_dims = [2**i for i in range(14, 16)]
-    all_output_dims = [2**i for i in range(14, 16)]
+    all_batch_sizes = [2 ** i for i in range(14, 16)]
+    all_input_dims = [2 ** i for i in range(14, 16)]
+    all_output_dims = [2 ** i for i in range(14, 16)]
     if dtype == "fp16":
         all_batch_sizes = [2 * v for v in all_batch_sizes]
         all_input_dims = [2 * v for v in all_input_dims]
@@ -213,14 +213,23 @@ def calibrate_device_parameters(dtype):
         )
         pytorch_latency = np.median(runtimes[0])
         Y[i] = pytorch_latency
-        data.append({'m': batch_size, 'n': input_dim, 'k': output_dim, 'data_size': data_size, 'flops': flops, 'latency': pytorch_latency})
+        data.append(
+            {
+                "m": batch_size,
+                "n": input_dim,
+                "k": output_dim,
+                "data_size": data_size,
+                "flops": flops,
+                "latency": pytorch_latency,
+            }
+        )
 
     df = pd.DataFrame(data)
-    df.to_csv('matmul_benchmark.csv')
+    df.to_csv("matmul_benchmark.csv")
 
     reg = LinearRegression(positive=True, fit_intercept=False).fit(X, Y)
 
-    return 1.0 / reg.coef_[0], 1.0 / reg.coef_[1], reg.coef_[2]
+    return (reg.coef_[0], reg.coef_[1], reg.coef_[2])
 
 
 def calibrate_allreduce_parameters(dtype):

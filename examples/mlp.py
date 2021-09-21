@@ -340,6 +340,7 @@ def run_mlp(
     kernel_launch_overhead,
     network_bandwidth,
     trace_file,
+    skip_allgathers=False,
     verbose=False,
 ):
     dist_ir_dtype = Float32 if dtype == "fp32" else Float16
@@ -395,6 +396,7 @@ def run_mlp(
             pp_degree,
             num_microbatches,
             topology.devices,
+            skip_allgathers=skip_allgathers,
         )
         typed_inputs = get_typed_input_values(
             init_fn.inputs, batch_size, input_dim, output_dim
@@ -445,6 +447,7 @@ def main(args):
         args.kernel_launch_overhead,
         args.network_bandwidth,
         args.trace_file,
+        args.skip_allgathers,
         args.verbose,
     )
 

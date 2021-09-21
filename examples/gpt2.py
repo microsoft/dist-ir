@@ -503,6 +503,7 @@ def transform(
     num_microbatches,
     d_embd,
     n_head,
+    skip_allgathers=False,
     use_real_weights=False,
 ):
     if hp_degree > 1:
@@ -519,6 +520,7 @@ def transform(
         num_microbatches,
         d_embd,
         n_head,
+        skip_allgathers=skip_allgathers,
     )
     wrapped_input_data = []
     for v in input_data:
@@ -545,6 +547,7 @@ def get_transformed_function_and_input_data(
     n_layer,
     n_head,
     d_embd,
+    skip_allgathers=False,
     use_real_weights=False,
     print_stats=False,
 ):
@@ -588,6 +591,7 @@ def get_transformed_function_and_input_data(
         num_microbatches,
         d_embd,
         n_head,
+        skip_allgathers=skip_allgathers,
         use_real_weights=use_real_weights,
     )
 
@@ -679,6 +683,7 @@ def main(args):
         args.n_layer,
         args.n_head,
         args.d_embd,
+        args.skip_allgathers,
         args.use_real_weights,
         print_stats=True,
     )

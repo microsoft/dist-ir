@@ -91,6 +91,7 @@ class MLPGridSearch(GridSearch):
             config.pp_degree,
             config.num_microbatches,
             topology.devices,
+            skip_allgathers=True,
         )
         if self.backend == "pytorch":
             _, dim = self.model_params[config.model_size]

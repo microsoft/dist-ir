@@ -84,6 +84,7 @@ def test_mlp_grid_search(backend, dtype):
                     kernel_launch_overhead=constants.DEFAULT_KERNEL_LAUNCH_OVERHEAD,
                     network_bandwidth=constants.DEFAULT_NETWORK_BANDWIDTH,
                     trace_file=None,
+                    skip_allgathers=True,
                     verbose=False,
                 )
                 latency = simulation.get_latency()
@@ -169,6 +170,7 @@ def test_gpt_grid_search(backend, dtype):
                     n_layer=n_layer,
                     n_head=n_head,
                     d_embd=d_embd,
+                    skip_allgathers=True,
                     use_real_weights=False,
                     print_stats=False,
                 )
@@ -185,10 +187,3 @@ def test_gpt_grid_search(backend, dtype):
                     & (df["num_microbatches"] == p)
                 ]["latency"].values[0]
                 assert math.isclose(latency, grid_search_latency, abs_tol=10 ** -8)
-
-
-if __name__ == "__main__":
-    print(f"MLP fp32")
-    test_mlp_grid_search("pytorch", "fp32")
-    print(f"MLP fp16")
-    test_mlp_grid_search("pytorch", "fp16")

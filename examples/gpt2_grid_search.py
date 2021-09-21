@@ -111,6 +111,7 @@ class GPTGridSearch(GridSearch):
             config.num_microbatches,
             d_embd,
             n_head,
+            skip_allgathers=True,
             use_real_weights=(self.backend == "pytorch"),
         )
 

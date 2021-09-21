@@ -370,7 +370,14 @@ def _get_device_tree(dp_degree, hp_degree, pp_degree, devices):
 
 
 def mlp_dhp_transform(
-    function, dp_degree, hp_degree, pp_degree, num_microbatches, devices, debug=False
+    function,
+    dp_degree,
+    hp_degree,
+    pp_degree,
+    num_microbatches,
+    devices,
+    skip_allgathers=False,
+    debug=False,
 ):
     """Automatically distributes an MLP function using D/H/P hybrid parallelism."""
 
@@ -761,7 +768,7 @@ def mlp_dhp_transform(
                             for j in range(len(hp_group))
                         ],
                     )
-            else:
+            elif not skip_allgathers:
                 for i, hp_group in enumerate(hp_groups):
                     _mpi_allgather_values(
                         hp_group,

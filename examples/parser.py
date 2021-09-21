@@ -37,6 +37,12 @@ class Parser(ArgumentParser):
             "-k", "--num_microbatches", type=int, default=1, help="# of microbatches"
         )
         self.add_argument("--batch_size", type=int, default=64, help="Batch size")
+        self.add_argument(
+            "--skip_allgathers",
+            action="store_true",
+            default=False,
+            help="Skip adding allgather ops",
+        )
 
     def add_simulation_config_arguments(self):
         self.add_argument(

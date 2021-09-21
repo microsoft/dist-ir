@@ -475,6 +475,7 @@ def gpt2_dhp_transform(
     num_microbatches,
     d_embd,
     n_head,
+    skip_allgathers=False,
     debug=False,
 ):
     """Automatically distributes a GPT-2 function using D/H/P hybrid parallelism."""
@@ -843,7 +844,7 @@ def gpt2_dhp_transform(
             assert len(dp_outputs[output][-1]) == len(hp_devices)
 
     # Aggregate data parallel outputs.
-    if dp_degree > 1:
+    if dp_degree > 1 and not skip_allgathers:
         for output in dp_outputs:
             logging.debug(f"Doing data parallel reduction for {dp_outputs[output]}")
             hp_groups = list(zip(*dp_outputs[output]))

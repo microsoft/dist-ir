@@ -6,9 +6,9 @@ import torch
 from tqdm import tqdm
 import pandas as pd
 
-from dist_ir.ir import FunctionMaker, Topology, cpprint
-from dist_ir.ir.type import Device, Float16, Float32, Tensor
-from dist_ir.backend.torch import run_pytorch
+from ..ir import FunctionMaker, Topology, cpprint
+from ..ir.type import Device, Float16, Float32, Tensor
+from ..backend.torch import run_pytorch
 from .type_inference import infer_types
 from .cost_model import CostModel
 from .simulator import Simulator
@@ -177,9 +177,9 @@ def calibrate_network_bandwidth(dtype):
 def calibrate_device_parameters(dtype):
     dist_ir_dtype = Float32 if dtype == "fp32" else Float16
     pytorch_dtype = torch.float32 if dtype == "fp32" else torch.float16
-    all_batch_sizes = [1024, 2048, 4096]
-    all_input_dims = [1024, 2048, 4096]
-    all_output_dims = [1024, 2048, 4096]
+    all_batch_sizes = [2**i for i in range(14, 16)]
+    all_input_dims = [2**i for i in range(14, 16)]
+    all_output_dims = [2**i for i in range(14, 16)]
     if dtype == "fp16":
         all_batch_sizes = [2 * v for v in all_batch_sizes]
         all_input_dims = [2 * v for v in all_input_dims]
@@ -187,6 +187,7 @@ def calibrate_device_parameters(dtype):
     n = len(all_batch_sizes) * len(all_input_dims) * len(all_output_dims)
     X = np.zeros(shape=(n, 3))
     Y = np.zeros(shape=(n,))
+    data = []
     device = Device(0, "gpu")
     for i, (batch_size, input_dim, output_dim) in enumerate(
         tqdm(list(itertools.product(all_batch_sizes, all_input_dims, all_output_dims)))
@@ -212,6 +213,10 @@ def calibrate_device_parameters(dtype):
         )
         pytorch_latency = np.median(runtimes[0])
         Y[i] = pytorch_latency
+        data.append({'m': batch_size, 'n': input_dim, 'k': output_dim, 'data_size': data_size, 'flops': flops, 'latency': pytorch_latency})
+
+    df = pd.DataFrame(data)
+    df.to_csv('matmul_benchmark.csv')
 
     reg = LinearRegression(positive=True, fit_intercept=False).fit(X, Y)
 

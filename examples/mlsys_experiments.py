@@ -11,6 +11,10 @@ from dist_ir.executor import (
 
 
 def calibrate_parameters(args):
+    if args.calibrate_all:
+        args.calibrate_device_parameters = True
+        args.calibrate_network_bandwidth = True
+        args.calibrate_allreduce_parameters = True
     if args.output_file is None:
         raise ValueError(
             "Output file must be specified to calibrate simulation parameters"
@@ -48,17 +52,17 @@ def calibrate_parameters(args):
             dram_bandwidth,
             device_throughput,
             kernel_launch_overhead,
-        ) = calibrate_device_parameters()
+        ) = calibrate_device_parameters(args.dtype)
         update_simulation_parameters = True
         print(f"DRAM bandwidth: {dram_bandwidth:.2e}")
         print(f"Device throughput: {device_throughput:.2e}")
         print(f"Kernel launch overhead: {kernel_launch_overhead:.2e}")
     if args.calibrate_network_bandwidth:
-        network_bandwidth = calibrate_network_bandwidth()
+        network_bandwidth = calibrate_network_bandwidth(args.dtype)
         update_simulation_parameters = True
         print(f"Network bandwidth: {network_bandwidth}")
     if args.calibrate_allreduce_parameters:
-        allreduce_parameters = calibrate_allreduce_parameters()
+        allreduce_parameters = calibrate_allreduce_parameters(args.dtype)
         update_simulation_parameters = True
         print(f"Allreduce parameters: {allreduce_parameters}")
     if update_simulation_parameters:
@@ -138,6 +142,15 @@ if __name__ == "__main__":
         action="store_true",
         default=False,
         help="Calibrate allreduce parameters",
+    )
+    parser.add_argument(
+        "--calibrate_all",
+        action="store_true",
+        default=False,
+        help="Calibrate all parameters",
+    )
+    parser.add_argument(
+        "--dtype", choices=["fp32", "fp16"], required=True, help="Dtype"
     )
 
     args = parser.parse_args()

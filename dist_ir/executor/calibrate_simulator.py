@@ -7,43 +7,45 @@ from tqdm import tqdm
 import pandas as pd
 
 from dist_ir.ir import FunctionMaker, Topology, cpprint
-from dist_ir.ir.type import Device, Float32, Tensor
+from dist_ir.ir.type import Device, Float16, Float32, Tensor
 from dist_ir.backend.torch import run_pytorch
 from .type_inference import infer_types
 from .cost_model import CostModel
 from .simulator import Simulator
 
 BYTES_IN_Gb = 1.25e8
+NUM_WARMUP = 5
+NUM_REPETITIONS = 30
 
 
-def _matmul(batch_size, input_dim, output_dim, device):
+def _matmul(batch_size, input_dim, output_dim, device, dtype):
     fn = FunctionMaker(name="matmul")
     x = fn.add_input_value(
         "x",
-        Tensor(shape=(batch_size, input_dim), dtype=Float32(), device=device),
+        Tensor(shape=(batch_size, input_dim), dtype=dtype(), device=device),
     )
     w = fn.add_input_value(
         "w",
-        Tensor(shape=(input_dim, output_dim), dtype=Float32(), device=device),
+        Tensor(shape=(input_dim, output_dim), dtype=dtype(), device=device),
     )
     y = fn.add_op(op_type="MatMul", inputs=[x, w], output_names=["y"])
     return fn.finalize()
 
 
-def _send(src, dst, m=1024, n=1024):
+def _send(src, dst, dtype, m=1024, n=1024):
     fn = FunctionMaker(name=f"send_{src.device_id}_to_{dst.device_id}")
-    x = fn.add_input_value("x", Tensor(shape=(m, n), dtype=Float32(), device=src))
+    x = fn.add_input_value("x", Tensor(shape=(m, n), dtype=dtype(), device=src))
     y = fn.add_op(
         op_type="Send", inputs=[x], attributes={"device": dst}, output_names=["y"]
     )
     return fn.finalize()
 
 
-def _allreduce(devices, m=1024, n=1024):
+def _allreduce(devices, dtype, m=1024, n=1024):
     fn = FunctionMaker(name=f"allreduce")
     xs = [
         fn.add_input_value(
-            f"x{i}", Tensor(shape=(m, n), dtype=Float32(), device=devices[i])
+            f"x{i}", Tensor(shape=(m, n), dtype=dtype(), device=devices[i])
         )
         for i in range(len(devices))
     ]
@@ -93,8 +95,8 @@ def network_bandwidth_debug():
                     for i in range(len(fn.inputs))
                 ],
                 use_gpu=True,
-                num_repetitions=10,
-                num_warmup=5,
+                num_repetitions=NUM_REPETITIONS,
+                num_warmup=NUM_WARMUP,
             )
             real_latency = np.median(runtimes[0])
             ex = Simulator(CostModel(topology))
@@ -129,7 +131,9 @@ def network_bandwidth_debug():
     print(df)
 
 
-def calibrate_network_bandwidth():
+def calibrate_network_bandwidth(dtype):
+    dist_ir_dtype = Float32 if dtype == "fp32" else Float16
+    pytorch_dtype = torch.float32 if dtype == "fp32" else torch.float16
     bandwidths = []
     all_sizes = [1024, 2048, 4096, 8192]
     n = len(all_sizes)
@@ -144,7 +148,7 @@ def calibrate_network_bandwidth():
             if src == dst:
                 continue
             for i, size in enumerate(tqdm(all_sizes)):
-                fn = _send(src, dst, m=size, n=size)
+                fn = _send(src, dst, dist_ir_dtype, m=size, n=size)
                 fn = infer_types(fn, fn.inputs)
                 X[i][0] = fn.inputs[0].type.size() / BYTES_IN_Gb
                 X[i][1] = 1
@@ -152,12 +156,12 @@ def calibrate_network_bandwidth():
                 _, runtimes = run_pytorch(
                     fn=fn,
                     inputs=[
-                        torch.randn(size=fn.inputs[i].type.shape, dtype=torch.float32)
+                        torch.randn(size=fn.inputs[i].type.shape, dtype=pytorch_dtype)
                         for i in range(len(fn.inputs))
                     ],
                     use_gpu=True,
-                    num_repetitions=10,
-                    num_warmup=5,
+                    num_repetitions=NUM_REPETITIONS,
+                    num_warmup=NUM_WARMUP,
                 )
                 pytorch_latency = np.median(runtimes[0])
                 Y[i] = pytorch_latency
@@ -170,10 +174,16 @@ def calibrate_network_bandwidth():
     return bandwidths
 
 
-def calibrate_device_parameters():
+def calibrate_device_parameters(dtype):
+    dist_ir_dtype = Float32 if dtype == "fp32" else Float16
+    pytorch_dtype = torch.float32 if dtype == "fp32" else torch.float16
     all_batch_sizes = [1024, 2048, 4096]
     all_input_dims = [1024, 2048, 4096]
     all_output_dims = [1024, 2048, 4096]
+    if dtype == "fp16":
+        all_batch_sizes = [2 * v for v in all_batch_sizes]
+        all_input_dims = [2 * v for v in all_input_dims]
+        all_output_dims = [2 * v for v in all_output_dims]
     n = len(all_batch_sizes) * len(all_input_dims) * len(all_output_dims)
     X = np.zeros(shape=(n, 3))
     Y = np.zeros(shape=(n,))
@@ -181,7 +191,7 @@ def calibrate_device_parameters():
     for i, (batch_size, input_dim, output_dim) in enumerate(
         tqdm(list(itertools.product(all_batch_sizes, all_input_dims, all_output_dims)))
     ):
-        fn = _matmul(batch_size, input_dim, output_dim, device)
+        fn = _matmul(batch_size, input_dim, output_dim, device, dist_ir_dtype)
         x = fn.inputs[0].type
         y = fn.inputs[1].type
         data_size = x.dtype.size() * (x.shape[0] * x.shape[1] + y.shape[0] * y.shape[1])
@@ -193,21 +203,24 @@ def calibrate_device_parameters():
         _, runtimes = run_pytorch(
             fn=fn,
             inputs=[
-                torch.randn(size=fn.inputs[0].type.shape, dtype=torch.float32),
-                torch.randn(size=fn.inputs[1].type.shape, dtype=torch.float32),
+                torch.randn(size=fn.inputs[0].type.shape, dtype=pytorch_dtype),
+                torch.randn(size=fn.inputs[1].type.shape, dtype=pytorch_dtype),
             ],
             use_gpu=True,
-            num_repetitions=10,
-            num_warmup=5,
+            num_repetitions=NUM_REPETITIONS,
+            num_warmup=NUM_WARMUP,
         )
         pytorch_latency = np.median(runtimes[0])
         Y[i] = pytorch_latency
 
     reg = LinearRegression(positive=True, fit_intercept=False).fit(X, Y)
+
     return 1.0 / reg.coef_[0], 1.0 / reg.coef_[1], reg.coef_[2]
 
 
-def calibrate_allreduce_parameters():
+def calibrate_allreduce_parameters(dtype):
+    dist_ir_dtype = Float32 if dtype == "fp32" else Float16
+    pytorch_dtype = torch.float32 if dtype == "fp32" else torch.float16
     all_input_dims = [2048, 4096, 8192]
     all_output_dims = [2048, 4096, 8192]
     n = len(all_input_dims) * len(all_output_dims)
@@ -222,7 +235,9 @@ def calibrate_allreduce_parameters():
         for i, (input_dim, output_dim) in enumerate(
             tqdm(list(itertools.product(all_input_dims, all_output_dims)))
         ):
-            fn = _allreduce(devices[1 : num_devices + 1], input_dim, output_dim)
+            fn = _allreduce(
+                devices[1 : num_devices + 1], dist_ir_dtype, input_dim, output_dim
+            )
             fn = infer_types(fn, fn.inputs)
             X[i][0] = fn.inputs[0].type.size() / BYTES_IN_Gb
             X[i][1] = num_devices
@@ -231,12 +246,12 @@ def calibrate_allreduce_parameters():
             _, runtimes = run_pytorch(
                 fn=fn,
                 inputs=[
-                    torch.randn(size=fn.inputs[i].type.shape, dtype=torch.float32)
+                    torch.randn(size=fn.inputs[i].type.shape, dtype=pytorch_dtype)
                     for i in range(len(fn.inputs))
                 ],
                 use_gpu=True,
-                num_repetitions=10,
-                num_warmup=5,
+                num_repetitions=NUM_REPETITIONS,
+                num_warmup=NUM_WARMUP,
             )
             pytorch_latency = np.median(runtimes[0])
             Y[i] = pytorch_latency
@@ -246,7 +261,7 @@ def calibrate_allreduce_parameters():
     return params
 
 
-def calibrate_simulator():
-    device_parameters = calibrate_device_parameters()
-    network_bandwidth = calibrate_network_bandwidth()
+def calibrate_simulator(dtype):
+    device_parameters = calibrate_device_parameters(dtype)
+    network_bandwidth = calibrate_network_bandwidth(dtype)
     return (*device_parameters, network_bandwidth)

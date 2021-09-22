@@ -6,6 +6,7 @@ import sys
 from time import perf_counter
 from traceback import print_exc
 from typing import Any, Dict, Iterable, List, NamedTuple, Sequence, Tuple
+from warnings import warn
 
 import torch
 import torch.distributed as dist
@@ -14,7 +15,7 @@ from torch import fx
 from ..executor.rank_projector import project
 from ..ir import Function, cpprint
 from ..ir.device import Device
-from ..ir.type import Int32, Int64, Float32, Type
+from ..ir.type import Int32, Int64, Float16, Float32, Type
 
 # NOTE: The code currently suffers from this issue, more investigation needed:
 # https://github.com/pytorch/pytorch/issues/11201
@@ -166,6 +167,8 @@ def _recv(shape=None, from_d=None, group=None, dtype=None, ctx=None):
         x = torch.zeros(shape).int()
     elif isinstance(dtype, Int64):
         x = torch.zeros(shape).long()
+    elif isinstance(dtype, Float16):
+        x = torch.zeros(shape).half()
     elif isinstance(dtype, Float32):
         x = torch.zeros(shape).float()
     else:
@@ -236,8 +239,7 @@ def _slice(x, starts, ends, axes, steps=None, ctx=None):
 
 
 def _softmax(x, axis, ctx=None):
-    exp = torch.exp(x)
-    return exp / torch.sum(exp, dim=axis, keepdim=True)
+    return torch.nn.functional.softmax(x, dim=axis)
 
 
 def _split(x, axis, split, ctx=None):
@@ -415,8 +417,12 @@ def run_function(
             assert isinstance(output, tuple)
             for i, v in enumerate(op.outputs):
                 value_map[v] = output[i]
+                if torch.any(torch.isnan(output[i])):
+                    warn(f"NaNs in op {op} output {i}")
         elif len(op.outputs) == 1:
             value_map[op.outputs[0]] = output
+            if torch.any(torch.isnan(output)):
+                warn(f"NaNs in op {op.name} output {0}")
 
         # Free tensors that are not used again
         for v in op.inputs:

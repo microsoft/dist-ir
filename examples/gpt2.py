@@ -13,8 +13,8 @@ from dist_ir.executor import (
     ConcreteValue,
 )
 from dist_ir.importer import import_from_onnx
-from dist_ir.ir import FunctionMaker, Op, get_uniform_topology
-from dist_ir.ir.type import Tensor, Type, abstract_values
+from dist_ir.ir import FunctionMaker, Op, Value, get_uniform_topology
+from dist_ir.ir.type import Float16, Float32, Tensor, Type, abstract_values
 from dist_ir.transforms import (
     gpt2_dhp_transform,
     sanitize_unhashable_attributes,
@@ -29,6 +29,41 @@ def _to_numpy(x):
     if type(x) is not np.ndarray:
         x = x.detach().cpu().numpy() if x.requires_grad else x.cpu().numpy()
     return x
+
+
+def _cast_to_fp16(function):
+    is_weight = lambda x: "weight" in x or "bias" in x
+
+    fp16_function = FunctionMaker(function.name)
+    value_map = {}
+    for i, inp in enumerate(function.inputs):
+        if is_weight(inp.name):
+            fp16_inp = fp16_function.add_input_value(
+                inp.name,
+                Tensor(
+                    shape=inp.type.shape,
+                    device=inp.type.device,
+                    dtype=Float16(device=inp.type.dtype.device),
+                ),
+            )
+        else:
+            fp16_inp = fp16_function.add_input_value(inp.name, inp.type)
+        value_map[inp] = fp16_inp
+    for op in function.ops:
+        inputs = [value_map[inp] for inp in op.inputs]
+        fp16_op = Op(
+            op_type=op.op_type,
+            name=op.name,
+            inputs=tuple(value_map[inp] for inp in op.inputs),
+            attributes=op.attributes,
+            subfunctions=op.subfunctions,
+            output_names=tuple(output.name for output in op.outputs),
+            output_types=tuple(None for output in op.outputs),
+        )
+        fp16_function.ops.append(fp16_op)
+        for output, fp16_output in zip(op.outputs, fp16_op.outputs):
+            value_map[output] = fp16_output
+    return fp16_function.finalize()
 
 
 def _filter_extra_outputs(function):
@@ -349,8 +384,11 @@ def _get_stats(function):
 def import_function_and_get_input_data(
     model_path,
     default_device,
+    dtype,
     use_real_weights=False,
 ):
+    is_input_or_weight = lambda x: "input" in x or "weight" in x or "bias" in x
+
     function, input_data_map = import_from_onnx(
         model_path,
         name="GPT-2",
@@ -360,10 +398,22 @@ def import_function_and_get_input_data(
 
     function = _filter_extra_outputs(function)
 
-    if not use_real_weights:
-        for inp in input_data_map:
-            if "input" in inp.name or "weight" in inp.name or "bias" in inp.name:
-                input_data_map[inp] = inp.type
+    if dtype == "fp16":
+        function = _cast_to_fp16(function)
+
+    for inp in input_data_map:
+        if is_input_or_weight(inp.name):
+            if not use_real_weights:
+                if dtype == "fp16" and isinstance(inp.type.dtype, Float32):
+                    input_data_map[inp] = Tensor(
+                        shape=inp.type.shape,
+                        dtype=Float16(inp.type.dtype.device),
+                        device=inp.type.device,
+                    )
+                else:
+                    input_data_map[inp] = inp.type
+            elif dtype == "fp16" and input_data_map[inp].dtype == np.float32:
+                input_data_map[inp] = input_data_map[inp].astype(np.float16)
     input_data = list(input_data_map.values())
 
     return function, input_data
@@ -488,6 +538,7 @@ def transform(
 
 def get_transformed_function_and_input_data(
     model_path,
+    dtype,
     device_throughput,
     dram_bandwidth,
     kernel_launch_overhead,
@@ -515,6 +566,7 @@ def get_transformed_function_and_input_data(
     function, input_data = import_function_and_get_input_data(
         model_path,
         default_device=topology.devices[0],
+        dtype=dtype,
         use_real_weights=use_real_weights,
     )
 
@@ -554,13 +606,17 @@ def simulate(function, input_data, topology, allreduce_parameters=None):
     return simulation
 
 
-def run_pytorch(function, input_data, world_size, use_gpu=True, debug_stacktrace=False):
+def run_pytorch(
+    function, input_data, world_size, use_gpu=False, debug_stacktrace=False
+):
     # TODO: Move this to a utils file
     def _resolve_dtype(dtype):
         if dtype == np.int32:
             return torch.int32
         elif dtype == np.int64:
             return torch.int64
+        elif dtype == np.float16:
+            return torch.float16
         elif dtype == np.float32:
             return torch.float32
         else:
@@ -616,6 +672,7 @@ def main(args):
         topology,
     ) = get_transformed_function_and_input_data(
         args.model_path,
+        args.dtype,
         args.device_throughput,
         args.dram_bandwidth,
         args.kernel_launch_overhead,

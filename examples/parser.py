@@ -75,6 +75,7 @@ class Parser(ArgumentParser):
 
     def add_execution_mode_config_arguments(self):
         self.add_argument("--backend", choices=["simulate", "pytorch"], required=True)
+        self.add_argument("--dtype", choices=["fp32", "fp16"], default="fp32")
 
     def add_simulation_output_config_arguments(self):
         self.add_argument("--trace_file", type=str, default=None, help="Trace file")
@@ -89,7 +90,7 @@ class Parser(ArgumentParser):
         self.add_argument(
             "--use_gpu",
             action="store_true",
-            default=torch.cuda.is_available(),
+            default=False,
             help="Use GPU with PyTorch backend",
         )
 
@@ -186,7 +187,3 @@ class Parser(ArgumentParser):
                 "text/machine_comprehension/gpt-2/model/gpt2-10.onnx?raw=True)"
             ),
         )
-
-    def add_calibration_arguments(self):
-        # TODO: Add for simulator accuracy
-        pass

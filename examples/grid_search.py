@@ -43,6 +43,7 @@ class GridSearch(ABC):
         self,
         model_params,
         backend,
+        dtype,
         use_gpu,
         output_file,
         device_throughput,
@@ -55,6 +56,7 @@ class GridSearch(ABC):
     ):
         self.model_params = model_params
         self.backend = backend
+        self.dtype = dtype
         self.use_gpu = use_gpu
         self.output_file = output_file
         self.device_throughput = device_throughput
@@ -263,15 +265,16 @@ def run_grid_search(args, grid_search_cls):
     if args.simulation_parameters_file is not None:
         with open(args.simulation_parameters_file, "r") as f:
             simulation_parameters = json.load(f)
-        args.device_throughput = simulation_parameters["device_throughput"]
-        args.dram_bandwidth = simulation_parameters["dram_bandwidth"]
-        args.kernel_launch_overhead = simulation_parameters["kernel_launch_overhead"]
+        args.device_throughput = 1.0 / simulation_parameters["device_parameters"][0]
+        args.dram_bandwidth = 1.0 / simulation_parameters["device_parameters"][1]
+        args.kernel_launch_overhead = simulation_parameters["device_parameters"][2]
         args.network_bandwidth = simulation_parameters["network_bandwidth"]
         args.allreduce_parameters = {
             int(k): v for k, v in simulation_parameters["allreduce_parameters"].items()
         }
     grid_search = grid_search_cls(
         args.backend,
+        args.dtype,
         args.use_gpu,
         args.output_file,
         args.device_throughput,

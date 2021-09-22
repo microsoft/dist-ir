@@ -5,8 +5,14 @@ import re
 import torch
 
 from dist_ir.ir import FunctionMaker, Topology, get_uniform_topology, Value
-from dist_ir.ir.type import Int32, Float32, Tensor, abstract_values
-from dist_ir.executor import CostModel, Simulator, infer_types
+from dist_ir.ir.type import Int32, Float16, Float32, Tensor, abstract_values
+from dist_ir.executor import (
+    CostModel,
+    Simulator,
+    ConcreteValue,
+    infer_types,
+    sequentially_execute,
+)
 from dist_ir.transforms import mlp_dhp_transform
 from .parser import Parser
 import dist_ir.backend.torch as torch_backend
@@ -39,42 +45,40 @@ def get_typed_input_values(inputs, batch_size, input_dim, output_dim):
     return tuple(typed_inputs)
 
 
-def get_input_data(batch_size, dim, num_layers):
-    x = np.random.normal(size=(batch_size, dim))
-    z = np.random.normal(size=(batch_size, dim))
-    n = batch_size
-    weights = [np.random.normal(size=(dim, dim))]
-    for i in range(1, num_layers - 1):
-        weights.append(np.random.normal(size=(dim, dim)))
-    weights.append(np.random.normal(size=(dim, dim)))
+def get_input_data(inputs, batch_size, input_dim, output_dim, device, dtype):
+    input_data = []
+    x = np.random.normal(0, 0.02, size=(batch_size, input_dim))
+    z = np.random.normal(0, 0.02, size=(batch_size, output_dim))
+    n = np.int64(batch_size)
+    weights = [np.random.normal(0, 0.02, size=inp.type.shape) for inp in inputs[3:]]
     input_data = [x, z, n] + weights
-    input_data = [
-        v.astype(np.float32) if i != 2 else v for i, v in enumerate(input_data)
-    ]
+    input_data = [v.astype(dtype) if i != 2 else v for i, v in enumerate(input_data)]
+    input_data = [ConcreteValue(v, device) for v in input_data]
+    assert len(input_data) == len(inputs)
     return input_data
 
 
-def mlp(input_dim, hidden_dim, output_dim, num_hidden_layers, device):
+def mlp(input_dim, hidden_dim, output_dim, num_hidden_layers, device, dtype):
     function = FunctionMaker(name="mlp")
     x = function.add_input_value(
         "x",
-        Tensor(dtype=Float32(), shape=None, device=device),
+        Tensor(dtype=dtype(), shape=None, device=device),
     )
     z = function.add_input_value(
         "z",
-        Tensor(dtype=Float32(), shape=None, device=device),
+        Tensor(dtype=dtype(), shape=None, device=device),
     )
     n = function.add_input_value("n", Int32(device=device))
     weights = []
     for i in range(num_hidden_layers - 1):
         w = function.add_input_value(
             f"w{chr(ord('A')+i)}",
-            Tensor(dtype=Float32(), shape=(input_dim, hidden_dim), device=device),
+            Tensor(dtype=dtype(), shape=(input_dim, hidden_dim), device=device),
         )
         weights.append(w)
     w = function.add_input_value(
         f"w{chr(ord('A')+i+1)}",
-        Tensor(dtype=Float32(), shape=(hidden_dim, output_dim), device=device),
+        Tensor(dtype=dtype(), shape=(hidden_dim, output_dim), device=device),
     )
     weights.append(w)
 
@@ -107,24 +111,24 @@ def mlp(input_dim, hidden_dim, output_dim, num_hidden_layers, device):
 
 
 def mlp_inference(
-    batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, device
+    batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, device, dtype
 ):
     function = FunctionMaker(name="mlp")
     weights = []
     for i in range(num_hidden_layers - 1):
         w = function.add_input_value(
             f"w{chr(ord('A')+i)}",
-            Tensor(dtype=Float32(), shape=(input_dim, hidden_dim), device=device),
+            Tensor(dtype=dtype(), shape=(input_dim, hidden_dim), device=device),
         )
         weights.append(w)
     w = function.add_input_value(
         f"w{chr(ord('A')+i+1)}",
-        Tensor(dtype=Float32(), shape=(hidden_dim, output_dim), device=device),
+        Tensor(dtype=dtype(), shape=(hidden_dim, output_dim), device=device),
     )
     weights.append(w)
     x = function.add_input_value(
         "x",
-        Tensor(dtype=Float32(), shape=(batch_size, input_dim), device=device),
+        Tensor(dtype=dtype(), shape=(batch_size, input_dim), device=device),
     )
 
     a = x
@@ -136,7 +140,7 @@ def mlp_inference(
 
 
 def mlp_inference_dp(
-    batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, devices
+    batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, devices, dtype
 ):
     num_devices = len(devices)
     assert batch_size % num_devices == 0
@@ -147,16 +151,16 @@ def mlp_inference_dp(
         for i in range(num_hidden_layers - 1):
             weights[i, d] = function.add_input_value(
                 f"w{chr(ord('A')+i)}_{d.device_id}",
-                Tensor(dtype=Float32(), shape=(input_dim, hidden_dim), device=d),
+                Tensor(dtype=dtype(), shape=(input_dim, hidden_dim), device=d),
             )
         weights[num_hidden_layers - 1, d] = function.add_input_value(
             f"w{chr(ord('A')+i+1)}_{d.device_id}",
-            Tensor(dtype=Float32(), shape=(hidden_dim, output_dim), device=d),
+            Tensor(dtype=dtype(), shape=(hidden_dim, output_dim), device=d),
         )
         x[d] = function.add_input_value(
             f"x_{d.device_id}",
             Tensor(
-                dtype=Float32(), shape=(batch_size // num_devices, input_dim), device=d
+                dtype=dtype(), shape=(batch_size // num_devices, input_dim), device=d
             ),
         )
 
@@ -274,12 +278,31 @@ def simulate(function, input_types, topology, allreduce_parameters=None):
     return simulation
 
 
-def run_pytorch(function, input_data, world_size, use_gpu=True):
+def run_pytorch(function, input_data, world_size, use_gpu=torch.cuda.is_available()):
+    # TODO: Move this to a utils file
+    def _resolve_dtype(dtype):
+        if dtype == np.int32:
+            return torch.int32
+        elif dtype == np.int64:
+            return torch.int64
+        elif dtype == np.float16:
+            return torch.float16
+        elif dtype == np.float32:
+            return torch.float32
+        else:
+            raise NotImplementedError(dtype)
+
     if use_gpu and world_size > torch.cuda.device_count():
         raise ValueError(
             f"Specified world size is {world_size}, but only "
             f"{torch.cuda.device_count()} GPUs available"
         )
+    pytorch_input_data = [
+        torch.tensor(x.val, dtype=_resolve_dtype(x.val.dtype))
+        if isinstance(x.val, np.ndarray)
+        else torch.tensor(x.val, dtype=torch.int32)
+        for x in input_data
+    ]
     input_types = abstract_values(
         input_data,
         tuple(
@@ -287,7 +310,6 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
             for i in range(len(input_data))
         ),
     )
-    pytorch_input_data = [torch.tensor(x.val, dtype=torch.float32) for x in input_data]
     per_rank_outputs, runtimes = torch_backend.run_pytorch(
         function,
         pytorch_input_data,
@@ -302,6 +324,7 @@ def run_pytorch(function, input_data, world_size, use_gpu=True):
 def run_mlp(
     phase,
     backend,
+    dtype,
     use_gpu,
     batch_size,
     input_dim,
@@ -319,6 +342,8 @@ def run_mlp(
     trace_file,
     verbose=False,
 ):
+    dist_ir_dtype = Float32 if dtype == "fp32" else Float16
+    numpy_dtype = np.float32 if dtype == "fp32" else np.float16
     world_size = dp_degree * hp_degree * pp_degree
     topology = get_uniform_topology(
         world_size,
@@ -335,6 +360,7 @@ def run_mlp(
             output_dim,
             num_hidden_layers,
             topology.devices[0],
+            dist_ir_dtype,
         )
     elif phase == "inference":
         fn = mlp_inference(
@@ -343,12 +369,23 @@ def run_mlp(
             output_dim,
             num_hidden_layers,
             topology.devices[0],
+            dist_ir_dtype,
         )
 
     if verbose:
         parameter_count, model_size, parameter_count_str, model_size_str = get_stats(fn)
         print("Parameter count:", parameter_count_str)
         print("Model size:", model_size_str)
+
+    if backend == "pytorch":
+        input_data = get_input_data(
+            fn.inputs,
+            batch_size,
+            input_dim,
+            output_dim,
+            topology.devices[0],
+            numpy_dtype,
+        )
 
     if world_size > 1:
         init_fn, transformed_fn = mlp_dhp_transform(
@@ -365,6 +402,8 @@ def run_mlp(
         init_fn = infer_types(init_fn, typed_inputs)
         transformed_fn = infer_types(transformed_fn, init_fn.outputs)
         input_types = tuple(output.type for output in init_fn.outputs)
+        if backend == "pytorch":
+            transformed_input_data = sequentially_execute(init_fn, input_data)
     else:
         typed_inputs = get_typed_input_values(
             fn.inputs, batch_size, input_dim, output_dim
@@ -372,6 +411,8 @@ def run_mlp(
         fn = infer_types(fn, typed_inputs)
         transformed_fn = fn
         input_types = tuple(inp.type for inp in fn.inputs)
+        if backend == "pytorch":
+            transformed_input_data = input_data
     transformed_fn = add_optimizer_ops(transformed_fn)
     if backend == "simulate":
         simulation = simulate(transformed_fn, input_types, topology)
@@ -381,19 +422,14 @@ def run_mlp(
             simulation.dump_chrome_trace(trace_file)
         return simulation
     elif backend == "pytorch":
-        input_data = [
-            ConcreteValue(
-                np.random.normal(size=typ.size).astype(np.float32), device=typ.device
-            )
-            for typ in input_types
-        ]
-        return run_pytorch(fn, input_data, world_size, use_gpu)
+        return run_pytorch(transformed_fn, transformed_input_data, world_size, use_gpu)
 
 
 def main(args):
     run_mlp(
         args.phase,
         args.backend,
+        args.dtype,
         args.use_gpu,
         args.batch_size,
         args.input_dim,

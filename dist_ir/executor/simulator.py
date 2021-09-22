@@ -5,7 +5,7 @@ from typing import Any, Dict, Sequence, Set, Tuple
 from warnings import warn
 
 from ..ir import Function, Device, Op
-from ..ir.type import Type, abstract_values
+from ..ir.type import Tensor, Type, abstract_values
 from .absint import (
     AbstractState,
     interpreter,
@@ -44,10 +44,28 @@ class SimulatorState(AbstractState):
         self.trace = []
         self._function_inputs_set = set(function.inputs)
 
-        for inp in function.inputs:
+        for i, inp in enumerate(function.inputs):
             if inp.type is None or inp.type.device is None:
-                continue
-            self.peak_memory[inp.type.device] += inp.type.size()
+                if (
+                    isinstance(inputs[i], ConcreteValue)
+                    and inputs[i].device is not None
+                ):
+                    self.peak_memory[inputs[i].device] += inputs[i].val.nbytes
+                elif (
+                    isinstance(inputs[i], Tensor)
+                    and inputs[i].shape is not None
+                    and inputs[i].dtype is not None
+                    and inputs[i].device is not None
+                ):
+                    self.peak_memory[inputs[i].device] += inputs[i].size()
+                else:
+                    warn_msg = (
+                        f"No input type or device for input {inp} ({type(inputs[i])})"
+                    )
+                    warn(warn_msg)
+                    continue
+            else:
+                self.peak_memory[inp.type.device] += inp.type.size()
         for device in self.peak_memory:
             self.live_memory[device][0] = (0, self.peak_memory[device])
 

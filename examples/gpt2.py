@@ -14,7 +14,7 @@ from dist_ir.executor import (
 )
 from dist_ir.importer import import_from_onnx
 from dist_ir.ir import FunctionMaker, Op, Value, get_uniform_topology
-from dist_ir.ir.type import Float16, Tensor, Type, abstract_values
+from dist_ir.ir.type import Float16, Float32, Tensor, Type, abstract_values
 from dist_ir.transforms import (
     gpt2_dhp_transform,
     sanitize_unhashable_attributes,
@@ -59,7 +59,6 @@ def _cast_to_fp16(function):
             subfunctions=op.subfunctions,
             output_names=tuple(output.name for output in op.outputs),
             output_types=tuple(None for output in op.outputs),
-            # output_types=tuple(output.type for output in op.outputs),
         )
         fp16_function.ops.append(fp16_op)
         for output, fp16_output in zip(op.outputs, fp16_op.outputs):
@@ -405,8 +404,15 @@ def import_function_and_get_input_data(
     for inp in input_data_map:
         if is_input_or_weight(inp.name):
             if not use_real_weights:
-                input_data_map[inp] = inp.type
-            elif dtype == "fp16" and "input" not in inp.name:
+                if dtype == "fp16" and isinstance(inp.type.dtype, Float32):
+                    input_data_map[inp] = Tensor(
+                        shape=inp.type.shape,
+                        dtype=Float16(inp.type.dtype.device),
+                        device=inp.type.device,
+                    )
+                else:
+                    input_data_map[inp] = inp.type
+            elif dtype == "fp16" and input_data_map[inp].dtype == np.float32:
                 input_data_map[inp] = input_data_map[inp].astype(np.float16)
     input_data = list(input_data_map.values())
 

@@ -31,41 +31,6 @@ def _to_numpy(x):
     return x
 
 
-def _cast_to_fp16(function):
-    is_weight = lambda x: "weight" in x or "bias" in x
-
-    fp16_function = FunctionMaker(function.name)
-    value_map = {}
-    for i, inp in enumerate(function.inputs):
-        if is_weight(inp.name):
-            fp16_inp = fp16_function.add_input_value(
-                inp.name,
-                Tensor(
-                    shape=inp.type.shape,
-                    device=inp.type.device,
-                    dtype=Float16(device=inp.type.dtype.device),
-                ),
-            )
-        else:
-            fp16_inp = fp16_function.add_input_value(inp.name, inp.type)
-        value_map[inp] = fp16_inp
-    for op in function.ops:
-        inputs = [value_map[inp] for inp in op.inputs]
-        fp16_op = Op(
-            op_type=op.op_type,
-            name=op.name,
-            inputs=tuple(value_map[inp] for inp in op.inputs),
-            attributes=op.attributes,
-            subfunctions=op.subfunctions,
-            output_names=tuple(output.name for output in op.outputs),
-            output_types=tuple(None for output in op.outputs),
-        )
-        fp16_function.ops.append(fp16_op)
-        for output, fp16_output in zip(op.outputs, fp16_op.outputs):
-            value_map[output] = fp16_output
-    return fp16_function.finalize()
-
-
 def _filter_extra_outputs(function):
     function, attribute_map = sanitize_unhashable_attributes(function)
 
@@ -352,13 +317,13 @@ def _set_model_size(function, n_layer, n_head, d_embd):
     return transformed_function.finalize(), inputs_to_remove
 
 
-def _get_stats(function):
+def _get_stats(function, input_types):
     parameter_count = 0
     model_size = 0
-    for inp in function.inputs:
+    for inp, typ in zip(function.inputs, input_types):
         if "weight" in inp.name or "bias" in inp.name:
-            parameter_count += np.prod(inp.type.shape)
-            model_size += inp.type.size()
+            parameter_count += np.prod(typ.shape)
+            model_size += typ.size()
 
     if parameter_count >= 1e3 and parameter_count < 1e6:
         parameter_count_str = f"{parameter_count / 1e3:.2f}K"
@@ -397,9 +362,6 @@ def import_function_and_get_input_data(
     )
 
     function = _filter_extra_outputs(function)
-
-    if dtype == "fp16":
-        function = _cast_to_fp16(function)
 
     for inp in input_data_map:
         if is_input_or_weight(inp.name):
@@ -582,7 +544,7 @@ def get_transformed_function_and_input_data(
 
     if print_stats:
         parameter_count, model_size, parameter_count_str, model_size_str = _get_stats(
-            function
+            function, input_data
         )
         print("Parameter count:", parameter_count_str)
         print("Model size:", model_size_str)

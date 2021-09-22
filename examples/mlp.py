@@ -240,7 +240,7 @@ def add_optimizer_ops(function):
         function.add_op(
             op_type="SGDOptimizer",
             inputs=(weights + gradients),
-            attributes={"lr": 1e-3},
+            attributes={"lr": 0},
             output_names=[f"{w.name}'" for w in weights],
         )
 

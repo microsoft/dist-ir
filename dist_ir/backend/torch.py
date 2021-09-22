@@ -209,7 +209,9 @@ def _sgd(*xs, lr=None, ctx=None):
     gradients = xs[(len(xs) // 2) :]
     updated_weights = []
     for w, dw in zip(weights, gradients):
-        updated_weights.append(w - lr * dw)
+        dw *= lr
+        w -= dw
+        updated_weights.append(w)
     return tuple(updated_weights)
 
 
@@ -399,11 +401,11 @@ def run_function(
         value_map[v] = x
     assert len(fn.inputs) == len(inputs)
 
-    def print_memory_usage():
-        t = torch.cuda.get_device_properties(0).total_memory
-        r = torch.cuda.memory_reserved(0)
-        a = torch.cuda.memory_allocated(0)
-        print(f"Total: {t} Reserved: {r} Allocated: {a} Free: {r-a}")
+    def print_memory_usage(rank):
+        t = torch.cuda.get_device_properties(rank).total_memory
+        r = torch.cuda.memory_reserved(rank)
+        a = torch.cuda.memory_allocated(rank)
+        print(f"[Rank {rank}] Total: {t} Reserved: {r} Allocated: {a} Free: {r-a}")
 
     # Run ops
     for op in fn.ops:

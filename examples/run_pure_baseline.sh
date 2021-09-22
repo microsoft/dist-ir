@@ -42,7 +42,7 @@ esac
 
 for ((i=10;i<20;i++)); do
     batch_size=$((2**i))
-    command="examples.$module $model_path_arg --mode config --backend pytorch \
+    command="examples.$module $model_path_arg --mode config --backend pytorch --use_gpu \
         --model_size $model_size --config $config $batch_size \
         --output_file $output_file --append_output_file \
         "

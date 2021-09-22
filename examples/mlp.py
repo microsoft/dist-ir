@@ -70,10 +70,15 @@ def mlp(input_dim, hidden_dim, output_dim, num_hidden_layers, device, dtype):
     )
     n = function.add_input_value("n", Int32(device=device))
     weights = []
-    for i in range(num_hidden_layers - 1):
+    w = function.add_input_value(
+        "wA",
+        Tensor(dtype=dtype(), shape=(input_dim, hidden_dim), device=device),
+    )
+    weights.append(w)
+    for i in range(1, num_hidden_layers - 1):
         w = function.add_input_value(
             f"w{chr(ord('A')+i)}",
-            Tensor(dtype=dtype(), shape=(input_dim, hidden_dim), device=device),
+            Tensor(dtype=dtype(), shape=(hidden_dim, hidden_dim), device=device),
         )
         weights.append(w)
     w = function.add_input_value(

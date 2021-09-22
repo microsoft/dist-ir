@@ -148,7 +148,7 @@ class Tensor(Type):
             np.float16: Float16,
             np.float32: Float32,
             np.float64: Float64,
-            np.bool: Bool,
+            bool: Bool,
         }  # TODO does this map exist/belong somewhere else?
         dtype = dtype_to_type[concrete_value.val.dtype.type](concrete_value.device)
         return Tensor(dtype, concrete_value.val.shape, concrete_value.device)

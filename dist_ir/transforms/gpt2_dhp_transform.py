@@ -450,7 +450,7 @@ def update_attributes(
             and value.shape == (1,)
             and value[0] == old_n_head
         ):
-            value = np.array([new_n_head])
+            value = np.array([new_n_head], dtype=value.dtype)
             sanitized_value = value.tobytes()
             attributes = frozendict(
                 {"value": sanitized_value, "device": attributes["device"]}

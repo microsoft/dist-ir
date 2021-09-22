@@ -6,8 +6,9 @@ import torch
 
 from dist_ir.executor import sequentially_execute, ConcreteValue
 from dist_ir.ir import cpprint
-from examples.gpt2 import get_transformed_function_and_input_data, run_pytorch
+from dist_ir.ir.type import Float16, Float32
 from dist_ir.utils import constants
+from examples.gpt2 import get_transformed_function_and_input_data, simulate, run_pytorch
 
 # Assume the onnx file is stored in the repository root
 MODEL_PATH = (Path(__file__).parent.parent / "gpt2-10.onnx").absolute()
@@ -75,6 +76,8 @@ def _run_gpt(
         else:
             outputs = sequentially_execute(transformed_function, initialized_input_data)
         return outputs
+    else:
+        return simulate(transformed_function, initialized_input_data, topology)
 
 
 def _test(
@@ -98,6 +101,10 @@ def _test(
     )
     assert len(transformed_outputs) == dp_degree * hp_degree
     for i in range(len(transformed_outputs)):
+        if dtype == "fp32":
+            assert transformed_outputs[i].val.dtype == np.float32
+        else:
+            assert transformed_outputs[i].val.dtype == np.float16
         np.testing.assert_array_almost_equal(
             original_outputs[0].val,
             transformed_outputs[i].val,
@@ -164,7 +171,7 @@ def test_pytorch_backend(original_outputs, dtype, dp_degree, hp_degree, pp_degre
     list(itertools.product(["fp16", "fp32"], [1, 2], [1, 2], [1, 2])),
 )
 def test_mixed_simulation(dtype, dp_degree, hp_degree, pp_degree):
-    _run_gpt(
+    simulation = _run_gpt(
         dtype=dtype,
         dp_degree=dp_degree,
         hp_degree=hp_degree,
@@ -172,3 +179,4 @@ def test_mixed_simulation(dtype, dp_degree, hp_degree, pp_degree):
         num_microbatches=pp_degree,
         use_real_weights=False,
     )
+    # TODO: Verify that output dtypes are correct

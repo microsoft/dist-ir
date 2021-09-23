@@ -213,20 +213,24 @@ class GridSearch(ABC):
         pass
 
     def run(self, config: DHPConfig):
+        print("Generating model and input data...")
         fn, input_data = self.get_model_and_input_data(
             config.batch_size, config.model_size
         )
         try:
+            print("Applying transform...")
             _, transformed_fn, input_data = self.transform(
                 fn, input_data, self.topology, config
             )
             if self.backend == "simulate":
+                print("Simulating...")
                 simulation = self.simulate(transformed_fn, input_data, self.topology)
                 latency = max([simulation.timestamps[d] for d in simulation.timestamps])
                 peak_memory = max(
                     [simulation.peak_memory[d] for d in simulation.peak_memory]
                 ) / (2.0 ** 20)
             elif self.backend == "pytorch":
+                print(f"Running with PyTorch backend...")
                 world_size = config.dp_degree * config.hp_degree * config.pp_degree
                 _, runtimes = self.pytorch(transformed_fn, input_data, world_size)
                 latency = np.median(runtimes[-1])

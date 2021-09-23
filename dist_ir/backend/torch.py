@@ -596,11 +596,13 @@ def run_pytorch(
     profiler and outputs logs to TensorBoard.
     """
 
+
     if input_types is None:
         input_types = tuple(v.type for v in fn.inputs)
     else:
         assert len(input_types) == len(fn.inputs)
 
+    print("Projecting function...")
     device_to_fns, groups = project(fn, input_types)
 
     # Map between DistIR devices and pytorch ranks:
@@ -627,6 +629,7 @@ def run_pytorch(
         per_rank_inputs[device_to_rank[t.device]].append(a)
     assert len(fn.inputs) == len(inputs)
 
+    print("Launching distributed processes...")
     if debug_mock:
         return run_mock_multiprocess(per_rank_fns, per_rank_inputs)
     else:

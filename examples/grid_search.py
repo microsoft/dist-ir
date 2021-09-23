@@ -258,6 +258,7 @@ class GridSearch(ABC):
             for config in configs:
                 print(config)  # TODO add current date/time
                 self.run(config)
+                torch.cuda.empty_cache()
         elif self.backend == "simulate":
             process_map(self.run, configs)
         else:

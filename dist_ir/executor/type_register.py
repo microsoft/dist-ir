@@ -723,6 +723,7 @@ TypePropRegister = {
     ("Select", (TupleType,)): _select_prop_fn,
     ("Send", (Tensor,)): _send_prop_fn,
     ("Send", (Int32,)): _send_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(2)))): _sgd_prop_fn,
     ("SGDOptimizer", (tuple(Tensor for i in range(4)))): _sgd_prop_fn,
     ("SGDOptimizer", (tuple(Tensor for i in range(8)))): _sgd_prop_fn,
     ("SGDOptimizer", (tuple(Tensor for i in range(16)))): _sgd_prop_fn,

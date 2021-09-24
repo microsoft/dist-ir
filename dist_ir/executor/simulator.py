@@ -146,13 +146,17 @@ def _simulate_op(
         state.timestamps[device] += costs[device]
 
     # Update the live memory with any new activations.
-    live_memory_deltas = defaultdict(lambda: 0)
-    for output, out_edge in zip(outputs, op.outputs):
-        state.consumers[out_edge] = len(state.function.consumers[out_edge])
-        output_devices = _get_all_devices([output])
-        for output_device in output_devices:
-            live_memory_deltas[output_device] += output.size()
-    state.update_live_memory(live_memory_deltas)
+    # We skip updating memory for SGDOptimizer outputs because we
+    # assume in-place weight updates.
+    # TODO: Handle in-place ops more generally?
+    if op.op_type != "SGDOptimizer":
+        live_memory_deltas = defaultdict(lambda: 0)
+        for output, out_edge in zip(outputs, op.outputs):
+            state.consumers[out_edge] = len(state.function.consumers[out_edge])
+            output_devices = _get_all_devices([output])
+            for output_device in output_devices:
+                live_memory_deltas[output_device] += output.size()
+        state.update_live_memory(live_memory_deltas)
 
     # Update the peak memory.
     for device in state.live_memory:

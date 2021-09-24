@@ -4,8 +4,8 @@
 # Given the strategy DP/HP/PP, we run with increasing batch_sizes until we find
 # find the config with the highest throughput.
 
-if [[ $# -lt 5 || ! ( "$1" =~ ^(mlp|gpt)$ ) || ! ( "$3" =~ ^(DP|HP|PP)$ ) ]]; then
-    echo "Usage: $0 <mlp|gpt> <model size> <DP|HP|PP> <world size> <output file>"
+if [[ $# -lt 7 || ! ( "$1" =~ ^(mlp|gpt)$ ) || ! ( "$3" =~ ^(DP|HP|PP)$ ) ]]; then
+    echo "Usage: $0 <mlp|gpt> <model size> <DP|HP|PP> <world size> <start batch size> <end batch size> <output file>"
     echo "Runs a pure strategy using pytorch backend and saves output to <output file>"
     exit 1
     # TODO use --arguments, parse robustly

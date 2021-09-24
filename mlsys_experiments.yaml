@@ -1,12 +1,9 @@
 description: Run DistIR MLSys experiments
 
-
-
 target:
   service: amlk8s
   name: itphyperdgx2cl1 #v100-32gb-eus
   vc: hai8 #aml-ds
-
 
 environment:
   image: pytorch/pytorch:1.9.0-cuda10.2-cudnn7-devel
@@ -14,12 +11,14 @@ environment:
   setup:
     - pip install -r requirements.txt
 
-
 code:
   # local directory of the code. this will be uploaded to the server.
   # $CONFIG_DIR is expanded to the directory of this config file
   local_dir: $CONFIG_DIR
 
+data:
+  local_dir: data
+  remote_dir: distir-data
 
 jobs:
   - name: mlp-small_pure_baseline_dp
@@ -64,3 +63,12 @@ jobs:
       - ./examples/run_pure_baseline.sh gpt gpt3-xl DP 16 $$AMLT_OUTPUT_DIR/gpt3-xl_backend.csv
       - ./examples/run_pure_baseline.sh gpt gpt3-xl HP 16 $$AMLT_OUTPUT_DIR/gpt3-xl_backend.csv
       - ./examples/run_pure_baseline.sh gpt gpt3-xl PP 16 $$AMLT_OUTPUT_DIR/gpt3-xl_backend.csv
+  - name: gpt3-xl_pure_baseline_hp_2
+    sku: G16
+    command:
+      - echo "START"
+      - free -h
+      - mv $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_pure_baseline.sh gpt gpt3-xl HP 16 
+        1024 1048576
+        $$AMLT_OUTPUT_DIR/gpt3-xl_backend.csv

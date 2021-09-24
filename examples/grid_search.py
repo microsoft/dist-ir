@@ -7,6 +7,7 @@ from os import path
 import sys
 from typing import NamedTuple
 import traceback
+import torch
 
 import numpy as np
 import pandas as pd

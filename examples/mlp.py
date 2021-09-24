@@ -429,7 +429,14 @@ def run_mlp(
             simulation.dump_chrome_trace(trace_file)
         return simulation
     elif backend == "pytorch":
-        return run_pytorch(transformed_fn, transformed_input_data, world_size, use_gpu)
+        per_rank_outputs, runtimes = run_pytorch(
+            transformed_fn, transformed_input_data, world_size, use_gpu
+        )
+        if verbose:
+            latency = np.median(runtimes[-1])
+            print(f"Latency: {latency}")
+            print(f"Throughput: {batch_size / latency}")
+        return per_rank_outputs, runtimes
 
 
 def main(args):

@@ -419,12 +419,14 @@ def run_function(
             assert isinstance(output, tuple)
             for i, v in enumerate(op.outputs):
                 value_map[v] = output[i]
-                if torch.any(torch.isnan(output[i])):
-                    warn(f"NaNs in op {op} output {i}")
+                # TODO: Hide this under debug flag
+                # if torch.any(torch.isnan(output[i])):
+                #     warn(f"NaNs in op {op} output {i}")
         elif len(op.outputs) == 1:
             value_map[op.outputs[0]] = output
-            if torch.any(torch.isnan(output)):
-                warn(f"NaNs in op {op.name} output {0}")
+            # TODO: Hide this under debug flag
+            # if torch.any(torch.isnan(output)):
+            #    warn(f"NaNs in op {op.name} output {0}")
 
         # Free tensors that are not used again
         for v in op.inputs:
@@ -595,7 +597,6 @@ def run_pytorch(
     any thread raises an exception. `profile` runs the code with the PyTorch
     profiler and outputs logs to TensorBoard.
     """
-
 
     if input_types is None:
         input_types = tuple(v.type for v in fn.inputs)

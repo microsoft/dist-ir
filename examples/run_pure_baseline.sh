@@ -14,7 +14,9 @@ model=$1
 model_size=$2
 strategy=$3
 world_size=$4
-output_file=$5
+start_batch_size=$5
+end_batch_size=$6
+output_file=$7
 
 if [[ "$model" == "mlp" ]]; then
     module="mlp_grid_search"
@@ -40,8 +42,9 @@ case $strategy in
         ;;
 esac
 
-for ((i=10;i<20;i++)); do
-    batch_size=$((2**i))
+for ((i=$start_batch_size;i<=$end_batch_size;i=i*2)); do
+    #batch_size=$((2**i))
+    batch_size=$i
     command="examples.$module $model_path_arg --mode config --backend pytorch --use_gpu \
         --model_size $model_size --config $config $batch_size --all_world_sizes $world_size \
         --output_file $output_file --append_output_file \

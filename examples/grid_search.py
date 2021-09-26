@@ -229,7 +229,7 @@ class GridSearch(ABC):
                 latency = max([simulation.timestamps[d] for d in simulation.timestamps])
                 peak_memory = max(
                     [simulation.peak_memory[d] for d in simulation.peak_memory]
-                ) / (2.0 ** 20)
+                )
             elif self.backend == "pytorch":
                 print(f"Running with PyTorch backend...")
                 world_size = config.dp_degree * config.hp_degree * config.pp_degree

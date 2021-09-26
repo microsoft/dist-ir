@@ -82,7 +82,8 @@ def _filter_extra_outputs(function):
     return filtered_function.finalize()
 
 
-def _set_model_size(function, n_layer, n_head, d_embd):
+def _set_model_size(function, n_layer, n_head, d_embd, dtype):
+    dist_ir_dtype = Float32 if dtype == "fp32" else Float16
     function, attribute_map = sanitize_unhashable_attributes(function)
 
     # Prepare a list of the existing Transformer blocks in the function.
@@ -134,11 +135,11 @@ def _set_model_size(function, n_layer, n_head, d_embd):
             if inp.name == "wte.weight":
                 vocab_size = inp.type.shape[0]
                 shape = (vocab_size, d_embd)
-                typ = Tensor(shape=shape, device=inp.type.device, dtype=inp.type.dtype)
+                typ = Tensor(shape=shape, device=inp.type.device, dtype=dist_ir_dtype())
             elif inp.name == "wpe.weight":
                 max_position_embeddings = inp.type.shape[0]
                 shape = (max_position_embeddings, d_embd)
-                typ = Tensor(shape=shape, device=inp.type.device, dtype=inp.type.dtype)
+                typ = Tensor(shape=shape, device=inp.type.device, dtype=dist_ir_dtype())
             elif (
                 "ln_1.weight" in inp.name
                 or "ln_1.bias" in inp.name
@@ -165,7 +166,7 @@ def _set_model_size(function, n_layer, n_head, d_embd):
             elif "mlp.c_proj.bias" in inp.name:
                 shape = (d_embd,)
             if shape != inp.type.shape:
-                typ = Tensor(shape=shape, device=inp.type.device, dtype=inp.type.dtype)
+                typ = Tensor(shape=shape, device=inp.type.device, dtype=dist_ir_dtype())
             else:
                 typ = inp.type
             value_map[inp] = transformed_function.add_input_value(inp.name, typ)
@@ -381,8 +382,12 @@ def import_function_and_get_input_data(
     return function, input_data
 
 
-def resize_function_and_input_data(function, input_data, n_layer, n_head, d_embd):
-    function, inputs_to_remove = _set_model_size(function, n_layer, n_head, d_embd)
+def resize_function_and_input_data(
+    function, input_data, n_layer, n_head, d_embd, dtype
+):
+    function, inputs_to_remove = _set_model_size(
+        function, n_layer, n_head, d_embd, dtype
+    )
 
     # If we shrunk the model, remove any unnecessary inputs.
     for i in inputs_to_remove[::-1]:
@@ -536,7 +541,7 @@ def get_transformed_function_and_input_data(
     )
 
     function, input_data = resize_function_and_input_data(
-        function, input_data, n_layer, n_head, d_embd
+        function, input_data, n_layer, n_head, d_embd, dtype
     )
 
     input_ids = create_input_ids(batch_size)

@@ -45,12 +45,19 @@ def get_typed_input_values(inputs, batch_size, input_dim, output_dim):
     return tuple(typed_inputs)
 
 
-def get_input_data(inputs, batch_size, input_dim, output_dim, device, dtype):
+def get_input_data(
+    inputs, batch_size, input_dim, output_dim, device, dtype, uniform_weight_sizes=False
+):
     input_data = []
     x = np.random.normal(0, 0.02, size=(batch_size, input_dim))
     z = np.random.normal(0, 0.02, size=(batch_size, output_dim))
     n = np.int64(batch_size)
-    weights = [np.random.normal(0, 0.02, size=inp.type.shape) for inp in inputs[3:]]
+    if uniform_weight_sizes:
+        combined_size = tuple([len(inputs) - 3] + list(inputs[3].type.shape))
+        all_weights = np.random.normal(0, 0.02, size=combined_size)
+        weights = [all_weights[i] for i in range(len(all_weights))]
+    else:
+        weights = [np.random.normal(0, 0.02, size=inp.type.shape) for inp in inputs[3:]]
     input_data = [x, z, n] + weights
     input_data = [v.astype(dtype) if i != 2 else v for i, v in enumerate(input_data)]
     input_data = [ConcreteValue(v, device) for v in input_data]
@@ -391,6 +398,7 @@ def run_mlp(
             output_dim,
             topology.devices[0],
             numpy_dtype,
+            uniform_weight_sizes=(input_dim == hidden_dim and input_dim == output_dim),
         )
 
     if world_size > 1:

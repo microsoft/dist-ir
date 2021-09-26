@@ -74,6 +74,7 @@ class GPTGridSearch(GridSearch):
                 n_layer,
                 n_head,
                 d_embd,
+                self.dtype,
             )
 
         model, input_data = self.models_and_input_data[model_size]

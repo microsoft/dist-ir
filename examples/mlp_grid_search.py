@@ -27,8 +27,8 @@ class MLPGridSearch(GridSearch):
         model_params = {
             "mlp-xs": (8, 512),
             "mlp-small": (16, 8192),
-            "mlp-medium": (64, 16384),
-            "mlp-large": (128, 32768),
+            "mlp-medium": (32, 16384),
+            "mlp-large": (64, 32768),
         }
         super().__init__(
             model_params,
@@ -69,6 +69,7 @@ class MLPGridSearch(GridSearch):
                 dim,
                 self.topology.devices[0],
                 dtype,
+                uniform_weight_sizes=True,
             )
         else:
             input_data = mlp.get_typed_input_values(fn.inputs, batch_size, dim, dim)

@@ -53,9 +53,8 @@ def get_input_data(
     z = np.random.normal(0, 0.02, size=(batch_size, output_dim))
     n = np.int64(batch_size)
     if uniform_weight_sizes:
-        combined_size = tuple([len(inputs) - 3] + list(inputs[3].type.shape))
-        all_weights = np.random.normal(0, 0.02, size=combined_size)
-        weights = [all_weights[i] for i in range(len(all_weights))]
+        weight = np.random.normal(0, 0.02, size=inputs[3].type.shape)
+        weights = [weight for _ in range(len(inputs[3:]))]
     else:
         weights = [np.random.normal(0, 0.02, size=inp.type.shape) for inp in inputs[3:]]
     input_data = [x, z, n] + weights

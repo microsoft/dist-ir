@@ -189,6 +189,10 @@ def calibrate_device_parameters(dtype):
     Y = np.zeros(shape=(n,))
     data = []
     device = Device(0, "gpu")
+    max_inputs = [
+        torch.randn(size=(max(all_batch_sizes), max(all_input_dims)), dtype=pytorch_dtype),
+        torch.randn(size=(max(all_input_dims), max(all_output_dims)), dtype=pytorch_dtype),
+    ]
     for i, (batch_size, input_dim, output_dim) in enumerate(
         tqdm(list(itertools.product(all_batch_sizes, all_input_dims, all_output_dims)))
     ):
@@ -204,8 +208,8 @@ def calibrate_device_parameters(dtype):
         _, runtimes = run_pytorch(
             fn=fn,
             inputs=[
-                torch.randn(size=fn.inputs[0].type.shape, dtype=pytorch_dtype),
-                torch.randn(size=fn.inputs[1].type.shape, dtype=pytorch_dtype),
+                max_inputs[0][:batch_size, :input_dim],
+                max_inputs[1][:input_dim, :output_dim]
             ],
             use_gpu=True,
             num_repetitions=NUM_REPETITIONS,
@@ -223,6 +227,7 @@ def calibrate_device_parameters(dtype):
                 "latency": pytorch_latency,
             }
         )
+        torch.cuda.empty_cache()
 
     df = pd.DataFrame(data)
     df.to_csv("matmul_benchmark.csv")

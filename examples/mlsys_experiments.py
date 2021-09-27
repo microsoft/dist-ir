@@ -136,7 +136,7 @@ if __name__ == "__main__":
         help="Calibrate all parameters",
     )
     parser.add_argument(
-        "--dtype", choices=["fp32", "fp16"], required=True, help="Dtype"
+        "--dtype", choices=["fp32", "fp16"], default="fp16", help="dtype"
     )
 
     args = parser.parse_args()

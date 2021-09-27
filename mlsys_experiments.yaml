@@ -21,6 +21,10 @@ data:
   remote_dir: distir-data
 
 jobs:
+  - name: calibrate_simulator_parameters
+    sku: G16
+    command:
+      - python -m examples.mlsys_experiments --mode calibrate --calibrate_all --output_file $$AMLT_OUTPUT_DIR/dgx.fp16.calibration_parameters.json
   - name: mlp-small_pure_baseline_dp
     sku: G16
     command:
@@ -63,12 +67,75 @@ jobs:
       - ./examples/run_pure_baseline.sh gpt gpt3-xl DP 16 $$AMLT_OUTPUT_DIR/gpt3-xl_backend.csv
       - ./examples/run_pure_baseline.sh gpt gpt3-xl HP 16 $$AMLT_OUTPUT_DIR/gpt3-xl_backend.csv
       - ./examples/run_pure_baseline.sh gpt gpt3-xl PP 16 $$AMLT_OUTPUT_DIR/gpt3-xl_backend.csv
+  - name: gpt3-xl_pure_baseline_dp_2
+    sku: G16
+    command:
+      - echo "START"
+      - free -h
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_pure_baseline.sh gpt gpt3-xl DP 16 
+        1024 1048576
+        $$AMLT_OUTPUT_DIR/gpt3-xl_backend.csv
   - name: gpt3-xl_pure_baseline_hp_2
     sku: G16
     command:
       - echo "START"
       - free -h
-      - mv $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
       - ./examples/run_pure_baseline.sh gpt gpt3-xl HP 16 
         1024 1048576
         $$AMLT_OUTPUT_DIR/gpt3-xl_backend.csv
+  - name: gpt3-xl_pure_baseline_pp_2
+    sku: G16
+    command:
+      - echo "START"
+      - free -h
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_pure_baseline.sh gpt gpt3-xl PP 16 
+        1024 1048576
+        $$AMLT_OUTPUT_DIR/gpt3-xl_backend.csv
+  - name: gpt3-13B_pure_baseline_dp_2
+    sku: G16
+    command:
+      - echo "START"
+      - free -h
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_pure_baseline.sh gpt gpt3-13B DP 16 
+        1024 1048576
+        $$AMLT_OUTPUT_DIR/gpt3-13B_backend.csv
+  - name: gpt3-13B_pure_baseline_hp_2
+    sku: G16
+    command:
+      - echo "START"
+      - free -h
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_pure_baseline.sh gpt gpt3-13B HP 16 
+        1024 1048576
+        $$AMLT_OUTPUT_DIR/gpt3-13B_backend.csv
+  - name: gpt3-13B_pure_baseline_pp_2
+    sku: G16
+    command:
+      - echo "START"
+      - free -h
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_pure_baseline.sh gpt gpt3-13B PP 16 
+        1024 1048576
+        $$AMLT_OUTPUT_DIR/gpt3-13B_backend.csv
+  - name: gpt3-175B_pure_baseline_hp_2
+    sku: G16
+    command:
+      - echo "START"
+      - free -h
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_pure_baseline.sh gpt gpt3-175B HP 16 
+        4 1048576
+        $$AMLT_OUTPUT_DIR/gpt3-175B_backend.csv
+  - name: gpt3-175B_pure_baseline_pp_2
+    sku: G16
+    command:
+      - echo "START"
+      - free -h
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_pure_baseline.sh gpt gpt3-175B PP 16 
+        1024 1048576
+        $$AMLT_OUTPUT_DIR/gpt3-175B_backend.csv

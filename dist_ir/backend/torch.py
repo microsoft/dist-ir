@@ -456,6 +456,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
 
     if ctx.use_gpu:
         # Move inputs to GPU
+        print(f"Rank {rank}: Moving inputs to GPU...")
         inputs = [t.cuda(rank) for t in inputs]
 
     events = []
@@ -479,9 +480,10 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
         return None, None
 
     def run(p=None):
-        for _ in range(num_warmup_steps + num_repetitions):
+        for i in range(num_warmup_steps + num_repetitions):
             add_event()
             # TODO: Handle failures here?
+            print(f"Rank {rank}: Running step {i}...")
             outputs = run_function(ctx, fn, inputs, rank)
             if ctx.world_size > 1:
                 torch.distributed.barrier()
@@ -510,7 +512,11 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
 
     if ctx.use_gpu:
         # Move outputs back to cpu
-        outputs = [t.cpu() for t in outputs]
+        try:
+            outputs = [t.cpu() for t in outputs]
+        except Exception as e:
+            print(outputs)
+            outputs = None
         torch.cuda.synchronize()
         runtimes = [
             events[i].elapsed_time(events[i + 1]) / 1e3 for i in range(len(events) - 1)

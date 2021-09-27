@@ -34,7 +34,7 @@ case $strategy in
         config="1 $world_size 1 1"
         ;;
     PP)
-        config="1 1 $world_size 32"  # TODO num_microbatches?
+        config="1 1 $world_size 128"  # TODO num_microbatches?
         ;;
     *)
         echo "Unknown strategy"

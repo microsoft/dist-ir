@@ -99,6 +99,12 @@ class Parser(ArgumentParser):
             default=False,
             help="Use GPU with PyTorch backend",
         )
+        self.add_argument(
+            "--measure_peak_memory",
+            action="store_true",
+            default=False,
+            help="Measure peak memory usage",
+        )
 
     def add_grid_search_config_arguments(self, defaults):
         # 3 modes: generate & search grid, run from file, run single config

@@ -455,8 +455,8 @@ def run_function(
 
         if ctx.measure_peak_memory:
             torch.cuda.synchronize(rank)
-            memory_usage = get_memory_usage()
-            peak_memory = max(peak_memory, memory_usage.allocated_memory)
+            memory_usage = get_memory_usage(rank)
+            peak_memory = max(peak_memory, memory_usage.allocated)
 
         # Free tensors that are not used again
         for v in op.inputs:
@@ -639,6 +639,9 @@ def run_pytorch(
     of the peak memory usage reported by PyTorch (note that this requires
     synchronizing after every op, which will result in runtime overhead).
     """
+
+    if measure_peak_memory:
+        assert use_gpu
 
     if input_types is None:
         input_types = tuple(v.type for v in fn.inputs)

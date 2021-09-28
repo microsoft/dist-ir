@@ -289,7 +289,13 @@ def simulate(function, input_types, topology, allreduce_parameters=None):
     return simulation
 
 
-def run_pytorch(function, input_data, world_size, use_gpu=torch.cuda.is_available()):
+def run_pytorch(
+    function,
+    input_data,
+    world_size,
+    use_gpu=torch.cuda.is_available(),
+    measure_peak_memory=False,
+):
     # TODO: Move this to a utils file
     def _resolve_dtype(dtype):
         if dtype == np.int32:
@@ -326,6 +332,7 @@ def run_pytorch(function, input_data, world_size, use_gpu=torch.cuda.is_availabl
         pytorch_input_data,
         input_types=input_types,
         use_gpu=use_gpu,
+        measure_peak_memory=measure_peak_memory,
         num_warmup=5,
         num_repetitions=10,
     )
@@ -351,6 +358,7 @@ def run_mlp(
     network_bandwidth,
     trace_file,
     skip_allgathers=False,
+    measure_peak_memory=False,
     verbose=False,
 ):
     dist_ir_dtype = Float32 if dtype == "fp32" else Float16
@@ -436,16 +444,21 @@ def run_mlp(
         return simulation
     elif backend == "pytorch":
         results = run_pytorch(
-            transformed_fn, transformed_input_data, world_size, use_gpu
+            transformed_fn,
+            transformed_input_data,
+            world_size,
+            use_gpu=use_gpu,
+            measure_peak_memory=measure_peak_memory,
         )
         if verbose:
             print(f"Latency: {results.latency * 1000:.2f} ms")
             print(f"Throughput: {batch_size / results.latency:.2f} samples / second")
             print(f"Peak memory: {results.peak_memory / 1e9:.2f} GB")
-        return per_rank_outputs, runtimes
+        return results
 
 
 def main(args):
+    # TODO: Add names to arguments
     run_mlp(
         args.phase,
         args.backend,
@@ -466,6 +479,7 @@ def main(args):
         args.network_bandwidth,
         args.trace_file,
         args.skip_allgathers,
+        args.measure_peak_memory,
         args.verbose,
     )
 

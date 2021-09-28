@@ -60,12 +60,13 @@ def _run_gpt(
     if use_real_weights:
         if use_pytorch_backend:
             world_size = dp_degree * hp_degree * pp_degree
-            outputs, _ = run_pytorch(
+            results = run_pytorch(
                 transformed_function,
                 initialized_input_data,
                 world_size,
                 use_gpu=torch.cuda.device_count() >= world_size,
             )
+            outputs = results.per_rank_outputs
             outputs = tuple(
                 ConcreteValue(v.numpy(), None if t.type is None else t.type.device)
                 for v, t in zip(

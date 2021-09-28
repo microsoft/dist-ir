@@ -88,7 +88,7 @@ def network_bandwidth_debug():
             n = sizes[j]
             fn = _allreduce(topology.devices[1:], m, n)
             fn = infer_types(fn, fn.inputs)
-            _, runtimes = run_pytorch(
+            results = run_pytorch(
                 fn=fn,
                 inputs=[
                     torch.randn(size=fn.inputs[i].type.shape, dtype=torch.float32)
@@ -98,7 +98,7 @@ def network_bandwidth_debug():
                 num_repetitions=NUM_REPETITIONS,
                 num_warmup=NUM_WARMUP,
             )
-            real_latency = np.median(runtimes[0])
+            real_latency = results.latency
             ex = Simulator(CostModel(topology))
             state = ex.interpret(fn, tuple(inp.type for inp in fn.inputs))
             simulated_latency = np.max([state.timestamps[d] for d in state.timestamps])
@@ -145,22 +145,22 @@ def calibrate_network_bandwidth(dtype):
     for i, src in enumerate(devices):
         # TODO: Calibrate CPU to GPU transfer time properly
         bandwidths.append([0, src.device_id, 64])
-        for dst in devices[i+1:]:
+        for dst in devices[i + 1 :]:
             for j, size in enumerate(tqdm(all_sizes)):
                 fn = _send(src, dst, dist_ir_dtype, m=size, n=size)
                 fn = infer_types(fn, fn.inputs)
                 X[j][0] = fn.inputs[0].type.size() / BYTES_IN_Gb
                 X[j][1] = 1
 
-                _, runtimes = run_pytorch(
+                results = run_pytorch(
                     fn=fn,
                     inputs=[max_input[:size, :size]],
                     use_gpu=True,
                     num_repetitions=NUM_REPETITIONS,
                     num_warmup=NUM_WARMUP,
                 )
-                pytorch_latency = np.median(runtimes[0])
-                Y[j] = pytorch_latency
+                pytorch_latency = results.latency
+                Y[i] = pytorch_latency
                 torch.cuda.empty_cache()
 
             reg = LinearRegression(positive=True, fit_intercept=False).fit(X, Y)
@@ -188,8 +188,12 @@ def calibrate_device_parameters(dtype):
     data = []
     device = Device(0, "gpu")
     max_inputs = [
-        torch.randn(size=(max(all_batch_sizes), max(all_input_dims)), dtype=pytorch_dtype),
-        torch.randn(size=(max(all_input_dims), max(all_output_dims)), dtype=pytorch_dtype),
+        torch.randn(
+            size=(max(all_batch_sizes), max(all_input_dims)), dtype=pytorch_dtype
+        ),
+        torch.randn(
+            size=(max(all_input_dims), max(all_output_dims)), dtype=pytorch_dtype
+        ),
     ]
     for i, (batch_size, input_dim, output_dim) in enumerate(
         tqdm(list(itertools.product(all_batch_sizes, all_input_dims, all_output_dims)))
@@ -203,17 +207,17 @@ def calibrate_device_parameters(dtype):
         X[i][1] = flops
         X[i][2] = 1
 
-        _, runtimes = run_pytorch(
+        results = run_pytorch(
             fn=fn,
             inputs=[
                 max_inputs[0][:batch_size, :input_dim],
-                max_inputs[1][:input_dim, :output_dim]
+                max_inputs[1][:input_dim, :output_dim],
             ],
             use_gpu=True,
             num_repetitions=NUM_REPETITIONS,
             num_warmup=NUM_WARMUP,
         )
-        pytorch_latency = np.median(runtimes[0])
+        pytorch_latency = results.latency
         Y[i] = pytorch_latency
         data.append(
             {
@@ -240,7 +244,9 @@ def calibrate_allreduce_parameters(dtype):
     pytorch_dtype = torch.float32 if dtype == "fp32" else torch.float16
     all_input_dims = [2 ** i for i in range(11, 14)]
     all_output_dims = [2 ** i for i in range(11, 14)]
-    max_input = torch.randn(size=(max(all_input_dims), max(all_output_dims)), dtype=pytorch_dtype)
+    max_input = torch.randn(
+        size=(max(all_input_dims), max(all_output_dims)), dtype=pytorch_dtype
+    )
     n = len(all_input_dims) * len(all_output_dims)
     X = np.zeros(shape=(n, 3))
     Y = np.zeros(shape=(n,))
@@ -261,7 +267,7 @@ def calibrate_allreduce_parameters(dtype):
             X[i][1] = num_devices
             X[i][2] = 1
 
-            _, runtimes = run_pytorch(
+            results = run_pytorch(
                 fn=fn,
                 inputs=[
                     max_input[:input_dim, :output_dim] for _ in range(len(fn.inputs))
@@ -270,7 +276,7 @@ def calibrate_allreduce_parameters(dtype):
                 num_repetitions=NUM_REPETITIONS,
                 num_warmup=NUM_WARMUP,
             )
-            pytorch_latency = np.median(runtimes[0])
+            pytorch_latency = results.latency
             Y[i] = pytorch_latency
             torch.cuda.empty_cache()
 

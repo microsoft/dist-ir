@@ -35,8 +35,23 @@ DistributedContext = NamedTuple(
     debug_stacktrace=bool,
     # Profile flag
     profile=bool,
+    # Memory tracking flag
+    measure_peak_memory=bool,
 )
 
+MemoryUsage = NamedTuple(
+    "MemoryUsage",
+    total=int,
+    reserved=int,
+    allocated=int,
+)
+
+BackendResults = NamedTuple(
+    "BackendResults",
+    per_rank_outputs=list,
+    latency=float,
+    peak_memory=int,
+)
 
 # TODO organize by category
 
@@ -401,11 +416,21 @@ def run_function(
         value_map[v] = x
     assert len(fn.inputs) == len(inputs)
 
-    def print_memory_usage(rank):
+    def get_memory_usage(rank, verbose=False):
         t = torch.cuda.get_device_properties(rank).total_memory
         r = torch.cuda.memory_reserved(rank)
         a = torch.cuda.memory_allocated(rank)
-        print(f"[Rank {rank}] Total: {t} Reserved: {r} Allocated: {a} Free: {r-a}")
+        if verbose:
+            print(f"[Rank {rank}] Total: {t} Reserved: {r} Allocated: {a} Free: {r-a}")
+        return MemoryUsage(t, r, a)
+
+    if ctx.measure_peak_memory:
+        torch.cuda.synchronize(rank)
+        memory_usage = get_memory_usage(rank)
+        allocated_memory = memory_usage.allocated
+        peak_memory = allocated_memory
+    else:
+        peak_memory = 0.0
 
     # Run ops
     for op in fn.ops:
@@ -428,13 +453,18 @@ def run_function(
             # if torch.any(torch.isnan(output)):
             #    warn(f"NaNs in op {op.name} output {0}")
 
+        if ctx.measure_peak_memory:
+            torch.cuda.synchronize(rank)
+            memory_usage = get_memory_usage()
+            peak_memory = max(peak_memory, memory_usage.allocated_memory)
+
         # Free tensors that are not used again
         for v in op.inputs:
             if v in value_map and fn.last_use(v) == op and not (v in fn.outputs):
                 del value_map[v]
 
     # Return outputs
-    return tuple(value_map[v] for v in fn.outputs)
+    return tuple(value_map[v] for v in fn.outputs), peak_memory
 
 
 def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
@@ -470,28 +500,28 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
 
     if ctx.debug_stacktrace:
         try:
-            outputs = run_function(ctx, fn, inputs, rank)
+            outputs, peak_memory = run_function(ctx, fn, inputs, rank)
             if ctx.world_size > 1:
                 torch.distributed.barrier()
         except Exception as e:
             print_exc()
         print(f"{rank}: PyTorch backend exiting after 1 run in debug mode.")
         dist.destroy_process_group()
-        return None, None
+        return BackendResults(None, None, None)
 
     def run(p=None):
         for i in range(num_warmup_steps + num_repetitions):
             add_event()
             # TODO: Handle failures here?
             print(f"Rank {rank}: Running step {i}...")
-            outputs = run_function(ctx, fn, inputs, rank)
+            outputs, peak_memory = run_function(ctx, fn, inputs, rank)
             if ctx.world_size > 1:
                 torch.distributed.barrier()
             # TODO do we need a torch.cuda.synchronize here?
             add_event()
             if p is not None:
                 p.step()
-        return outputs
+        return outputs, peak_memory
 
     if ctx.profile:
         with torch.profiler.profile(
@@ -506,9 +536,9 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
                 f"{fn.name}_{rank}_profile"
             ),
         ) as p:
-            outputs = run(p)
+            outputs, peak_memory = run(p)
     else:
-        outputs = run()
+        outputs, peak_memory = run()
 
     if ctx.use_gpu:
         # Move outputs back to cpu
@@ -525,7 +555,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
         runtimes = [events[i + 1] - events[i] for i in range(len(events) - 1)]
 
     dist.destroy_process_group()
-    return outputs, runtimes[num_warmup_steps:]
+    return outputs, runtimes[num_warmup_steps:], peak_memory
 
 
 def run_mock_multiprocess(
@@ -540,16 +570,14 @@ def run_mock_multiprocess(
     ctx = DistributedContext(use_gpu=False, groups=None)
 
     per_rank_outputs = [
-        run_function(ctx, fn, inputs, debug_mock=True)
+        run_function(ctx, fn, inputs, debug_mock=True)[0]
         for rank, fn, inputs in zip(
             range(_mock_world_size), per_rank_functions, per_rank_inputs
         )
     ]
-    mock_runtimes = [
-        [0.0 for _ in range(num_warmup + num_repetitions)]
-        for _ in range(_mock_world_size)
-    ]
-    return (per_rank_outputs, mock_runtimes)
+    mock_latency = 0.0
+    mock_peak_memory = 0.0
+    return BackendResults(per_rank_outputs, mock_latency, mock_peak_memory)
 
 
 def run_multiprocesses(
@@ -572,8 +600,13 @@ def run_multiprocesses(
     if ctx.debug_stacktrace:
         sys.exit(1)
 
-    per_rank_outputs, runtimes = zip(*outputs)
-    return per_rank_outputs, runtimes
+    per_rank_outputs, per_rank_runtimes, per_rank_peak_memory = zip(*outputs)
+    per_rank_runtimes = np.array(per_rank_runtimes)
+    latency = np.median(
+        [np.max(per_rank_runtimes[:, i]) for i in range(len(per_rank_runtimes[0]))]
+    )
+    peak_memory = np.max(per_rank_peak_memory)
+    return BackendResults(per_rank_outputs, latency, peak_memory)
 
 
 def run_pytorch(
@@ -586,6 +619,7 @@ def run_pytorch(
     debug_mock=False,
     debug_stacktrace=False,
     profile=False,
+    measure_peak_memory=False,
 ):
     """Project `fn` and run on `inputs` over `num_devices` devices using the
     PyTorch backend.
@@ -601,7 +635,9 @@ def run_pytorch(
     mock versions that return arbitrary values. `debug_stacktrace` wraps the
     run function with a try-catch block and prints the stack trace and exits if
     any thread raises an exception. `profile` runs the code with the PyTorch
-    profiler and outputs logs to TensorBoard.
+    profiler and outputs logs to TensorBoard. `measure_peak_memory` keeps track
+    of the peak memory usage reported by PyTorch (note that this requires
+    synchronizing after every op, which will result in runtime overhead).
     """
 
     if input_types is None:
@@ -629,6 +665,7 @@ def run_pytorch(
         device_to_rank=device_to_rank,
         debug_stacktrace=debug_stacktrace,
         profile=profile,
+        measure_peak_memory=measure_peak_memory,
     )
 
     per_rank_inputs = [[] for _ in range(world_size)]

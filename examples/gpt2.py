@@ -611,7 +611,7 @@ def run_pytorch(
             f"Specified world size is {world_size}, but only "
             f"{torch.cuda.device_count()} GPUs available"
         )
-    per_rank_outputs, runtimes = torch_backend.run_pytorch(
+    return torch_backend.run_pytorch(
         function,
         pytorch_input_data,
         input_types=input_types,
@@ -620,7 +620,6 @@ def run_pytorch(
         num_repetitions=10,
         debug_stacktrace=debug_stacktrace,
     )
-    return per_rank_outputs, runtimes
 
 
 def main(args):
@@ -668,18 +667,16 @@ def main(args):
         simulation.print_summary(args.batch_size)
     elif args.backend == "pytorch":
         world_size = args.dp_degree * args.hp_degree * args.pp_degree
-        per_rank_outputs, runtimes = run_pytorch(
+        results = run_pytorch(
             transformed_function,
             initialized_input_data,
             world_size,
             use_gpu=args.use_gpu,
             debug_stacktrace=args.debug_stacktrace,
         )
-        print(f"Latency: {np.median(runtimes[-1])*1000:.2f} ms")
-        print(
-            f"Throughput: {args.batch_size / np.median(runtimes[-1]):.2f} "
-            f"samples/second"
-        )
+        print(f"Latency: {results.latency*1000:.2f} ms")
+        print(f"Throughput: {args.batch_size / results.latency:.2f} " f"samples/second")
+        print(f"Peak memory: {results.peak_memory / 1e9:.2f} GB")
 
 
 if __name__ == "__main__":

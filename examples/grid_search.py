@@ -233,10 +233,9 @@ class GridSearch(ABC):
             elif self.backend == "pytorch":
                 print(f"Running with PyTorch backend...")
                 world_size = config.dp_degree * config.hp_degree * config.pp_degree
-                _, runtimes = self.pytorch(transformed_fn, input_data, world_size)
-                latency = np.median(runtimes[-1])
-                # TODO: Measure peak memory?
-                peak_memory = 0
+                results = self.pytorch(transformed_fn, input_data, world_size)
+                latency = results.latency
+                peak_memory = results.peak_memory
         except Exception as e:
             print(f"Failed to run the configuration {config}:")
             traceback.print_exc()

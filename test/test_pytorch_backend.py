@@ -166,12 +166,14 @@ def test_owt(num_devices, num_layers, use_gpu, dtype):
     assert all(np.allclose(y, o) for y, o in zip(ys, output_arrays))
 
     # Run per-rank modules using PyTorch backend:
-    per_rank_outputs, _ = run_pytorch(
+    results = run_pytorch(
         fn, [torch.tensor(a).to(torch_dtype) for a in input_arrays], use_gpu=use_gpu
     )
 
     # Check outputs:
-    assert all(np.allclose(y[0], o) for y, o in zip(per_rank_outputs, output_arrays))
+    assert all(
+        np.allclose(y[0], o) for y, o in zip(results.per_rank_outputs, output_arrays)
+    )
 
 
 def test_dp_mp_matmuls():
@@ -232,9 +234,9 @@ def test_single_device(use_gpu):
 
     x = torch.randn(4, 4)
     inputs = (x,)
-    outputs, _ = run_pytorch(fn, inputs, use_gpu=use_gpu)
-    print(outputs)
-    assert torch.allclose(torch.matmul(x, x), outputs[0][0])
+    results = run_pytorch(fn, inputs, use_gpu=use_gpu)
+    print(results.per_rank_outputs)
+    assert torch.allclose(torch.matmul(x, x), results.per_rank_outputs[0][0])
 
 
 @pytest.mark.parametrize(
@@ -261,8 +263,8 @@ def test_send_recv(use_gpu):
 
     x = torch.randn(4, 4)
     inputs = (x,)
-    outputs, _ = run_pytorch(fn, inputs, use_gpu=use_gpu)
-    assert torch.allclose(x, outputs[1][0])
+    results = run_pytorch(fn, inputs, use_gpu=use_gpu)
+    assert torch.allclose(x, results.per_rank_outputs[1][0])
 
 
 @pytest.mark.parametrize(
@@ -324,16 +326,16 @@ def test_dp_mlp(use_gpu, dtype):
         y = torch.relu(y)
 
     # Project and run on backend:
-    per_rank_outputs, runtimes = run_pytorch(
+    results = run_pytorch(
         fn,
         convert_inputs_dp(weights, x),
         use_gpu=use_gpu,
     )
 
     # Check outputs:
-    assert torch.allclose(y, torch.cat([o[0] for o in per_rank_outputs], 0))
+    assert torch.allclose(y, torch.cat([o[0] for o in results.per_rank_outputs], 0))
 
-    return runtimes
+    return results.latency
 
 
 def test_separate_projection_types():
@@ -349,14 +351,14 @@ def test_separate_projection_types():
     x = torch.randn(4, 4)
     inputs = [x]
     input_types = [Tensor(Float32(), (4, 4), d1)]
-    outputs, _ = run_pytorch(fn, inputs, input_types=input_types)
-    assert torch.allclose(x, outputs[1][0])
+    results = run_pytorch(fn, inputs, input_types=input_types)
+    assert torch.allclose(x, results.per_rank_outputs[1][0])
 
     x = torch.randn(8, 8)
     inputs = [x]
     input_types = [Tensor(Float32(), (8, 8), d1)]
-    outputs, _ = run_pytorch(fn, inputs, input_types=input_types)
-    assert torch.allclose(x, outputs[1][0])
+    results = run_pytorch(fn, inputs, input_types=input_types)
+    assert torch.allclose(x, results.per_rank_outputs[1][0])
 
 
 if __name__ == "__main__":

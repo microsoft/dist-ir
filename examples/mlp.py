@@ -321,7 +321,7 @@ def run_pytorch(function, input_data, world_size, use_gpu=torch.cuda.is_availabl
             for i in range(len(input_data))
         ),
     )
-    per_rank_outputs, runtimes = torch_backend.run_pytorch(
+    return torch_backend.run_pytorch(
         function,
         pytorch_input_data,
         input_types=input_types,
@@ -329,7 +329,6 @@ def run_pytorch(function, input_data, world_size, use_gpu=torch.cuda.is_availabl
         num_warmup=5,
         num_repetitions=10,
     )
-    return per_rank_outputs, runtimes
 
 
 def run_mlp(
@@ -436,13 +435,13 @@ def run_mlp(
             simulation.dump_chrome_trace(trace_file)
         return simulation
     elif backend == "pytorch":
-        per_rank_outputs, runtimes = run_pytorch(
+        results = run_pytorch(
             transformed_fn, transformed_input_data, world_size, use_gpu
         )
         if verbose:
-            latency = np.median(runtimes[-1])
-            print(f"Latency: {latency}")
-            print(f"Throughput: {batch_size / latency}")
+            print(f"Latency: {results.latency * 1000:.2f} ms")
+            print(f"Throughput: {batch_size / results.latency:.2f} samples / second")
+            print(f"Peak memory: {results.peak_memory / 1e9:.2f} GB")
         return per_rank_outputs, runtimes
 
 

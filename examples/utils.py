@@ -1,5 +1,6 @@
 import json
 
+
 def load_simulation_parameters_to_args(args):
     if args.simulation_parameters_file is not None:
         with open(args.simulation_parameters_file, "r") as f:

@@ -423,6 +423,14 @@ def get_memory_usage(rank, verbose=False):
     return MemoryUsage(t, r, a)
 
 
+def add_event(ctx, events):
+    if ctx.use_gpu:
+        events.append(torch.cuda.Event(enable_timing=True))
+        events[-1].record()
+    else:
+        events.append(time.perf_counter())
+
+
 def run_function(
     ctx: DistributedContext,
     fn: Function,
@@ -451,8 +459,7 @@ def run_function(
     else:
         peak_memory = 0.0
 
-    if record_op_runtimes:
-        op_runtimes = []
+    op_runtime_events = []
 
     # Run ops
     for op in fn.ops:
@@ -461,26 +468,10 @@ def run_function(
         kwargs["ctx"] = ctx
 
         if record_op_runtimes:
-            if ctx.use_gpu:
-                torch.cuda.synchronize(device=rank)
-            start = time.time()
+            add_event(ctx, op_runtime_events)
         output = op_to_torch[op.op_type](*inputs, **kwargs)
         if record_op_runtimes:
-            if ctx.use_gpu:
-                torch.cuda.synchronize(device=rank)
-            end = time.time()
-            # TODO: Remove debug code
-            if op.op_type == "RecvP2P":
-                print(
-                    f"Rank {rank} recv: from_d={kwargs['from_d']}, group={kwargs['group']}, "
-                    f"start={start}, end={end}, duration={end - start}"
-                )
-            elif op.op_type == "SendP2P":
-                print(
-                    f"Rank {rank} send: to_d={kwargs['to_d']}, group={kwargs['group']}, "
-                    f"start={start}, end={end}, duration={end - start}"
-                )
-            op_runtimes.append(end - start)
+            add_event(ctx, op_runtime_events)
 
         if len(op.outputs) > 1:
             assert isinstance(output, tuple)
@@ -505,26 +496,25 @@ def run_function(
             if v in value_map and fn.last_use(v) == op and not (v in fn.outputs):
                 del value_map[v]
 
+    # We measure the duration of each op as the delta between each pair of events
+    # i and j where i is even and j = i + 1. Note that this differs from how we
+    # measure durations for the entire iteration, as in this case we want to
+    # ignore any overhead from de-allocating memory when constructing the trace.
     if record_op_runtimes:
-        trace = []
-        ts = op_runtimes_ts
-        assert len(fn.ops) == len(op_runtimes)
-        for op, runtime in zip(fn.ops, op_runtimes):
-            trace.append(
-                {
-                    "name": op.op_type,
-                    "ph": "X",
-                    "ts": ts,
-                    "dur": runtime * 1e6,
-                    "pid": 0,
-                    "tid": rank,
-                }
-            )
-            ts += runtime * 1e6
-        ctx.trace[rank] += trace
+        torch.cuda.synchronize(device=rank)
+    if ctx.use_gpu:
+        op_runtimes = [
+            op_runtime_events[i].elapsed_time(op_runtime_events[i + 1]) / 1e3
+            for i in range(0, len(op_runtime_events) - 1, 2)
+        ]
+    else:
+        op_runtimes = [
+            op_runtime_events[i + 1] - op_runtime_events[i]
+            for i in range(0, len(op_runtime_events) - 1, 2)
+        ]
 
     # Return outputs
-    return tuple(value_map[v] for v in fn.outputs), peak_memory
+    return tuple(value_map[v] for v in fn.outputs), peak_memory, op_runtimes
 
 
 def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
@@ -573,41 +563,75 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
 
     events = []
 
-    def add_event():
-        if ctx.use_gpu:
-            events.append(torch.cuda.Event(enable_timing=True))
-            events[-1].record()
-        else:
-            events.append(time.perf_counter())
-
     if ctx.debug_stacktrace:
         try:
-            outputs, peak_memory = run_function(ctx, fn, inputs, rank)
+            outputs, peak_memory, op_runtimes = run_function(ctx, fn, inputs, rank)
         except Exception as e:
             print_exc()
         print(f"{rank}: PyTorch backend exiting after 1 run in debug mode.")
         dist.destroy_process_group()
         return BackendResults(None, None, None)
 
-    def run(p=None):
+    def run(events, p=None):
+        # This keeps track of the starting timestamp for the current iteration
+        # when constructing a profiled trace.
         op_runtimes_ts = None
+
         for i in range(num_warmup_steps + num_repetitions):
+            # We start constructing a profiled trace after finishing the warmup phase.
             record_op_runtimes = ctx.profile and i >= num_warmup_steps
             if record_op_runtimes and op_runtimes_ts is None:
                 op_runtimes_ts = 0.0
+
             # TODO: Handle failures here?
+
             print(f"Rank {rank}: Running step {i}...")
-            add_event()
-            outputs, peak_memory = run_function(
+
+            # We add a timing event at the start of every iteration, and at the
+            # end of the last iteration. This ensures that the delta between any
+            # two consecutive timing events i and i + 1 measures the runtime of
+            # iteration i.
+            add_event(ctx, events)
+
+            # This dispatches all ops for the function.
+            outputs, peak_memory, op_runtimes = run_function(
                 ctx, fn, inputs, rank, op_runtimes_ts=op_runtimes_ts
             )
+
+            # We synchronize here so that all kernels dispatched by the function complete
+            # before we add the timing event signaling the end of the current iteration /
+            # start of the next iteration.
             if ctx.use_gpu:
                 torch.cuda.synchronize(device=rank)
             if i == (num_warmup_steps + num_repetitions - 1):
-                add_event()
+                add_event(ctx, events)
+
+            # If we are profiling with the PyTorch profiler, we advance the profiler
+            # iterator here.
             if p is not None:
                 p.step()
+
+            # If profiling, we construct the trace of events for each rank in this iteration
+            # and reset the timestamp to the maximum timestamp observed across all ranks.
             if record_op_runtimes:
+                trace = []
+                ts = op_runtimes_ts
+                assert len(fn.ops) == len(op_runtimes)
+                for op, runtime in zip(fn.ops, op_runtimes):
+                    trace.append(
+                        {
+                            "name": op.op_type,
+                            "ph": "X",
+                            "ts": ts,
+                            "dur": runtime * 1e6,
+                            "pid": 0,
+                            "tid": rank,
+                        }
+                    )
+                    ts += runtime * 1e6
+                ctx.trace[rank] += trace
+                if ctx.world_size > 1:
+                    torch.distributed.barrier()
                 op_runtimes_ts = max(
                     ctx.trace[rank][-1]["ts"] + ctx.trace[rank][-1]["dur"]
                     for rank in ctx.trace.keys()
@@ -627,9 +651,9 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
                 f"{fn.name}_profile"
             ),
         ) as p:
-            outputs, peak_memory = run(p)
+            outputs, peak_memory = run(events, p)
     else:
-        outputs, peak_memory = run()
+        outputs, peak_memory = run(events)
 
     if ctx.use_gpu:
         # Move outputs back to cpu

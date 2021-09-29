@@ -100,10 +100,28 @@ class Parser(ArgumentParser):
             help="Use GPU with PyTorch backend",
         )
         self.add_argument(
+            "--profile",
+            action="store_true",
+            default=False,
+            help="Profile with PyTorch profiler",
+        )
+        self.add_argument(
             "--measure_peak_memory",
             action="store_true",
             default=False,
             help="Measure peak memory usage",
+        )
+        self.add_argument(
+            "--num_warmup",
+            type=int,
+            default=5,
+            help="Number of warmup steps",
+        )
+        self.add_argument(
+            "--num_repetitions",
+            type=int,
+            default=10,
+            help="Number of repetitions",
         )
 
     def add_grid_search_config_arguments(self, defaults):

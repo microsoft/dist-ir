@@ -120,8 +120,15 @@ class MLPGridSearch(GridSearch):
         )
 
     def pytorch(self, transformed_fn, input_data, world_size):
+        # TODO: Get num_warmup and num_repetitions from args
         return mlp.run_pytorch(
-            transformed_fn, input_data, world_size, use_gpu=self.use_gpu
+            transformed_fn,
+            input_data,
+            world_size,
+            use_gpu=self.use_gpu,
+            num_warmup=5,
+            num_repetitions=10,
+            profile=False,
         )
 
 

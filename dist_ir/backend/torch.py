@@ -1,9 +1,11 @@
+import itertools
+import json
 from functools import partial
 import numpy as np
 from operator import getitem
 import os
 import sys
-from time import perf_counter
+import time
 from traceback import print_exc
 from typing import Any, Dict, Iterable, List, NamedTuple, Sequence, Tuple
 from warnings import warn
@@ -35,6 +37,8 @@ DistributedContext = NamedTuple(
     debug_stacktrace=bool,
     # Profile flag
     profile=bool,
+    # Event trace
+    trace=list,
     # Memory tracking flag
     measure_peak_memory=bool,
 )
@@ -89,7 +93,7 @@ def _cast(x, to, ctx=None):
         raise NotImplementedError()
 
 
-def _concat2(*args, axis=None, ctx=None):
+def _concat(*args, axis=None, ctx=None):
     return torch.cat(args, dim=axis)
 
 
@@ -296,7 +300,7 @@ _op_to_torch = {
     "Add": torch.add,
     "Cast": _cast,
     "Add": _add,
-    "Concat": _concat2,
+    "Concat": _concat,
     "Constant": _constant,
     "ConstantOfShape": _constant_of_shape,
     "Div": _div,
@@ -404,10 +408,12 @@ def run_function(
     inputs: List[Any],
     rank: int,
     debug_mock=False,
+    op_runtimes_ts: float = None,
 ):
     """Runs DistIR Function `fn` on `inputs` in a distributed context `ctx` by
     converting each DistIR op to its torch implementation as given in _op_to_torch.
     """
+    record_op_runtimes = op_runtimes_ts is not None
     op_to_torch = _mock_op_to_torch if debug_mock else _op_to_torch
     value_map = {}
 
@@ -432,13 +438,23 @@ def run_function(
     else:
         peak_memory = 0.0
 
+    if record_op_runtimes:
+        op_runtimes = []
+
     # Run ops
     for op in fn.ops:
         inputs = tuple(value_map[v] for v in op.inputs)
         kwargs = {} if op.attributes is None else {**op.attributes}
         kwargs["ctx"] = ctx
 
+        if record_op_runtimes:
+            start = time.time()
         output = op_to_torch[op.op_type](*inputs, **kwargs)
+        if record_op_runtimes:
+            if ctx.use_gpu:
+                torch.cuda.synchronize()
+            end = time.time()
+            op_runtimes.append(end - start)
 
         if len(op.outputs) > 1:
             assert isinstance(output, tuple)
@@ -462,6 +478,24 @@ def run_function(
         for v in op.inputs:
             if v in value_map and fn.last_use(v) == op and not (v in fn.outputs):
                 del value_map[v]
+
+    if record_op_runtimes:
+        trace = []
+        ts = op_runtimes_ts
+        assert len(fn.ops) == len(op_runtimes)
+        for op, runtime in zip(fn.ops, op_runtimes):
+            trace.append(
+                {
+                    "name": op.op_type,
+                    "ph": X,
+                    "ts": ts,
+                    "dur": runtime * 1e6,
+                    "pid": 0,
+                    "tid": rank,
+                }
+            )
+            ts += runtime * 1e6
+        ctx.trace[rank] += trace
 
     # Return outputs
     return tuple(value_map[v] for v in fn.outputs), peak_memory
@@ -496,7 +530,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
             events.append(torch.cuda.Event(enable_timing=True))
             events[-1].record()
         else:
-            events.append(perf_counter())
+            events.append(time.perf_counter())
 
     if ctx.debug_stacktrace:
         try:
@@ -510,17 +544,24 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
         return BackendResults(None, None, None)
 
     def run(p=None):
+        op_runtimes_ts = None
         for i in range(num_warmup_steps + num_repetitions):
-            add_event()
+            record_op_runtimes = ctx.profile and i >= num_warmup_steps
+            if record_op_runtimes and op_runtimes_ts is None:
+                op_runtimes_ts = 0.0
             # TODO: Handle failures here?
             print(f"Rank {rank}: Running step {i}...")
-            outputs, peak_memory = run_function(ctx, fn, inputs, rank)
-            if ctx.world_size > 1:
-                torch.distributed.barrier()
-            # TODO do we need a torch.cuda.synchronize here?
             add_event()
+            outputs, peak_memory = run_function(ctx, fn, inputs, rank)
+            if i == (num_warmup_steps + num_repetitions - 1):
+                add_event()
             if p is not None:
                 p.step()
+            if record_op_runtimes:
+                op_runtimes_ts = max(
+                    ctx.trace[rank][-1]["ts"] + ctx.trace[rank][-1]["dur"]
+                    for rank in ctx.trace.keys()
+                )
         return outputs, peak_memory
 
     if ctx.profile:
@@ -600,6 +641,11 @@ def run_multiprocesses(
     if ctx.debug_stacktrace:
         sys.exit(1)
 
+    if ctx.profile:
+        trace = list(itertools.chain.from_iterable(list(ctx.trace.values())))
+        with open(f"{per_rank_functions[0].name}_profile/trace.json", "w") as f:
+            json.dump(trace, f)
+
     per_rank_outputs, per_rank_runtimes, per_rank_peak_memory = zip(*outputs)
     per_rank_runtimes = np.array(per_rank_runtimes)
     latency = np.median(
@@ -660,6 +706,14 @@ def run_pytorch(
         per_rank_fns.append(device_to_fns[d])
         world_size += 1
 
+    if profile:
+        manager = torch.multiprocessing.Manager()
+        trace = manager.dict()
+        for d in sorted(device_to_rank.keys()):
+            trace[device_to_rank[d]] = []
+    else:
+        trace = None
+
     ctx = DistributedContext(
         world_size=world_size,
         use_gpu=use_gpu,
@@ -668,6 +722,7 @@ def run_pytorch(
         device_to_rank=device_to_rank,
         debug_stacktrace=debug_stacktrace,
         profile=profile,
+        trace=trace,
         measure_peak_memory=measure_peak_memory,
     )
 

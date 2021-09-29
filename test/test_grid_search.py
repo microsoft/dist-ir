@@ -83,6 +83,8 @@ def test_mlp_grid_search(backend, dtype):
                     dram_bandwidth=constants.DEFAULT_DRAM_BANDWIDTH,
                     kernel_launch_overhead=constants.DEFAULT_KERNEL_LAUNCH_OVERHEAD,
                     network_bandwidth=constants.DEFAULT_NETWORK_BANDWIDTH,
+                    num_warmup=0,
+                    num_repetitions=0,
                     trace_file=None,
                     skip_allgathers=True,
                     verbose=False,

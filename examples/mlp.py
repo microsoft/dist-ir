@@ -293,7 +293,10 @@ def run_pytorch(
     function,
     input_data,
     world_size,
+    num_warmup,
+    num_repetitions,
     use_gpu=torch.cuda.is_available(),
+    profile=False,
     measure_peak_memory=False,
 ):
     # TODO: Move this to a utils file
@@ -333,8 +336,8 @@ def run_pytorch(
         input_types=input_types,
         use_gpu=use_gpu,
         measure_peak_memory=measure_peak_memory,
-        num_warmup=5,
-        num_repetitions=10,
+        num_warmup=num_warmup,
+        num_repetitions=num_repetitions,
     )
 
 
@@ -357,6 +360,9 @@ def run_mlp(
     kernel_launch_overhead,
     network_bandwidth,
     trace_file,
+    num_warmup,
+    num_repetitions,
+    profile=False,
     skip_allgathers=False,
     measure_peak_memory=False,
     verbose=False,
@@ -447,7 +453,10 @@ def run_mlp(
             transformed_fn,
             transformed_input_data,
             world_size,
+            num_warmup,
+            num_repetitions,
             use_gpu=use_gpu,
+            profile=profile,
             measure_peak_memory=measure_peak_memory,
         )
         if verbose:
@@ -478,6 +487,9 @@ def main(args):
         args.kernel_launch_overhead,
         args.network_bandwidth,
         args.trace_file,
+        args.num_warmup,
+        args.num_repetitions,
+        args.profile,
         args.skip_allgathers,
         args.measure_peak_memory,
         args.verbose,

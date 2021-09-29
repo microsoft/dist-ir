@@ -136,7 +136,7 @@ def calibrate_network_bandwidth(dtype):
     pytorch_dtype = torch.float32 if dtype == "fp32" else torch.float16
     bandwidths = []
     all_sizes = [2 ** i for i in range(13, 16)]
-    max_input = torch.randn(size=(max(all_sizes), max(all_sizes)), dtype=pytorch.dtype)
+    max_input = torch.randn(size=(max(all_sizes), max(all_sizes)), dtype=pytorch_dtype)
     n = len(all_sizes)
     X = np.zeros(shape=(n, 2))
     Y = np.zeros(shape=(n,))

@@ -402,6 +402,15 @@ def function_to_module(fn: Function) -> torch.nn.Module:
     return fx.GraphModule({}, g)
 
 
+def get_memory_usage(rank, verbose=False):
+    t = torch.cuda.get_device_properties(rank).total_memory
+    r = torch.cuda.memory_reserved(rank)
+    a = torch.cuda.memory_allocated(rank)
+    if verbose:
+        print(f"[Rank {rank}] Total: {t} Reserved: {r} Allocated: {a} Free: {r-a}")
+    return MemoryUsage(t, r, a)
+
+
 def run_function(
     ctx: DistributedContext,
     fn: Function,
@@ -421,14 +430,6 @@ def run_function(
     for v, x in zip(fn.inputs, inputs):
         value_map[v] = x
     assert len(fn.inputs) == len(inputs)
-
-    def get_memory_usage(rank, verbose=False):
-        t = torch.cuda.get_device_properties(rank).total_memory
-        r = torch.cuda.memory_reserved(rank)
-        a = torch.cuda.memory_allocated(rank)
-        if verbose:
-            print(f"[Rank {rank}] Total: {t} Reserved: {r} Allocated: {a} Free: {r-a}")
-        return MemoryUsage(t, r, a)
 
     if ctx.measure_peak_memory:
         torch.cuda.synchronize(rank)
@@ -487,7 +488,7 @@ def run_function(
             trace.append(
                 {
                     "name": op.op_type,
-                    "ph": X,
+                    "ph": "X",
                     "ts": ts,
                     "dur": runtime * 1e6,
                     "pid": 0,
@@ -521,7 +522,24 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
     if ctx.use_gpu:
         # Move inputs to GPU
         print(f"Rank {rank}: Moving inputs to GPU...")
-        inputs = [t.cuda(rank) for t in inputs]
+        gpu_inputs = []
+        torch.cuda.synchronize(rank)
+        memory_usage = get_memory_usage(rank)
+        print(
+            f"Rank {rank}: reserved={memory_usage.reserved}, "
+            f"allocated={memory_usage.allocated}"
+        )
+        for i, t in enumerate(inputs):
+            input_size = t.nelement() * t.element_size()
+            print(f"Rank {rank}: Moving input {i} of {input_size} bytes to GPU...")
+            gpu_inputs.append(t.cuda(rank))
+            torch.cuda.synchronize(rank)
+            memory_usage = get_memory_usage(rank)
+            print(
+                f"Rank {rank}: reserved={memory_usage.reserved}, "
+                f"allocated={memory_usage.allocated}"
+            )
+        inputs = gpu_inputs
 
     events = []
 
@@ -549,10 +567,13 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
             record_op_runtimes = ctx.profile and i >= num_warmup_steps
             if record_op_runtimes and op_runtimes_ts is None:
                 op_runtimes_ts = 0.0
+                print(f"In run: op_runtimes_ts={op_runtimes_ts}")
             # TODO: Handle failures here?
             print(f"Rank {rank}: Running step {i}...")
             add_event()
-            outputs, peak_memory = run_function(ctx, fn, inputs, rank)
+            outputs, peak_memory = run_function(
+                ctx, fn, inputs, rank, op_runtimes_ts=op_runtimes_ts
+            )
             if i == (num_warmup_steps + num_repetitions - 1):
                 add_event()
             if p is not None:
@@ -574,7 +595,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
                 wait=0, warmup=num_warmup_steps, active=num_repetitions
             ),
             on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                f"{fn.name}_{rank}_profile"
+                f"{fn.name}_profile"
             ),
         ) as p:
             outputs, peak_memory = run(p)

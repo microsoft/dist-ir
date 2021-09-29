@@ -15,6 +15,7 @@ from dist_ir.executor import (
 )
 from dist_ir.transforms import mlp_dhp_transform
 from .parser import Parser
+from . import utils
 import dist_ir.backend.torch as torch_backend
 
 
@@ -338,6 +339,7 @@ def run_pytorch(
         measure_peak_memory=measure_peak_memory,
         num_warmup=num_warmup,
         num_repetitions=num_repetitions,
+        profile=profile,
     )
 
 
@@ -468,6 +470,7 @@ def run_mlp(
 
 def main(args):
     # TODO: Add names to arguments
+    utils.load_simulation_parameters_to_args(args)
     run_mlp(
         args.phase,
         args.backend,

@@ -14,7 +14,7 @@ import pandas as pd
 from tqdm.contrib.concurrent import process_map
 
 from dist_ir.ir.topology import get_uniform_topology
-
+from . import utils
 
 FIELDNAMES = [
     "model_size",
@@ -267,20 +267,7 @@ class GridSearch(ABC):
 
 # TODO merge with grid_search? move everything there or here?
 def run_grid_search(args, grid_search_cls):
-    if args.simulation_parameters_file is not None:
-        with open(args.simulation_parameters_file, "r") as f:
-            simulation_parameters = json.load(f)
-        args.dram_bandwidth = (
-            float("inf")
-            if simulation_parameters["device_parameters"][0] == 0
-            else 1.0 / simulation_parameters["device_parameters"][0]
-        )
-        args.device_throughput = 1.0 / simulation_parameters["device_parameters"][1]
-        args.kernel_launch_overhead = simulation_parameters["device_parameters"][2]
-        args.network_bandwidth = simulation_parameters["network_bandwidth"]
-        args.allreduce_parameters = {
-            int(k): v for k, v in simulation_parameters["allreduce_parameters"].items()
-        }
+    utils.load_simulation_parameters_to_args(args)
     grid_search = grid_search_cls(
         args.backend,
         args.dtype,

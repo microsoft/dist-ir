@@ -182,16 +182,28 @@ def _reshape(x, y, ctx=None):
 
 
 def _recv(shape=None, from_d=None, group=None, dtype=None, ctx=None):
-    if isinstance(dtype, Int32):
-        x = torch.zeros(shape).int()
-    elif isinstance(dtype, Int64):
-        x = torch.zeros(shape).long()
-    elif isinstance(dtype, Float16):
-        x = torch.zeros(shape).half()
-    elif isinstance(dtype, Float32):
-        x = torch.zeros(shape).float()
+    if len(shape) == 0:
+        if isinstance(dtype, Int32):
+            x = torch.tensor(0).int()
+        elif isinstance(dtype, Int64):
+            x = torch.tensor(0).long()
+        elif isinstance(dtype, Float16):
+            x = torch.tensor(0).half()
+        elif isinstance(dtype, Float32):
+            x = torch.tensor(0).float()
+        else:
+            raise NotImplementedError(dtype)
     else:
-        raise NotImplementedError(dtype)
+        if isinstance(dtype, Int32):
+            x = torch.zeros(shape).int()
+        elif isinstance(dtype, Int64):
+            x = torch.zeros(shape).long()
+        elif isinstance(dtype, Float16):
+            x = torch.zeros(shape).half()
+        elif isinstance(dtype, Float32):
+            x = torch.zeros(shape).float()
+        else:
+            raise NotImplementedError(dtype)
 
     src_rank = ctx.device_to_rank[from_d]
     if ctx.use_gpu:
@@ -449,12 +461,25 @@ def run_function(
         kwargs["ctx"] = ctx
 
         if record_op_runtimes:
+            if ctx.use_gpu:
+                torch.cuda.synchronize(device=rank)
             start = time.time()
         output = op_to_torch[op.op_type](*inputs, **kwargs)
         if record_op_runtimes:
             if ctx.use_gpu:
                 torch.cuda.synchronize(device=rank)
             end = time.time()
+            # TODO: Remove debug code
+            if op.op_type == "RecvP2P":
+                print(
+                    f"Rank {rank} recv: from_d={kwargs['from_d']}, group={kwargs['group']}, "
+                    f"start={start}, end={end}, duration={end - start}"
+                )
+            elif op.op_type == "SendP2P":
+                print(
+                    f"Rank {rank} send: to_d={kwargs['to_d']}, group={kwargs['group']}, "
+                    f"start={start}, end={end}, duration={end - start}"
+                )
             op_runtimes.append(end - start)
 
         if len(op.outputs) > 1:
@@ -521,7 +546,9 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
 
     if ctx.use_gpu:
         # Move inputs to GPU
-        print(f"Rank {rank}: Moving inputs to GPU...")
+        print(
+            f"Rank {rank}: Moving inputs with shapes {[inp.shape for inp in inputs]} to GPU..."
+        )
         gpu_inputs = []
         torch.cuda.synchronize(device=rank)
         memory_usage = get_memory_usage(rank)
@@ -531,7 +558,10 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
         )
         for i, t in enumerate(inputs):
             input_size = t.nelement() * t.element_size()
-            print(f"Rank {rank}: Moving input {i} of {input_size} bytes to GPU...")
+            print(
+                f"Rank {rank}: Moving input {i} of shape {t.shape} "
+                f"({input_size} bytes) to GPU..."
+            )
             gpu_inputs.append(t.cuda(rank))
             torch.cuda.synchronize(device=rank)
             memory_usage = get_memory_usage(rank)
@@ -553,8 +583,6 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
     if ctx.debug_stacktrace:
         try:
             outputs, peak_memory = run_function(ctx, fn, inputs, rank)
-            if ctx.world_size > 1:
-                torch.distributed.barrier()
         except Exception as e:
             print_exc()
         print(f"{rank}: PyTorch backend exiting after 1 run in debug mode.")
@@ -573,6 +601,8 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
             outputs, peak_memory = run_function(
                 ctx, fn, inputs, rank, op_runtimes_ts=op_runtimes_ts
             )
+            if ctx.use_gpu:
+                torch.cuda.synchronize(device=rank)
             if i == (num_warmup_steps + num_repetitions - 1):
                 add_event()
             if p is not None:

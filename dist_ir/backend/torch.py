@@ -567,7 +567,6 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
             record_op_runtimes = ctx.profile and i >= num_warmup_steps
             if record_op_runtimes and op_runtimes_ts is None:
                 op_runtimes_ts = 0.0
-                print(f"In run: op_runtimes_ts={op_runtimes_ts}")
             # TODO: Handle failures here?
             print(f"Rank {rank}: Running step {i}...")
             add_event()

@@ -560,6 +560,10 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
                 f"allocated={memory_usage.allocated}"
             )
         inputs = gpu_inputs
+    else:
+        print(
+            f"Rank {rank}: Using inputs with shapes {[inp.shape for inp in inputs]}..."
+        )
 
     events = []
 

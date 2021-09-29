@@ -174,6 +174,9 @@ def _partition_inputs_hp(function, device_tree, dp_inputs):
                         dim=dim,
                         parallelism_level="hp",
                     )
+                    print(
+                        f"Partitioning input {j} into {len(hp_inputs[dp_inputs[inp][i]])}"
+                    )
         else:
             # If not using horizontal parallelism, no action necessary here.
             for inp in function.inputs:

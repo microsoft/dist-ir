@@ -399,6 +399,9 @@ def _mpi_scatter_prop_fn(op, x, to_tuple_type=False):
     output_shape = list(x.shape)
     output_shape[dim] //= len(devices)
     output_shape = tuple(output_shape)
+    print(
+        f"Splitting input of size {x.shape} to {len(devices)} inputs of size {output_shape}"
+    )
     if to_tuple_type:
         return TupleType(
             tuple(

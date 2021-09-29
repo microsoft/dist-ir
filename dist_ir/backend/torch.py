@@ -432,7 +432,7 @@ def run_function(
     assert len(fn.inputs) == len(inputs)
 
     if ctx.measure_peak_memory:
-        torch.cuda.synchronize(rank)
+        torch.cuda.synchronize(device=rank)
         memory_usage = get_memory_usage(rank)
         allocated_memory = memory_usage.allocated
         peak_memory = allocated_memory
@@ -453,7 +453,7 @@ def run_function(
         output = op_to_torch[op.op_type](*inputs, **kwargs)
         if record_op_runtimes:
             if ctx.use_gpu:
-                torch.cuda.synchronize()
+                torch.cuda.synchronize(device=rank)
             end = time.time()
             op_runtimes.append(end - start)
 
@@ -471,7 +471,7 @@ def run_function(
             #    warn(f"NaNs in op {op.name} output {0}")
 
         if ctx.measure_peak_memory:
-            torch.cuda.synchronize(rank)
+            torch.cuda.synchronize(device=rank)
             memory_usage = get_memory_usage(rank)
             peak_memory = max(peak_memory, memory_usage.allocated)
 
@@ -523,7 +523,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
         # Move inputs to GPU
         print(f"Rank {rank}: Moving inputs to GPU...")
         gpu_inputs = []
-        torch.cuda.synchronize(rank)
+        torch.cuda.synchronize(device=rank)
         memory_usage = get_memory_usage(rank)
         print(
             f"Rank {rank}: reserved={memory_usage.reserved}, "
@@ -533,7 +533,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
             input_size = t.nelement() * t.element_size()
             print(f"Rank {rank}: Moving input {i} of {input_size} bytes to GPU...")
             gpu_inputs.append(t.cuda(rank))
-            torch.cuda.synchronize(rank)
+            torch.cuda.synchronize(device=rank)
             memory_usage = get_memory_usage(rank)
             print(
                 f"Rank {rank}: reserved={memory_usage.reserved}, "

@@ -135,8 +135,8 @@ def calibrate_network_bandwidth(dtype):
     dist_ir_dtype = Float32 if dtype == "fp32" else Float16
     pytorch_dtype = torch.float32 if dtype == "fp32" else torch.float16
     bandwidths = []
-    all_sizes = [2 ** i for i in range(13, 16)]
-    max_input = torch.randn(size=(max(all_sizes), max(all_sizes)), dtype=pytorch_dtype)
+    size = 32768
+    max_input = torch.randn(size=(size, size), dtype=pytorch_dtype)
     n = len(all_sizes)
     X = np.zeros(shape=(n, 2))
     Y = np.zeros(shape=(n,))
@@ -146,25 +146,18 @@ def calibrate_network_bandwidth(dtype):
         # TODO: Calibrate CPU to GPU transfer time properly
         bandwidths.append([0, src.device_id, 64])
         for dst in devices[i + 1 :]:
-            for j, size in enumerate(tqdm(all_sizes)):
-                fn = _send(src, dst, dist_ir_dtype, m=size, n=size)
-                fn = infer_types(fn, fn.inputs)
-                X[j][0] = fn.inputs[0].type.size() / BYTES_IN_Gb
-                X[j][1] = 1
-
-                results = run_pytorch(
-                    fn=fn,
-                    inputs=[max_input[:size, :size]],
-                    use_gpu=True,
-                    num_repetitions=NUM_REPETITIONS,
-                    num_warmup=NUM_WARMUP,
-                )
-                pytorch_latency = results.latency
-                Y[i] = pytorch_latency
-                torch.cuda.empty_cache()
-
-            reg = LinearRegression(positive=True, fit_intercept=False).fit(X, Y)
-            bandwidth = 1.0 / reg.coef_[0]
+            fn = _send(src, dst, dist_ir_dtype, m=size, n=size)
+            fn = infer_types(fn, fn.inputs)
+            results = run_pytorch(
+                fn=fn,
+                inputs=[max_input[:size, :size]],
+                use_gpu=True,
+                num_repetitions=NUM_REPETITIONS,
+                num_warmup=NUM_WARMUP,
+            )
+            pytorch_latency = results.latency
+            torch.cuda.empty_cache()
+            bandwidth = fn.inputs[0].type.size() / pytorch_latency
             bandwidths.append([src.device_id, dst.device_id, bandwidth])
             bandwidths.append([dst.device_id, src.device_id, bandwidth])
             print(f"bandwidth[({src.device_id}, {dst.device_id})] = {bandwidth} Gbps")

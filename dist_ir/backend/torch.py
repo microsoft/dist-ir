@@ -478,7 +478,8 @@ def run_function(
                 buffer = recv_buffers[op]
             else:
                 buffer = _allocate_recv_buffer(kwargs["shape"], kwargs["dtype"], ctx)
-                torch.cuda.synchronize(device=rank)
+                if ctx.use_gpu:
+                    torch.cuda.synchronize(device=rank)
                 recv_buffers[op] = buffer
             kwargs["x"] = buffer
             del kwargs["shape"]
@@ -650,7 +651,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
                 # before measuring op durations.
                 if ctx.world_size > 1:
                     torch.distributed.barrier()
-                else:
+                elif ctx.use_gpu:
                     torch.cuda.synchronize(device=rank)
 
                 # We measure the duration of each op as the delta between each pair

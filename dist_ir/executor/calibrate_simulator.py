@@ -135,11 +135,8 @@ def calibrate_network_bandwidth(dtype):
     dist_ir_dtype = Float32 if dtype == "fp32" else Float16
     pytorch_dtype = torch.float32 if dtype == "fp32" else torch.float16
     bandwidths = []
-    size = 32768
+    size = 16384
     max_input = torch.randn(size=(size, size), dtype=pytorch_dtype)
-    n = len(all_sizes)
-    X = np.zeros(shape=(n, 2))
-    Y = np.zeros(shape=(n,))
     params = {}
     devices = [Device(i + 1, "gpu") for i in range(torch.cuda.device_count())]
     for i, src in enumerate(devices):
@@ -157,7 +154,7 @@ def calibrate_network_bandwidth(dtype):
             )
             pytorch_latency = results.latency
             torch.cuda.empty_cache()
-            bandwidth = fn.inputs[0].type.size() / pytorch_latency
+            bandwidth = fn.inputs[0].type.size() / BYTES_IN_Gb / pytorch_latency
             bandwidths.append([src.device_id, dst.device_id, bandwidth])
             bandwidths.append([dst.device_id, src.device_id, bandwidth])
             print(f"bandwidth[({src.device_id}, {dst.device_id})] = {bandwidth} Gbps")
@@ -168,9 +165,14 @@ def calibrate_network_bandwidth(dtype):
 def calibrate_device_parameters(dtype):
     dist_ir_dtype = Float32 if dtype == "fp32" else Float16
     pytorch_dtype = torch.float32 if dtype == "fp32" else torch.float16
+    """
     all_batch_sizes = [2 ** i for i in range(12, 15)]
     all_input_dims = [2 ** i for i in range(12, 15)]
     all_output_dims = [2 ** i for i in range(12, 15)]
+    """
+    all_batch_sizes = [2 ** i for i in range(12, 14)]
+    all_input_dims = [2 ** i for i in range(12, 14)]
+    all_output_dims = [2 ** i for i in range(12, 14)]
     if dtype == "fp16":
         all_batch_sizes = [2 * v for v in all_batch_sizes]
         all_input_dims = [2 * v for v in all_input_dims]

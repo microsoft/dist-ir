@@ -179,7 +179,7 @@ def _reshape(x, y, ctx=None):
     return torch.reshape(x, new_shape)
 
 
-def _recv(shape=None, from_d=None, group=None, dtype=None, ctx=None):
+def _allocate_recv_buffer(shape, dtype, ctx):
     if len(shape) == 0:
         if isinstance(dtype, Int32):
             x = torch.tensor(0).int()
@@ -202,11 +202,16 @@ def _recv(shape=None, from_d=None, group=None, dtype=None, ctx=None):
             x = torch.zeros(shape).float()
         else:
             raise NotImplementedError(dtype)
+    if ctx.use_gpu:
+        x = x.cuda(dist.get_rank())
+    return x
+
+
+def _recv(x=None, from_d=None, group=None, ctx=None):
 
     src_rank = ctx.device_to_rank[from_d]
     if ctx.use_gpu:
-        x = x.cuda(dist.get_rank())
-        dist.broadcast(x, src_rank, group=ctx.groups[group])
+        dist.broadcast(x, src_rank, group=ctx.groups[group], async_op=False)
     else:
         dist.recv(x, src_rank)
     return x
@@ -225,7 +230,7 @@ def _relu_grad(x, dy, ctx=None):
 def _send(x, to_d=None, group=None, ctx=None):
     if ctx.use_gpu:
         src_rank = dist.get_rank()
-        dist.broadcast(x, src_rank, group=ctx.groups[group])
+        dist.broadcast(x, src_rank, group=ctx.groups[group], async_op=False)
     else:
         dst_rank = ctx.device_to_rank[to_d]
         dist.send(x, dst_rank)
@@ -434,6 +439,7 @@ def run_function(
     fn: Function,
     inputs: List[Any],
     rank: int,
+    recv_buffers: dict,
     debug_mock=False,
     record_op_runtimes: bool = False,
 ):
@@ -456,6 +462,7 @@ def run_function(
     else:
         peak_memory = 0.0
 
+    recv_output_values = set()
     op_runtime_events = []
 
     # Run ops
@@ -466,6 +473,16 @@ def run_function(
 
         if record_op_runtimes:
             add_event(ctx, op_runtime_events)
+        if op.op_type == "RecvP2P":
+            if op in recv_buffers:
+                buffer = recv_buffers[op]
+            else:
+                buffer = _allocate_recv_buffer(kwargs["shape"], kwargs["dtype"], ctx)
+                torch.cuda.synchronize(device=rank)
+                recv_buffers[op] = buffer
+            kwargs["x"] = buffer
+            del kwargs["shape"]
+            del kwargs["dtype"]
         output = op_to_torch[op.op_type](*inputs, **kwargs)
         if record_op_runtimes:
             add_event(ctx, op_runtime_events)
@@ -479,6 +496,8 @@ def run_function(
                 #     warn(f"NaNs in op {op} output {i}")
         elif len(op.outputs) == 1:
             value_map[op.outputs[0]] = output
+            if op.op_type == "RecvP2P":
+                recv_output_values.add(op.outputs[0])
             # TODO: Hide this under debug flag
             # if torch.any(torch.isnan(output)):
             #    warn(f"NaNs in op {op.name} output {0}")
@@ -490,7 +509,12 @@ def run_function(
 
         # Free tensors that are not used again
         for v in op.inputs:
-            if v in value_map and fn.last_use(v) == op and not (v in fn.outputs):
+            if (
+                v in value_map
+                and fn.last_use(v) == op
+                and not (v in fn.outputs)
+                and not (v in recv_output_values)
+            ):
                 del value_map[v]
 
     # Return outputs
@@ -550,7 +574,11 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
     if ctx.debug_stacktrace:
         try:
             outputs, peak_memory, op_runtime_events = run_function(
-                ctx, fn, inputs, rank
+                ctx,
+                fn,
+                inputs,
+                rank,
+                recv_buffers,
             )
         except Exception as e:
             print_exc()
@@ -564,7 +592,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
         op_runtimes_ts = None
 
         all_op_runtimes = []
-
+        recv_buffers = {}
         for i in range(num_warmup_steps + num_repetitions):
             # We start constructing a profiled trace after finishing the warmup phase.
             record_op_runtimes = False
@@ -595,14 +623,24 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
                 # we proceed without the try/catch in subsequent iterations.
                 try:
                     outputs, peak_memory, op_runtime_events = run_function(
-                        ctx, fn, inputs, rank, record_op_runtimes=record_op_runtimes
+                        ctx,
+                        fn,
+                        inputs,
+                        rank,
+                        recv_buffers,
+                        record_op_runtimes=record_op_runtimes,
                     )
                 except Exception as e:
                     print_exc()
                     return None, None, None
             else:
                 outputs, peak_memory, op_runtime_events = run_function(
-                    ctx, fn, inputs, rank, record_op_runtimes=record_op_runtimes
+                    ctx,
+                    fn,
+                    inputs,
+                    rank,
+                    recv_buffers,
+                    record_op_runtimes=record_op_runtimes,
                 )
             if i == (num_warmup_steps + num_repetitions - 1):
                 add_event(ctx, events)

@@ -26,15 +26,19 @@ def calibrate_parameters(args):
         if "device_parameters" in simulation_parameters:
             device_parameters = simulation_parameters["device_parameters"]
         else:
-            assert args.calibrate_device_parameters
+            device_parameters = [
+                1.0 / args.dram_bandwidth,
+                1.0 / args.device_throughput,
+                args.kernel_launch_overhead,
+            ]
         if "network_bandwidth" in simulation_parameters:
             network_bandwidth = simulation_parameters["network_bandwidth"]
         else:
-            assert args.calibrate_network_bandwidth
+            network_bandwidth = args.network_bandwidth
         if "allreduce_parameters" in simulation_parameters:
             allreduce_parameters = simulation_parameters["allreduce_parameters"]
         else:
-            assert args.calibrate_allreduce_parameters
+            allreduce_parameters = args.allreduce_parameters
     else:
         simulation_parameters = {}
     update_simulation_parameters = False

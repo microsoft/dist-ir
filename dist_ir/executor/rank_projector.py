@@ -1,4 +1,5 @@
 from collections import defaultdict
+from frozendict import frozendict
 from typing import Any, Dict, Sequence, Set, Tuple
 
 from ..ir import Function, FunctionMaker, Device, Op
@@ -55,10 +56,12 @@ def _collective_projector(op: Op, state: ProjectorState, inputs, outputs):
     for in_v, out_v in zip(inputs, outputs):
         assert in_v.device == out_v.device
     group = _make_group(v.device for v in inputs + outputs)
-    attributes = {
-        **(op.attributes if op.attributes is not None else {}),
-        "group": group,
-    }
+    attributes = frozendict(
+        {
+            **(op.attributes if op.attributes is not None else {}),
+            "group": group,
+        }
+    )
     for in_, in_v, out_v in zip(inputs, op.inputs, op.outputs):
         d = in_.device
 
@@ -81,10 +84,12 @@ def _gather_projector(op: Op, state: ProjectorState, inputs, outputs):
     devices = set(v.device for v in inputs)
     assert len(op.inputs) == len(devices)
     assert len(op.outputs) == 1 and outputs[0].device in devices
-    attributes = {
-        **(op.attributes if op.attributes is not None else {}),
-        "group": _make_group(devices),
-    }
+    attributes = frozendict(
+        {
+            **(op.attributes if op.attributes is not None else {}),
+            "group": _make_group(devices),
+        }
+    )
     for in_, in_v in zip(inputs, op.inputs):
         d = in_.device
         new_op = Op(
@@ -131,19 +136,21 @@ def _send_projector(op: Op, state: ProjectorState, inputs, outputs):
         Op(
             "SendP2P",
             inputs=op.inputs,
-            attributes={"to_d": to_d, "group": group},
+            attributes=frozendict({"to_d": to_d, "group": group}),
         )
     )
     state.per_rank_fns[to_d].ops.append(
         Op(
             "RecvP2P",
             output_values=(op.outputs[0],),
-            attributes={
-                "shape": output_shape,
-                "from_d": from_d,
-                "group": group,
-                "dtype": output_type,
-            },
+            attributes=frozendict(
+                {
+                    "shape": output_shape,
+                    "from_d": from_d,
+                    "group": group,
+                    "dtype": output_type,
+                }
+            ),
         )
     )
 

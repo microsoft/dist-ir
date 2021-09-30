@@ -323,8 +323,14 @@ def _get_stats(function, input_types):
     model_size = 0
     for inp, typ in zip(function.inputs, input_types):
         if "weight" in inp.name or "bias" in inp.name:
-            parameter_count += np.prod(typ.shape)
-            model_size += typ.size()
+            if isinstance(typ, Type):
+                parameter_count += np.prod(typ.shape)
+                model_size += typ.size()
+            elif isinstance(typ, np.ndarray):
+                parameter_count += typ.size
+                model_size += typ.size * typ.itemsize
+            else:
+                raise ValueError(f"Invalid input type {type(typ)}")
 
     if parameter_count >= 1e3 and parameter_count < 1e6:
         parameter_count_str = f"{parameter_count / 1e3:.2f}K"

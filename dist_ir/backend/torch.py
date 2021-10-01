@@ -522,6 +522,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
     `num_warmup_steps + num_repetitions` times. The outputs of the last run are
     returned, along with the last `num_repetitions` runtimes.
     """
+    torch.cuda.set_per_process_memory_fraction(1.0, device=rank)
     os.environ["MASTER_ADDR"] = "127.0.0.1"  # TODO make these configurable
     os.environ["MASTER_PORT"] = "29500"
     backend = "nccl" if ctx.use_gpu else "gloo"
@@ -624,14 +625,15 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
                 # exit in the event of errors. After confirming there are no errors,
                 # we proceed without the try/catch in subsequent iterations.
                 try:
-                    outputs, peak_memory, op_runtime_events = run_function(
-                        ctx,
-                        fn,
-                        inputs,
-                        rank,
-                        recv_buffers,
-                        record_op_runtimes=record_op_runtimes,
-                    )
+                    with torch.inference_mode():
+                        outputs, peak_memory, op_runtime_events = run_function(
+                            ctx,
+                            fn,
+                            inputs,
+                            rank,
+                            recv_buffers,
+                            record_op_runtimes=record_op_runtimes,
+                        )
                 except Exception as e:
                     print_exc()
                     return None, None, None

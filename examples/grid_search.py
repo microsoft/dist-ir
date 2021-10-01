@@ -163,11 +163,11 @@ class GridSearch(ABC):
                 elif pp_degree == 1:
                     all_num_microbatches = [1]
                 else:
-                    all_num_microbatches = [
-                        int(2 ** k)
-                        for k in range(1, int(np.floor(np.log2(dp_batch_size) / 2)))
-                    ]
+                    all_num_microbatches = [int(2 ** k) for k in range(1, 8)]
                 for num_microbatches in all_num_microbatches:
+                    pp_batch_size = dp_batch_size // num_microbatches
+                    if pp_batch_size == 0:
+                        continue
                     config = DHPConfig(
                         model_size,
                         dp_degree,

@@ -21,23 +21,8 @@ class GPTGridSearch(GridSearch):
         max_world_size,
         model_path,
     ):
-        model_params = {
-            "gpt2-xs": (4, 12, 768),  # Debug
-            "gpt2": (12, 12, 768),  # HuggingFace
-            "gpt2-medium": (24, 16, 1024),  # HuggingFace
-            "gpt2-large": (36, 20, 1280),  # HuggingFace
-            "gpt2-xl": (48, 25, 1600),  # HuggingFace
-            "gpt3": (12, 12, 768),  # OpenAI
-            "gpt3-medium": (24, 16, 1024),  # OpenAI
-            "gpt3-large": (24, 16, 1536),  # OpenAI
-            "gpt3-xl": (24, 16, 2048),  # OpenAI
-            "gpt3-2.7B": (32, 32, 2560),  # OpenAI
-            "gpt3-6.7B": (32, 32, 4096),  # OpenAI
-            "gpt3-13B": (40, 40, 5120),  # OpenAI
-            "gpt3-175B": (96, 96, 12288),  # OpenAI
-        }
         super().__init__(
-            model_params,
+            gpt2.model_params,
             backend,
             dtype,
             use_gpu,
@@ -153,5 +138,6 @@ if __name__ == "__main__":
     parser.add_grid_search_config_arguments(defaults)
     parser.add_backend_config_arguments()
     parser.add_gpt2_model_path_config_arguments()
+    parser.add_model_config_arguments(choices=list(gpt2.model_params.keys()))
     args = parser.parse_args()
     run_grid_search(args, GPTGridSearch)

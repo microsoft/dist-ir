@@ -64,6 +64,8 @@ def _run_gpt(
                 transformed_function,
                 initialized_input_data,
                 world_size,
+                num_warmup=1,
+                num_repetitions=1,
                 use_gpu=torch.cuda.device_count() >= world_size,
             )
             outputs = results.per_rank_outputs

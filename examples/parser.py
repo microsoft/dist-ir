@@ -79,9 +79,18 @@ class Parser(ArgumentParser):
             help="Simulation parameters file",
         )
 
+    def add_model_config_arguments(self, choices):
+        self.add_argument(
+            "--model_size",
+            type=str,
+            choices=choices,
+            default=None,
+            help="The model size to run when mode == config, e.g. mlp-xs or gpt3",
+        )
+        self.add_argument("--dtype", choices=["fp32", "fp16"], default="fp16")
+
     def add_execution_mode_config_arguments(self):
         self.add_argument("--backend", choices=["simulate", "pytorch"], required=True)
-        self.add_argument("--dtype", choices=["fp32", "fp16"], default="fp16")
 
     def add_simulation_output_config_arguments(self):
         self.add_argument("--trace_file", type=str, default=None, help="Trace file")
@@ -165,13 +174,6 @@ class Parser(ArgumentParser):
             type=int,
             default=None,
             help="The configuration from configs_file to run (line number, 0 = header)",
-        )
-        # single config arguments:
-        self.add_argument(
-            "--model_size",
-            type=str,
-            default=None,
-            help="The model size to run when mode == config, e.g. mlp-xs or gpt3",
         )
         self.add_argument(
             "--config",

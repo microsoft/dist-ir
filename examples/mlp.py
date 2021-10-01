@@ -18,6 +18,13 @@ from .parser import Parser
 from . import utils
 import dist_ir.backend.torch as torch_backend
 
+model_params = {
+    "mlp-xs": (8, 512),
+    "mlp-small": (16, 8192),
+    "mlp-medium": (64, 16384),
+    "mlp-large": (128, 32768),
+}
+
 
 def get_typed_input_values(inputs, batch_size, input_dim, output_dim):
     # TODO: Add types for weights as well?
@@ -471,6 +478,11 @@ def run_mlp(
 def main(args):
     # TODO: Add names to arguments
     utils.load_simulation_parameters_to_args(args)
+    if args.model_size is not None:
+        args.num_hidden_layers, dim = model_params[args.model_size]
+        args.input_dim = dim
+        args.hidden_dim = dim
+        args.output_dim = dim
     run_mlp(
         args.phase,
         args.backend,
@@ -507,6 +519,7 @@ if __name__ == "__main__":
     parser.add_backend_config_arguments()
     parser.add_simulation_output_config_arguments()
     parser.add_global_output_config_arguments()
+    parser.add_model_config_arguments(choices=list(model_params.keys()))
     parser.add_argument(
         "--phase", choices=["inference", "training"], default="training"
     )

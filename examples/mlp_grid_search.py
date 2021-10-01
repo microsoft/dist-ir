@@ -24,14 +24,8 @@ class MLPGridSearch(GridSearch):
         max_world_size,
         model_path=None,
     ):
-        model_params = {
-            "mlp-xs": (8, 512),
-            "mlp-small": (16, 8192),
-            "mlp-medium": (64, 16384),
-            "mlp-large": (128, 32768),
-        }
         super().__init__(
-            model_params,
+            mlp.model_params,
             backend,
             dtype,
             use_gpu,
@@ -143,5 +137,6 @@ if __name__ == "__main__":
     parser.add_execution_mode_config_arguments()
     parser.add_grid_search_config_arguments(defaults)
     parser.add_backend_config_arguments()
+    parser.add_model_config_arguments(choices=list(mlp.model_params.keys()))
     args = parser.parse_args()
     run_grid_search(args, MLPGridSearch)

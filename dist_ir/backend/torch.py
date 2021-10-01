@@ -870,14 +870,6 @@ def run_pytorch(
         per_rank_fns.append(device_to_fns[d])
         world_size += 1
 
-    if profile:
-        manager = torch.multiprocessing.Manager()
-        trace = manager.dict()
-        for d in sorted(device_to_rank.keys()):
-            trace[device_to_rank[d]] = []
-    else:
-        trace = None
-
     ctx = DistributedContext(
         world_size=world_size,
         use_gpu=use_gpu,

@@ -24,6 +24,22 @@ from dist_ir.transforms.gpt2_dhp_transform import check_params, update_attribute
 
 from .parser import Parser
 
+model_params = {
+    "gpt2-xs": (4, 12, 768),  # Debug
+    "gpt2": (12, 12, 768),  # HuggingFace
+    "gpt2-medium": (24, 16, 1024),  # HuggingFace
+    "gpt2-large": (36, 20, 1280),  # HuggingFace
+    "gpt2-xl": (48, 25, 1600),  # HuggingFace
+    "gpt3": (12, 12, 768),  # OpenAI
+    "gpt3-medium": (24, 16, 1024),  # OpenAI
+    "gpt3-large": (24, 16, 1536),  # OpenAI
+    "gpt3-xl": (24, 16, 2048),  # OpenAI
+    "gpt3-2.7B": (32, 32, 2560),  # OpenAI
+    "gpt3-6.7B": (32, 32, 4096),  # OpenAI
+    "gpt3-13B": (40, 40, 5120),  # OpenAI
+    "gpt3-175B": (96, 96, 12288),  # OpenAI
+}
+
 
 def _to_numpy(x):
     if type(x) is not np.ndarray:
@@ -639,6 +655,8 @@ def run_pytorch(
 
 
 def main(args):
+    if args.model_size is not None:
+        args.n_layer, args.n_head, args.d_embd = model_params[args.model_size]
     check_params(
         args.batch_size,
         args.dp_degree,
@@ -707,6 +725,7 @@ if __name__ == "__main__":
     parser.add_execution_mode_config_arguments()
     parser.add_gpt2_model_path_config_arguments()
     parser.add_simulation_output_config_arguments()
+    parser.add_model_config_arguments(choices=list(model_params.keys()))
     parser.add_argument("--n_layer", type=int, default=12, help="Num hidden layers")
     parser.add_argument(
         "--n_head",

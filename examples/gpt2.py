@@ -584,7 +584,15 @@ def simulate(function, input_data, topology, allreduce_parameters=None):
 
 
 def run_pytorch(
-    function, input_data, world_size, use_gpu=False, debug_stacktrace=False
+    function,
+    input_data,
+    world_size,
+    num_warmup,
+    num_repetitions,
+    use_gpu=False,
+    debug_stacktrace=False,
+    measure_peak_memory=False,
+    profile=False,
 ):
     # TODO: Move this to a utils file
     def _resolve_dtype(dtype):
@@ -622,9 +630,11 @@ def run_pytorch(
         pytorch_input_data,
         input_types=input_types,
         use_gpu=use_gpu,
-        num_warmup=5,
-        num_repetitions=10,
+        num_warmup=num_warmup,
+        num_repetitions=num_repetitions,
         debug_stacktrace=debug_stacktrace,
+        measure_peak_memory=measure_peak_memory,
+        profile=profile,
     )
 
 
@@ -677,8 +687,12 @@ def main(args):
             transformed_function,
             initialized_input_data,
             world_size,
+            args.num_warmup,
+            args.num_repetitions,
             use_gpu=args.use_gpu,
             debug_stacktrace=args.debug_stacktrace,
+            measure_peak_memory=args.measure_peak_memory,
+            profile=args.profile,
         )
         print(f"Latency: {results.latency*1000:.2f} ms")
         print(f"Throughput: {args.batch_size / results.latency:.2f} " f"samples/second")

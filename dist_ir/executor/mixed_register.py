@@ -49,9 +49,9 @@ def _gather_prop_fn(op, x, y):
         axis = op.attributes["axis"]
     else:
         axis = 0
-    if isinstance(y, np.ndarray) and axis == 0:
+    if isinstance(y.val, np.ndarray) and axis == 0:
         # Manually compute the new shape for the common case
-        new_shape = y.shape + x.shape[1:]
+        new_shape = y.val.shape + x.shape[1:]
     else:
         # Use the NumPy implementation in the general case
         temp = np.zeros(x.shape)

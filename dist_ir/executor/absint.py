@@ -132,7 +132,10 @@ def dispatch(
         if _abstractable_types(input_types, signature):
             return signature, implementation
 
-    raise ValueError(f"Could not dispatch {op_type} with input types {input_types}")
+    raise ValueError(
+        f"Could not dispatch {op_type} with {len(input_types)} "
+        f"input types {input_types}"
+    )
 
 
 class AbstractState:

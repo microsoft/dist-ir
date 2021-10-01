@@ -22,7 +22,7 @@ model_params = {
     "mlp-xs": (8, 512),
     "mlp-small": (16, 8192),
     "mlp-medium": (64, 16384),
-    "mlp-large": (128, 32768),
+    "mlp-large": (96, 32768),
 }
 
 

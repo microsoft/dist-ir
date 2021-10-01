@@ -118,15 +118,9 @@ def _div(x, y, ctx=None):
 
 
 def _gather(x, y, axis=0, ctx=None):
-    # TODO: Find the best Torch equivalent for this
-    # torch.gather and torch.index_select do not work
-    output = torch.tensor(np.take(x.cpu().numpy(), y.cpu().numpy(), axis=axis))
-    # output = torch.gather(x, index=torch.LongTensor(y), dim=axis)
-    if output.shape == (1,):
-        return output[0]
-    if ctx.use_gpu:
-        return output.cuda(dist.get_rank())
-    return output
+    if axis != 0:
+        raise NotImplementedError(f"Gather currently requires axis to be 0")
+    return x[y]
 
 
 def _gemm(x, y, z, alpha, beta, transA=0, transB=0, ctx=None):

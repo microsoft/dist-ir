@@ -685,6 +685,9 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
         return outputs, peak_memory, all_op_runtimes
 
     if ctx.profile:
+        profile_dir = f"{fn.name}_profile"
+        if not os.path.isdir(profile_dir):
+            os.mkdir(profile_dir)
         outputs, peak_memory, all_op_runtimes = run(events)
         # TODO: Include separate flag for PyTorch profiling?
         """
@@ -697,7 +700,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
                 wait=0, warmup=num_warmup_steps, active=num_repetitions
             ),
             on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                f"{fn.name}_profile"
+                profile_dir,
             ),
         ) as p:
             outputs, peak_memory, all_op_runtimes = run(events, p)

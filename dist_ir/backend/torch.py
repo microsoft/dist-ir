@@ -547,17 +547,24 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
         )
         for i, t in enumerate(inputs):
             input_size = t.nelement() * t.element_size()
+            # TODO: Hide under a verbose flag
+            """
             print(
                 f"Rank {rank}: Moving input {i} of shape {t.shape} "
                 f"({input_size} bytes) to GPU..."
             )
+            """
             gpu_inputs.append(t.cuda(rank))
+            # TODO: Hide under a verbose flag
+            """
             torch.cuda.synchronize(device=rank)
             memory_usage = get_memory_usage(rank)
             print(
                 f"Rank {rank}: reserved={memory_usage.reserved}, "
                 f"allocated={memory_usage.allocated}"
             )
+            """
+        torch.cuda.synchronize(device=rank)
         inputs = gpu_inputs
     else:
         print(

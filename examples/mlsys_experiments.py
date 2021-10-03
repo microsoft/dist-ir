@@ -69,9 +69,22 @@ def prepare_best_grid_search_configs(args):
     if args.simulation_file is None:
         raise ValueError("Simulation file must be provided")
     # TODO handle files containing multiple model(-size)s
+    best_configs = None
     df = pd.read_csv(args.simulation_file)
-    best_configs = df[df["peak_memory"] < 21e3]  # TODO make memory limit an arg
-    best_configs = best_configs.sort_values(by="throughput", ascending=False).head(10)
+    model_sizes = df["model_size"].unique()
+    if "mlp" in model_sizes[0]:
+        model_sizes = ["mlp-small", "mlp-medium", "mlp-large"]
+    elif "gpt" in model_sizes[0]:
+        model_sizes = ["gpt3-xl", "gpt3-13B", "gpt3-175B"]
+    for model_size in model_sizes:
+        df = pd.read_csv(args.simulation_file)
+        df = df[df["model_size"] == model_size]
+        df = df[df["peak_memory"] < 28 * 1e9]  # TODO make memory limit an arg
+        df = df.sort_values(by="throughput", ascending=False).head(10)
+        if best_configs is None:
+            best_configs = df
+        else:
+            best_configs = best_configs.append(df)
     best_configs.to_csv(args.output_file)
 
 
@@ -79,8 +92,16 @@ def prepare_accuracy_sample_configs(args):
     if args.simulation_file is None:
         raise ValueError("Simulation file must be provided")
     df = pd.read_csv(args.simulation_file)
-    sample = df[df["peak_memory"] < 21e3]  # TODO make memory limit an arg
-    sample = sample.sample(n=20, random_state=1)
+    sample = df[
+        (df["model_size"] == "mlp-small")
+        | (df["model_size"] == "mlp-medium")
+        | (df["model_size"] == "mlp-large")
+        | (df["model_size"] == "gpt3-xl")
+        | (df["model_size"] == "gpt3-13B")
+        | (df["model_size"] == "gpt3-175B")
+    ]
+    sample = df[df["peak_memory"] <= 28 * 1e9]  # TODO make memory limit an arg
+    sample = sample.sample(n=100, random_state=args.seed)
     sample = sample.sort_values(by="peak_memory")
     sample.to_csv(args.output_file)
 
@@ -142,6 +163,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--dtype", choices=["fp32", "fp16"], default="fp16", help="dtype"
     )
+    parser.add_argument("--seed", type=int, default=1, help="Random seed")
 
     args = parser.parse_args()
     assert args.mode is not None

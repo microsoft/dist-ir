@@ -100,7 +100,7 @@ def prepare_accuracy_sample_configs(args):
         | (df["model_size"] == "gpt3-13B")
         | (df["model_size"] == "gpt3-175B")
     ]
-    sample = df[df["peak_memory"] <= 28 * 1e9]  # TODO make memory limit an arg
+    sample = sample[sample["peak_memory"] <= 28 * 1e9]  # TODO make memory limit an arg
     sample = sample.sample(n=100, random_state=args.seed)
     sample = sample.sort_values(by="peak_memory")
     sample.to_csv(args.output_file)

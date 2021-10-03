@@ -522,7 +522,8 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
     `num_warmup_steps + num_repetitions` times. The outputs of the last run are
     returned, along with the last `num_repetitions` runtimes.
     """
-    torch.cuda.set_per_process_memory_fraction(1.0, device=rank)
+    if ctx.use_gpu:
+        torch.cuda.set_per_process_memory_fraction(1.0, device=rank)
     os.environ["MASTER_ADDR"] = "127.0.0.1"  # TODO make these configurable
     os.environ["MASTER_PORT"] = "29500"
     backend = "nccl" if ctx.use_gpu else "gloo"
@@ -605,7 +606,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
                 if i == num_warmup_steps:
                     if ctx.world_size > 0:
                         torch.distributed.barrier()
-                    else:
+                    elif ctx.use_gpu:
                         torch.cuda.synchronize(device=rank)
                 record_op_runtimes = i >= num_warmup_steps
 

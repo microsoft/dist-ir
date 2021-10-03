@@ -49,5 +49,10 @@ for ((i=$start_batch_size;i<=$end_batch_size;i=i*2)); do
         --model_size $model_size --config $config $batch_size --all_world_sizes $world_size \
         --output_file $output_file --append_output_file \
         "
-    python -m $command || exit 1
+    timeout 1h python -m $command
+    retcode=$?
+    if [[ $retcode == 124 ]]; then
+        echo "TIMEOUT"
+        exit 1
+    fi
 done

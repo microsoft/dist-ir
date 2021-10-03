@@ -179,18 +179,18 @@ jobs:
   - name: mlp-sample
     sku: G16
     command:
-      - ./examples/run_grid_search.sh mlp $$AMLT_DATA_DIR/mlp_dgx_simulated_grid_search_results_sample.csv $$AMLT_OUTPUT_DIR/mlp_dgx_backend_grid_search_results_sample.csv
+      - ./examples/run_grid_search.sh mlp 16 $$AMLT_DATA_DIR/mlp_dgx_simulated_grid_search_results_sample.csv $$AMLT_OUTPUT_DIR/mlp_dgx_backend_grid_search_results_sample.csv
   - name: gpt2-sample
     sku: G16
     command:
       - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
-      - ./examples/run_grid_search.sh gpt $$AMLT_DATA_DIR/gpt2_dgx_simulated_grid_search_results_sample.csv $$AMLT_OUTPUT_DIR/gpt2_dgx_backend_grid_search_results_sample.csv
+      - ./examples/run_grid_search.sh gpt 16 $$AMLT_DATA_DIR/gpt2_dgx_simulated_grid_search_results_sample.csv $$AMLT_OUTPUT_DIR/gpt2_dgx_backend_grid_search_results_sample.csv
   - name: mlp-best
     sku: G16
     command:
-      - ./examples/run_grid_search.sh mlp $$AMLT_DATA_DIR/mlp_dgx_simulated_grid_search_results_best.csv $$AMLT_OUTPUT_DIR/mlp_dgx_backend_grid_search_results_best.csv
+      - ./examples/run_grid_search.sh mlp 16 $$AMLT_DATA_DIR/mlp_dgx_simulated_grid_search_results_best.csv $$AMLT_OUTPUT_DIR/mlp_dgx_backend_grid_search_results_best.csv
   - name: gpt2-best
     sku: G16
     command:
       - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
-      - ./examples/run_grid_search.sh gpt $$AMLT_DATA_DIR/gpt2_dgx_simulated_grid_search_results_best.csv $$AMLT_OUTPUT_DIR/gpt2_dgx_backend_grid_search_results_best.csv
+      - ./examples/run_grid_search.sh gpt 16 $$AMLT_DATA_DIR/gpt2_dgx_simulated_grid_search_results_best.csv $$AMLT_OUTPUT_DIR/gpt2_dgx_backend_grid_search_results_best.csv

@@ -21,6 +21,16 @@ data:
   remote_dir: distir-data
 
 jobs:
+  - name: sleep
+    sku: G16
+    command:
+      - sleep 10h
+  - name: calibrate_network_bandwidth
+    sku: G16
+    command:
+      - cp $$AMLT_DATA_DIR/dgx.fp16.calibration_parameters.json $$AMLT_OUTPUT_DIR
+      - python -m examples.mlsys_experiments --mode calibrate --calibrate_network_bandwidth --output_file $$AMLT_OUTPUT_DIR/dgx.fp16.calibration_parameters.json
+      - cp $$AMLT_OUTPUT_DIR/dgx.fp16.calibration_parameters.json $$AMLT_DATA_DIR
   - name: calibrate_simulator_parameters
     sku: G16
     command:
@@ -28,27 +38,27 @@ jobs:
   - name: mlp-small_pure_baseline_dp
     sku: G16
     command:
-      - ./examples/run_pure_baseline.sh mlp mlp-small DP 16 1024 131072 $$AMLT_OUTPUT_DIR/mlp-small_backend_dp.csv
+      - ./examples/run_pure_baseline.sh mlp mlp-small DP 16 1024 524288 $$AMLT_OUTPUT_DIR/mlp-small_backend_dp.csv
   - name: mlp-small_pure_baseline_hp
     sku: G16
     command:
-      - ./examples/run_pure_baseline.sh mlp mlp-small HP 16 1024 16384 $$AMLT_OUTPUT_DIR/mlp-small_backend_hp.csv
+      - ./examples/run_pure_baseline.sh mlp mlp-small HP 16 1024 65536 $$AMLT_OUTPUT_DIR/mlp-small_backend_hp.csv
   - name: mlp-small_pure_baseline_pp
     sku: G16
     command:
-      - ./examples/run_pure_baseline.sh mlp mlp-small PP 16 1024 1048576 $$AMLT_OUTPUT_DIR/mlp-small_backend_pp.csv
+      - ./examples/run_pure_baseline.sh mlp mlp-small PP 16 1024 524288 $$AMLT_OUTPUT_DIR/mlp-small_backend_pp.csv
   - name: mlp-medium_pure_baseline_dp
     sku: G16
     command:
-      - ./examples/run_pure_baseline.sh mlp mlp-medium DP 16 1024 131072 $$AMLT_OUTPUT_DIR/mlp-medium_backend_dp.csv
+      - ./examples/run_pure_baseline.sh mlp mlp-medium DP 16 1024 1048576 $$AMLT_OUTPUT_DIR/mlp-medium_backend_dp.csv
   - name: mlp-medium_pure_baseline_hp
     sku: G16
     command:
-      - ./examples/run_pure_baseline.sh mlp mlp-medium HP 16 1024 16384 $$AMLT_OUTPUT_DIR/mlp-medium_backend_hp.csv
+      - ./examples/run_pure_baseline.sh mlp mlp-medium HP 16 1024 8192 $$AMLT_OUTPUT_DIR/mlp-medium_backend_hp.csv
   - name: mlp-medium_pure_baseline_pp
     sku: G16
     command:
-      - ./examples/run_pure_baseline.sh mlp mlp-medium PP 16 1024 1048576 $$AMLT_OUTPUT_DIR/mlp-medium_backend_pp.csv
+      - ./examples/run_pure_baseline.sh mlp mlp-medium PP 16 1024 131072 $$AMLT_OUTPUT_DIR/mlp-medium_backend_pp.csv
   - name: mlp-large_pure_baseline_dp
     sku: G16
     command:
@@ -56,11 +66,11 @@ jobs:
   - name: mlp-large_pure_baseline_hp
     sku: G16
     command:
-      - ./examples/run_pure_baseline.sh mlp mlp-large HP 16 1024 16384 $$AMLT_OUTPUT_DIR/mlp-large_backend_hp.csv
+      - ./examples/run_pure_baseline.sh mlp mlp-large HP 16 1024 2048 $$AMLT_OUTPUT_DIR/mlp-large_backend_hp.csv
   - name: mlp-large_pure_baseline_pp
     sku: G16
     command:
-      - ./examples/run_pure_baseline.sh mlp mlp-large PP 16 1024 1048576 $$AMLT_OUTPUT_DIR/mlp-large_backend_pp.csv
+      - ./examples/run_pure_baseline.sh mlp mlp-large PP 16 1024 4096 $$AMLT_OUTPUT_DIR/mlp-large_backend_pp.csv
   - name: gpt3-xl_pure_baseline
     sku: G16
     command:
@@ -74,7 +84,7 @@ jobs:
       - free -h
       - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
       - ./examples/run_pure_baseline.sh gpt gpt3-xl DP 16
-        1024 1048576
+        131072 524288
         $$AMLT_OUTPUT_DIR/gpt3-xl_backend.csv
   - name: gpt3-xl_pure_baseline_hp_2
     sku: G16
@@ -83,7 +93,7 @@ jobs:
       - free -h
       - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
       - ./examples/run_pure_baseline.sh gpt gpt3-xl HP 16
-        1024 1048576
+        65536 262144
         $$AMLT_OUTPUT_DIR/gpt3-xl_backend.csv
   - name: gpt3-xl_pure_baseline_pp_2
     sku: G16
@@ -92,7 +102,7 @@ jobs:
       - free -h
       - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
       - ./examples/run_pure_baseline.sh gpt gpt3-xl PP 16
-        1024 1048576
+        65536 262144
         $$AMLT_OUTPUT_DIR/gpt3-xl_backend.csv
   - name: gpt3-6.7B_pure_baseline_dp_2
     sku: G16
@@ -101,7 +111,7 @@ jobs:
       - free -h
       - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
       - ./examples/run_pure_baseline.sh gpt gpt3-6.7B DP 16
-        1024 1048576
+        16384 65536
         $$AMLT_OUTPUT_DIR/gpt3-6.7B_backend.csv
   - name: gpt3-6.7B_pure_baseline_hp_2
     sku: G16
@@ -110,7 +120,7 @@ jobs:
       - free -h
       - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
       - ./examples/run_pure_baseline.sh gpt gpt3-6.7B HP 16
-        1024 1048576
+        65536 1048576
         $$AMLT_OUTPUT_DIR/gpt3-6.7B_backend.csv
   - name: gpt3-6.7B_pure_baseline_pp_2
     sku: G16
@@ -119,7 +129,7 @@ jobs:
       - free -h
       - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
       - ./examples/run_pure_baseline.sh gpt gpt3-6.7B PP 16
-        1024 1048576
+        65536 1048576
         $$AMLT_OUTPUT_DIR/gpt3-6.7B_backend.csv
   - name: gpt3-13B_pure_baseline_dp_2
     sku: G16
@@ -128,7 +138,7 @@ jobs:
       - free -h
       - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
       - ./examples/run_pure_baseline.sh gpt gpt3-13B DP 16
-        1024 1048576
+        16384 65536
         $$AMLT_OUTPUT_DIR/gpt3-13B_backend.csv
   - name: gpt3-13B_pure_baseline_hp_2
     sku: G16
@@ -137,7 +147,7 @@ jobs:
       - free -h
       - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
       - ./examples/run_pure_baseline.sh gpt gpt3-13B HP 16
-        1024 1048576
+        16384 65536
         $$AMLT_OUTPUT_DIR/gpt3-13B_backend.csv
   - name: gpt3-13B_pure_baseline_pp_2
     sku: G16
@@ -146,7 +156,7 @@ jobs:
       - free -h
       - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
       - ./examples/run_pure_baseline.sh gpt gpt3-13B PP 16
-        1024 1048576
+        32768 131072
         $$AMLT_OUTPUT_DIR/gpt3-13B_backend.csv
   - name: gpt3-175B_pure_baseline_hp_2
     sku: G16
@@ -155,7 +165,7 @@ jobs:
       - free -h
       - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
       - ./examples/run_pure_baseline.sh gpt gpt3-175B HP 16
-        1024 1048576
+        2048 8192
         $$AMLT_OUTPUT_DIR/gpt3-175B_backend.csv
   - name: gpt3-175B_pure_baseline_pp_2
     sku: G16
@@ -164,5 +174,23 @@ jobs:
       - free -h
       - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
       - ./examples/run_pure_baseline.sh gpt gpt3-175B PP 16
-        1024 1048576
+        8192 32768
         $$AMLT_OUTPUT_DIR/gpt3-175B_backend.csv
+  - name: mlp-sample
+    sku: G16
+    command:
+      - ./examples/run_grid_search.sh mlp $$AMLT_DATA_DIR/mlp_dgx_simulated_grid_search_results_sample.csv $$AMLT_OUTPUT_DIR/mlp_dgx_backend_grid_search_results_sample.csv
+  - name: gpt2-sample
+    sku: G16
+    command:
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_grid_search.sh gpt $$AMLT_DATA_DIR/gpt2_dgx_simulated_grid_search_results_sample.csv $$AMLT_OUTPUT_DIR/gpt2_dgx_backend_grid_search_results_sample.csv
+  - name: mlp-best
+    sku: G16
+    command:
+      - ./examples/run_grid_search.sh mlp $$AMLT_DATA_DIR/mlp_dgx_simulated_grid_search_results_best.csv $$AMLT_OUTPUT_DIR/mlp_dgx_backend_grid_search_results_best.csv
+  - name: gpt2-best
+    sku: G16
+    command:
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_grid_search.sh gpt $$AMLT_DATA_DIR/gpt2_dgx_simulated_grid_search_results_best.csv $$AMLT_OUTPUT_DIR/gpt2_dgx_backend_grid_search_results_best.csv

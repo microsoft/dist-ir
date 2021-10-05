@@ -14,13 +14,14 @@ from dist_ir.executor import (
 )
 from dist_ir.importer import import_from_onnx
 from dist_ir.ir import FunctionMaker, Op, Value, get_uniform_topology
-from dist_ir.ir.type import Float16, Float32, Tensor, Type, abstract_values
+from dist_ir.ir.type import Int64, Float16, Float32, Tensor, Type, abstract_values
 from dist_ir.transforms import (
     gpt2_dhp_transform,
 )
 from dist_ir.transforms.gpt2_dhp_transform import check_params, update_attributes
 
 from .parser import Parser
+
 
 model_params = {
     "gpt2-xs": (4, 12, 768),  # Debug
@@ -447,13 +448,17 @@ def resize_function_and_input_data(
     return function, input_data
 
 
-def create_input_ids(batch_size):
-    tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-    tokens = tokenizer.encode(
-        "Here is some text to encode Hello World", add_special_tokens=True
-    )
-    input_ids = torch.tensor([[tokens] for _ in range(batch_size)])
-    return _to_numpy(input_ids)
+def create_input_ids(batch_size, use_real_data):
+    if use_real_data:
+        tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+        tokens = tokenizer.encode(
+            "Here is some text to encode Hello World", add_special_tokens=True
+        )
+        input_ids = torch.tensor([[tokens] for _ in range(batch_size)])
+        input_ids = _to_numpy(input_ids)
+    else:
+        input_ids = Tensor(shape=(batch_size, 1, 8), dtype=Int64(), device=None)
+    return input_ids
 
 
 def _update_input_data_for_hp(
@@ -555,7 +560,7 @@ def get_transformed_function_and_input_data(
         function, input_data, n_layer, n_head, d_embd, dtype
     )
 
-    input_ids = create_input_ids(batch_size)
+    input_ids = create_input_ids(batch_size, use_real_weights)
     input_data = [input_ids] + input_data
 
     if print_stats:

@@ -12,10 +12,6 @@ import roundrobin
 from ..ir import cpprint, Op
 from ..ir.function import Function, FunctionMaker
 from .pipedream_scheduler import PipeDreamScheduler
-from .sanitize_attributes_transform import (
-    sanitize_unhashable_attributes,
-    restore_unhashable_attributes,
-)
 
 # TODO: Add these helper functions to a transform-writing API
 
@@ -387,9 +383,6 @@ def mlp_dhp_transform(
 
     if debug:
         logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.DEBUG)
-
-    # Temporarily remove unhashable attributes.
-    (function, attribute_map) = sanitize_unhashable_attributes(function)
 
     # Initialize the transformed function and construct the device tree given the
     # specified parallelism dimensions.
@@ -783,11 +776,5 @@ def mlp_dhp_transform(
                             for j in range(len(hp_group))
                         ],
                     )
-
-    # Hack to get around unhashable numpy array attributes
-    # TODO: Fix this more gracefully?
-    transformed_function = restore_unhashable_attributes(
-        transformed_function, attribute_map
-    )
 
     return init_function, transformed_function.finalize()

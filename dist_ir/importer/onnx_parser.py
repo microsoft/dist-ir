@@ -58,6 +58,10 @@ def _parse_attribute(attr):
     elif attr_type == 4:
         numpy_dtype = _get_numpy_dtype_from_onnx_dtype(attr.t.data_type)
         value = np.frombuffer(attr.t.raw_data, dtype=numpy_dtype)
+        if value.shape != (1,):
+            raise NotImplementedError("NumPy attributes must be scalars")
+        else:
+            value = value.item(0)
     elif attr_type == 5:
         raise NotImplementedError("Graph attribute")
     elif attr_type == 11:

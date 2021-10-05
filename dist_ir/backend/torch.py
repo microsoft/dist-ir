@@ -106,7 +106,7 @@ def _constant(value, device=None, ctx=None):
 
 def _constant_of_shape(x, value=0, ctx=None):
     # TODO: Check if value is a single value or array?
-    output = torch.full(tuple(x.int().cpu().numpy()), value[0])
+    output = torch.full(tuple(x.int().cpu().numpy()), value)
     if ctx.use_gpu:
         return output.cuda(dist.get_rank())
     else:
@@ -516,6 +516,11 @@ def run_function(
     return tuple(value_map[v] for v in fn.outputs), peak_memory, op_runtime_events
 
 
+def run_process_wrapper(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
+    with torch.inference_mode():
+        return run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs)
+
+
 def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
     """The Python function on rank `rank` that runs DistIR function `fn` on
     (torch) inputs `inputs`. The function is run
@@ -626,15 +631,14 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
                 # exit in the event of errors. After confirming there are no errors,
                 # we proceed without the try/catch in subsequent iterations.
                 try:
-                    with torch.inference_mode():
-                        outputs, peak_memory, op_runtime_events = run_function(
-                            ctx,
-                            fn,
-                            inputs,
-                            rank,
-                            recv_buffers,
-                            record_op_runtimes=record_op_runtimes,
-                        )
+                    outputs, peak_memory, op_runtime_events = run_function(
+                        ctx,
+                        fn,
+                        inputs,
+                        rank,
+                        recv_buffers,
+                        record_op_runtimes=record_op_runtimes,
+                    )
                 except Exception as e:
                     print_exc()
                     return None, None, None
@@ -769,7 +773,7 @@ def run_multiprocesses(
         (r, f, x) for (r, (f, x)) in enumerate(zip(per_rank_functions, per_rank_inputs))
     ]
 
-    per_rank_runner = partial(run_process, ctx, num_warmup, num_repetitions)
+    per_rank_runner = partial(run_process_wrapper, ctx, num_warmup, num_repetitions)
     mp = torch.multiprocessing.get_context("spawn")
     with mp.Pool(ctx.world_size) as p:
         outputs = p.starmap(per_rank_runner, args)

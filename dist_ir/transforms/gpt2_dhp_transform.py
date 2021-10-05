@@ -12,10 +12,7 @@ import roundrobin
 from ..executor.type_inference import infer_types
 from ..ir.function import FunctionMaker
 from .pipedream_scheduler import PipeDreamScheduler
-from .sanitize_attributes_transform import (
-    sanitize_unhashable_attributes,
-    restore_unhashable_attributes,
-)
+
 
 # TODO: Add these helper functions to a transform-writing API
 
@@ -418,7 +415,6 @@ def check_params(
 def update_attributes(
     op_type,
     attributes,
-    attribute_map,
     old_d_embd,
     new_d_embd,
     old_n_head,
@@ -444,24 +440,13 @@ def update_attributes(
                 }
             )
     elif op_type == "Constant":
-        value = attribute_map[("value", attributes["value"])]
-        if (
-            isinstance(value, np.ndarray)
-            and value.shape == (1,)
-            and value[0] == old_n_head
-        ):
-            value = np.array([new_n_head], dtype=value.dtype)
-            sanitized_value = value.tobytes()
-            attributes = frozendict(
-                {"value": sanitized_value, "device": attributes["device"]}
-            )
-            attribute_map[("value", sanitized_value)] = value
+        value = attributes["value"]
+        if value == old_n_head:
+            value = new_n_head
             new_device = new_device if new_device is not None else attributes["device"]
-            attributes = frozendict({"value": sanitized_value, "device": new_device})
-            attribute_map[("value", sanitized_value)] = value
+            attributes = frozendict({"value": value, "device": new_device})
         elif new_device is not None:
-            sanitized_value = attributes["value"]
-            attributes = frozendict({"value": sanitized_value, "device": new_device})
+            attributes = frozendict({"value": value, "device": new_device})
     return attributes
 
 
@@ -482,9 +467,6 @@ def gpt2_dhp_transform(
 
     if debug:
         logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.DEBUG)
-
-    # Temporarily remove unhashable attributes.
-    (function, attribute_map) = sanitize_unhashable_attributes(function)
 
     # Initialize the transformed function and construct the device tree given the
     # specified parallelism dimensions.
@@ -625,7 +607,6 @@ def gpt2_dhp_transform(
                             attributes = update_attributes(
                                 op.op_type,
                                 op.attributes,
-                                attribute_map,
                                 old_d_embd=d_embd,
                                 new_d_embd=d_embd // hp_degree,
                                 old_n_head=n_head,
@@ -868,11 +849,5 @@ def gpt2_dhp_transform(
             else:
                 # Do nothing for other outputs
                 pass
-
-    # Hack to get around unhashable numpy array attributes
-    # TODO: Fix this more gracefully?
-    transformed_function = restore_unhashable_attributes(
-        transformed_function, attribute_map
-    )
 
     return init_function, transformed_function.finalize()

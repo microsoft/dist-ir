@@ -101,6 +101,7 @@ class Function:
     ) -> Function:
         """Returns a Function comprised of the specified subset of ops."""
         assert not deepcopy  # TODO We shouldn't need this functionality anymore
+        ops_set = set(ops)
         subfunction = FunctionMaker(name)
         value_map = {}
         outputs = []
@@ -137,7 +138,7 @@ class Function:
                 has_external_output = False
                 if (
                     orig_output in self.outputs
-                    or len(set(self.consumers[orig_output]).difference(ops)) > 0
+                    or len(set(self.consumers[orig_output]).difference(ops_set)) > 0
                 ):
                     outputs.append(subfunction_output)
                 value_map[orig_output] = subfunction_output

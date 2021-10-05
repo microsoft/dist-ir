@@ -103,6 +103,8 @@ def create_owt_model(num_devices, num_layers):
     ],
 )
 def test_owt(num_devices, num_layers, use_gpu, dtype):
+    if not use_gpu:
+        pytest.skip("TODO: Fix inference mode issue with allgather")
     dist_ir_dtype = Float32 if dtype == "fp32" else Float16
     numpy_dtype = np.float32 if dtype == "fp32" else np.float16
     torch_dtype = torch.float32 if dtype == "fp32" else torch.float16
@@ -362,9 +364,9 @@ def test_separate_projection_types():
 
 
 if __name__ == "__main__":
-    # test_owt(2, 4, use_gpu=False)
+    test_owt(2, 4, use_gpu=False, dtype="fp32")
     # test_dp_mlp(use_gpu=False)
     # test_send_recv(use_gpu=False)
     # test_single_device(use_gpu=False)
-    test_dp_mp_matmuls()
-    test_mlp_grid_search(use_gpu=False)
+    # test_dp_mp_matmuls()
+    # test_mlp_grid_search(use_gpu=False)

@@ -17,8 +17,6 @@ from dist_ir.ir import FunctionMaker, Op, Value, get_uniform_topology
 from dist_ir.ir.type import Float16, Float32, Tensor, Type, abstract_values
 from dist_ir.transforms import (
     gpt2_dhp_transform,
-    sanitize_unhashable_attributes,
-    restore_unhashable_attributes,
 )
 from dist_ir.transforms.gpt2_dhp_transform import check_params, update_attributes
 
@@ -48,8 +46,6 @@ def _to_numpy(x):
 
 
 def _filter_extra_outputs(function):
-    function, attribute_map = sanitize_unhashable_attributes(function)
-
     # Map from op to set of function output values.
     sinks = defaultdict(set)
 
@@ -94,13 +90,11 @@ def _filter_extra_outputs(function):
         for orig_output, new_output in zip(op.outputs, new_op.outputs):
             value_map[orig_output] = new_output
 
-    filtered_function = restore_unhashable_attributes(filtered_function, attribute_map)
     return filtered_function.finalize()
 
 
 def _set_model_size(function, n_layer, n_head, d_embd, dtype):
     dist_ir_dtype = Float32 if dtype == "fp32" else Float16
-    function, attribute_map = sanitize_unhashable_attributes(function)
 
     # Prepare a list of the existing Transformer blocks in the function.
     blocks = []
@@ -207,7 +201,6 @@ def _set_model_size(function, n_layer, n_head, d_embd, dtype):
                 attributes = update_attributes(
                     op.op_type,
                     op.attributes,
-                    attribute_map,
                     old_d_embd=768,
                     new_d_embd=d_embd,
                     old_n_head=12,
@@ -326,10 +319,6 @@ def _set_model_size(function, n_layer, n_head, d_embd, dtype):
         transformed_function.ops.append(new_op)
         for output, transformed_output in zip(op.outputs, new_op.outputs):
             value_map[output] = transformed_output
-
-    transformed_function = restore_unhashable_attributes(
-        transformed_function, attribute_map
-    )
 
     return transformed_function.finalize(), inputs_to_remove
 

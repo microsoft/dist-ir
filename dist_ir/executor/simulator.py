@@ -158,12 +158,6 @@ def _simulate_op(
                 live_memory_deltas[output_device] += output.size()
         state.update_live_memory(live_memory_deltas)
 
-    # Update the peak memory.
-    for device in state.live_memory:
-        state.peak_memory[device] = max(
-            state.peak_memory[device], state.live_memory[device][-1][1]
-        )
-
     # Update the live memory to reflect any freed activations.
     live_memory_deltas = defaultdict(lambda: 0)
     for inp, in_edge in zip(inputs, op.inputs):
@@ -230,4 +224,14 @@ class Simulator:
                 costs = cost_function(op, *abstracted_inputs)
 
             _simulate_op(state, op, costs, inputs, outputs)
+
+        # Record the peak memory.
+        for device in state.live_memory:
+            state.peak_memory[device] = max(
+                [
+                    state.live_memory[device][i][1]
+                    for i in range(len(state.live_memory[device]))
+                ]
+            )
+
         return state

@@ -92,18 +92,23 @@ def prepare_accuracy_sample_configs(args):
     if args.simulation_file is None:
         raise ValueError("Simulation file must be provided")
     df = pd.read_csv(args.simulation_file)
-    sample = df[
-        (df["model_size"] == "mlp-small")
-        | (df["model_size"] == "mlp-medium")
-        | (df["model_size"] == "mlp-large")
-        | (df["model_size"] == "gpt3-xl")
-        | (df["model_size"] == "gpt3-13B")
-        | (df["model_size"] == "gpt3-175B")
-    ]
-    sample = sample[sample["peak_memory"] <= 28 * 1e9]  # TODO make memory limit an arg
-    sample = sample.sample(n=100, random_state=args.seed)
-    sample = sample.sort_values(by="peak_memory")
-    sample.to_csv(args.output_file)
+    model_sizes = df["model_size"].unique()
+    if "mlp" in model_sizes[0]:
+        model_sizes = ["mlp-small", "mlp-medium", "mlp-large"]
+    elif "gpt" in model_sizes[0]:
+        model_sizes = ["gpt3-xl", "gpt3-13B", "gpt3-175B"]
+    sample_configs = None
+    for model_size in model_sizes:
+        df = pd.read_csv(args.simulation_file)
+        df = df[df["model_size"] == model_size]
+        df = df[df["peak_memory"] < 28 * 1e9]  # TODO make memory limit an arg
+        df = df.sample(n=min(100, len(df)), random_state=args.seed)
+        df = df.sort_values(by="peak_memory")
+        if sample_configs is None:
+            sample_configs = df
+        else:
+            sample_configs = sample_configs.append(df)
+    sample_configs.to_csv(args.output_file)
 
 
 if __name__ == "__main__":

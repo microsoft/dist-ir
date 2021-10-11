@@ -97,6 +97,8 @@ def _concat(*args, axis=None, ctx=None):
 
 def _constant(value, device=None, ctx=None):
     output = torch.tensor(value)
+    if len(output.shape) == 0:
+        return output
     if output.shape == (1,):
         return output[0]
     if ctx.use_gpu:

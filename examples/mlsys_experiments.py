@@ -72,19 +72,21 @@ def prepare_best_grid_search_configs(args):
     best_configs = None
     df = pd.read_csv(args.simulation_file)
     model_sizes = df["model_size"].unique()
+    batch_sizes = sorted(df["batch_size"].unique())
     if "mlp" in model_sizes[0]:
         model_sizes = ["mlp-small", "mlp-medium", "mlp-large"]
     elif "gpt" in model_sizes[0]:
         model_sizes = ["gpt3-xl", "gpt3-13B", "gpt3-175B"]
-    for model_size in model_sizes:
-        df = pd.read_csv(args.simulation_file)
-        df = df[df["model_size"] == model_size]
-        df = df[df["peak_memory"] < 28 * 1e9]  # TODO make memory limit an arg
-        df = df.sort_values(by="throughput", ascending=False).head(10)
-        if best_configs is None:
-            best_configs = df
-        else:
-            best_configs = best_configs.append(df)
+    for batch_size in batch_sizes:
+        for model_size in model_sizes:
+            df = pd.read_csv(args.simulation_file)
+            df = df[(df["model_size"] == model_size) & (df["batch_size"] == batch_size)]
+            df = df[df["peak_memory"] < 28 * 1e9]  # TODO make memory limit an arg
+            df = df.sort_values(by="throughput", ascending=False).head(10)
+            if best_configs is None:
+                best_configs = df
+            else:
+                best_configs = best_configs.append(df)
     best_configs.to_csv(args.output_file)
 
 

@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 from .fifo_scheduler import FIFOScheduler
 from .filter_transform import filter_transform
 from .gpt2_dhp_transform import gpt2_dhp_transform

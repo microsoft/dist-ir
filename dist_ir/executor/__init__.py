@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 from .absint import AbstractInterpreter, AbstractState
 from .concrete_value import ConcreteValue
 from .cost_model import CostModel

@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """
 This file defines a MixedRegister which contains op implementations that accept
 combinations of concrete and abstract input types. This is necessary for certain

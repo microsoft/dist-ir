@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 from collections import defaultdict
 from collections.abc import Hashable
 from frozendict import frozendict

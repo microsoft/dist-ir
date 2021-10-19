@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 from typing import List
 from ..ir.device import Device
 from ..ir.value import Value

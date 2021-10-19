@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 from dist_ir.ir import Value
 from dist_ir.ir.type import Tensor
 from dist_ir.executor import infer_types, sequentially_execute, ConcreteValue

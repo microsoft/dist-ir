@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """
 An abstract interpreter for DistIR programs. The abstract interpreter can be
 instantiated to perform multiple analyses by providing it with a notion of

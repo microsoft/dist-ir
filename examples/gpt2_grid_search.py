@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 import copy
 
 from .grid_search import DHPConfig, GridSearch, run_grid_search

@@ -1,4 +1,6 @@
 #! /bin/bash
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
 
 # A script to run pure strategy baslines using the pytorch backend.
 # Given the strategy DP/HP/PP, we run with increasing batch_sizes until we find

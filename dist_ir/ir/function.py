@@ -96,40 +96,19 @@ class Function:
         """Checks whether the given value is an output of this function."""
         return value in self.outputs
 
-    def get_subfunction(
-        self, ops: List[Op], deepcopy: bool = False, name: Optional[str] = "bar"
-    ) -> Function:
+    def get_subfunction(self, ops: List[Op], name: Optional[str] = "bar") -> Function:
         """Returns a Function comprised of the specified subset of ops."""
-        assert not deepcopy  # TODO We shouldn't need this functionality anymore
         ops_set = set(ops)
+        seen_values = set()
         subfunction = FunctionMaker(name)
-        value_map = {}
         outputs = []
         for op in ops:
-            subfunction_op_inputs = []
             for inp in op.inputs:
-                if inp not in value_map:
-                    if deepcopy:
-                        value_map[inp] = subfunction.add_input_value(inp.name, inp.type)
-                    else:
-                        subfunction.inputs.append(inp)
-                        value_map[inp] = inp
-                subfunction_op_inputs.append(value_map[inp])
-            output_names = [output.name for output in op.outputs]
-            if deepcopy:
-                subfunction_op_outputs = subfunction.add_op(
-                    op.op_type,
-                    name=op.name,
-                    inputs=subfunction_op_inputs,
-                    attributes=copy.deepcopy(op.attributes),
-                    subfunctions=copy.deepcopy(op.subfunctions),
-                    output_names=output_names,
-                )
-                if not isinstance(subfunction_op_outputs, tuple):
-                    subfunction_op_outputs = (subfunction_op_outputs,)
-            else:
-                subfunction.ops.append(op)
-                subfunction_op_outputs = op.outputs
+                if inp not in seen_values:
+                    subfunction.inputs.append(inp)
+                    seen_values.add(inp)
+            subfunction.ops.append(op)
+            subfunction_op_outputs = op.outputs
             for orig_output, subfunction_output in zip(
                 op.outputs, subfunction_op_outputs
             ):
@@ -141,7 +120,7 @@ class Function:
                     or len(set(self.consumers[orig_output]).difference(ops_set)) > 0
                 ):
                     outputs.append(subfunction_output)
-                value_map[orig_output] = subfunction_output
+                seen_values.add(subfunction_output)
         subfunction.set_outputs(outputs)
         return subfunction.finalize()
 

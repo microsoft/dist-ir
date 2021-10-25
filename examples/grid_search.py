@@ -260,7 +260,7 @@ class GridSearch(ABC):
                 self.run(config)
                 torch.cuda.empty_cache()
         elif self.backend == "simulate":
-            process_map(self.run, configs)
+            process_map(self.run, configs, max_workers=50, chunksize=1)
         else:
             raise ValueError(f"Invalid backend {self.backend}")
 

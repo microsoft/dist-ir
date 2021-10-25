@@ -11,9 +11,11 @@ from .type import Type
 @dataclass(frozen=True)
 class Op:
     op_type: str
-    name: str = ""
+    name: str = field(default="", hash=False, compare=False)
     inputs: Tuple[Value] = field(default_factory=tuple)
-    attributes: Dict[str, Any] = field(default_factory=frozendict)
+    attributes: Dict[str, Any] = field(
+        default_factory=frozendict, hash=False, compare=False
+    )
     subfunctions: Tuple["Function"] = field(default_factory=tuple)
     outputs: Tuple[Value] = field(init=False)
 

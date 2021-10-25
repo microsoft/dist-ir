@@ -8,7 +8,6 @@ import logging
 import re
 import roundrobin
 
-
 from ..executor.type_inference import infer_types
 from ..ir.function import FunctionMaker
 from .pipedream_scheduler import PipeDreamScheduler
@@ -540,6 +539,8 @@ def gpt2_dhp_transform(
     for v in init_function.outputs:
         transformed_function.inputs.append(v)
 
+    function_inputs = set(function.inputs)
+
     dp_outputs = defaultdict(list)
     for i, dp_device in enumerate(device_tree[device_tree_root]):
         # A map with the following structure:
@@ -589,7 +590,7 @@ def gpt2_dhp_transform(
                             # Retrieve the transformed input value from the appropriate
                             # data structure depending on whether the original input is
                             # a function input or an intermediate value.
-                            if inp in function.inputs:
+                            if inp in function_inputs:
                                 v = transformed_inputs[inp]
                                 dp_v = dp_inputs[v][i]
                                 hp_v = hp_inputs[dp_v][j]

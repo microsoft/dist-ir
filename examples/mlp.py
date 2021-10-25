@@ -59,7 +59,7 @@ def get_input_data(
     input_data = []
     x = np.random.normal(0, 0.02, size=(batch_size, input_dim))
     z = np.random.normal(0, 0.02, size=(batch_size, output_dim))
-    n = np.int64(batch_size)
+    n = np.int64(batch_size)  # Batch size needed for loss weighting
     if uniform_weight_sizes:
         weight = np.random.normal(0, 0.02, size=inputs[3].type.shape)
         weights = [weight for _ in range(len(inputs[3:]))]
@@ -254,7 +254,7 @@ def add_optimizer_ops(function):
         function.add_op(
             op_type="SGDOptimizer",
             inputs=(weights + gradients),
-            attributes={"lr": 0},
+            attributes={"lr": 0},  # Set learning rate to 0 to prevent precision issues
             output_names=[f"{w.name}'" for w in weights],
         )
 

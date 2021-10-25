@@ -230,7 +230,7 @@ def _send(x, to_d=None, group=None, ctx=None):
     else:
         dst_rank = ctx.device_to_rank[to_d]
         dist.send(x, dst_rank)
-    # Note: in a proper backend, might want to concatenate multiple tensors into
+    # NOTE: in a proper backend, might want to concatenate multiple tensors into
     # a single buffer and call a single send op
 
 
@@ -238,6 +238,7 @@ def _sgd(*xs, lr=None, ctx=None):
     weights = xs[: (len(xs) // 2)]
     gradients = xs[(len(xs) // 2) :]
     updated_weights = []
+    # Update weights in-place to avoid duplicating memory
     for w, dw in zip(weights, gradients):
         dw *= lr
         w -= dw
@@ -724,12 +725,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
 
     if ctx.use_gpu:
         # Move outputs back to cpu
-        # TODO: Investigate why pipeline parallelism sometimes causes an issue here.
-        try:
-            outputs = [t.cpu() for t in outputs]
-        except Exception as e:
-            print(outputs)
-            outputs = None
+        outputs = [t.cpu() for t in outputs]
         torch.cuda.synchronize()
         runtimes = [
             events[i].elapsed_time(events[i + 1]) / 1e3 for i in range(len(events) - 1)
@@ -816,6 +812,8 @@ def run_multiprocesses(
         with open(f"{per_rank_functions[0].name}_profile/trace.json", "w") as f:
             json.dump(trace, f)
 
+    # Latency is measured as the median across all iterations of
+    # the maximum runtime across all distributed workers per iteration.
     per_rank_runtimes = np.array(per_rank_runtimes)
     print("Per rank runtimes:")
     print(per_rank_runtimes)

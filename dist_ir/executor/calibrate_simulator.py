@@ -58,6 +58,7 @@ def _allreduce(devices, dtype, m=1024, n=1024):
 
 
 def _memcpy(rank):
+    # TODO: Use this to measure CPU -> GPU transfer time
     t = torch.randn(size=(8192, 8192), dtype=torch.float32)
     start = time.time()
     t = t.to(f"cuda:{rank}")
@@ -67,71 +68,8 @@ def _memcpy(rank):
     return size_in_bytes / BYTES_IN_Gb / latency
 
 
-def network_bandwidth_debug():
-    # devices = [Device(i + 1, "gpu") for i in range(4)]
-    bandwidth = 56  # Gbps
-    topology = Topology()
-    topology.add_device(0, "cpu")
-    for i in range(4):
-        topology.add_device(i + 1, "gpu")
-    for i in range(4):
-        for j in range(i + 1, 4):
-            topology.set_bandwidth(
-                topology.devices[i + 1], topology.devices[j + 1], bandwidth
-            )
-    sizes = [2048, 4096, 8192, 16384]
-    # sizes = [32, 64, 128, 256, 1024, 2048, 4096, 8192, 16384]
-    results = []
-    for i in range(len(sizes)):
-        for j in range(i, len(sizes)):
-            m = sizes[i]
-            n = sizes[j]
-            fn = _allreduce(topology.devices[1:], m, n)
-            fn = infer_types(fn, fn.inputs)
-            results = run_pytorch(
-                fn=fn,
-                inputs=[
-                    torch.randn(size=fn.inputs[i].type.shape, dtype=torch.float32)
-                    for i in range(len(fn.inputs))
-                ],
-                use_gpu=True,
-                num_repetitions=NUM_REPETITIONS,
-                num_warmup=NUM_WARMUP,
-            )
-            real_latency = results.latency
-            ex = Simulator(CostModel(topology))
-            state = ex.interpret(fn, tuple(inp.type for inp in fn.inputs))
-            simulated_latency = np.max([state.timestamps[d] for d in state.timestamps])
-            simulated_bandwidth = (
-                fn.inputs[0].type.size() / BYTES_IN_Gb / simulated_latency
-            )
-
-            print(
-                f"{m}x{n}: shape={fn.inputs[0].type.shape}, "
-                f"size={fn.inputs[0].type.size()}, real latency={real_latency}, "
-                f"simulated latency={simulated_latency}"
-            )
-
-            results.append(
-                (
-                    m,
-                    n,
-                    fn.inputs[0].type.shape,
-                    fn.inputs[0].type.size(),
-                    real_latency,
-                    simulated_latency,
-                )
-            )
-
-    df = pd.DataFrame(
-        results,
-        columns=["M", "N", "Shape", "Size", "PyTorch Latency", "Simulated Latency"],
-    )
-    df.to_csv("allreduce_benchmark_results.csv")
-    print(df)
-
-
 def calibrate_network_bandwidth(dtype):
+    """Estimates network bandwidth by sending tensors between every pair of GPUs."""
     dist_ir_dtype = Float32 if dtype == "fp32" else Float16
     pytorch_dtype = torch.float32 if dtype == "fp32" else torch.float16
     bandwidths = []
@@ -163,13 +101,9 @@ def calibrate_network_bandwidth(dtype):
 
 
 def calibrate_device_parameters(dtype):
+    """Estimates DRAM bandwidth, device throughput, and kernel launch overhead using MatMul ops."""
     dist_ir_dtype = Float32 if dtype == "fp32" else Float16
     pytorch_dtype = torch.float32 if dtype == "fp32" else torch.float16
-    """
-    all_batch_sizes = [2 ** i for i in range(12, 15)]
-    all_input_dims = [2 ** i for i in range(12, 15)]
-    all_output_dims = [2 ** i for i in range(12, 15)]
-    """
     all_batch_sizes = [2 ** i for i in range(12, 14)]
     all_input_dims = [2 ** i for i in range(12, 14)]
     all_output_dims = [2 ** i for i in range(12, 14)]
@@ -235,6 +169,7 @@ def calibrate_device_parameters(dtype):
 
 
 def calibrate_allreduce_parameters(dtype):
+    """Estimates a linear function of 2 parameters (+launch overhead) to model allreduce cost."""
     dist_ir_dtype = Float32 if dtype == "fp32" else Float16
     pytorch_dtype = torch.float32 if dtype == "fp32" else torch.float16
     all_input_dims = [2 ** i for i in range(11, 14)]
@@ -278,9 +213,3 @@ def calibrate_allreduce_parameters(dtype):
         reg = LinearRegression(positive=True, fit_intercept=False).fit(X, Y)
         params[num_devices] = (reg.coef_[0], reg.coef_[1], reg.coef_[2])
     return params
-
-
-def calibrate_simulator(dtype):
-    device_parameters = calibrate_device_parameters(dtype)
-    network_bandwidth = calibrate_network_bandwidth(dtype)
-    return (*device_parameters, network_bandwidth)

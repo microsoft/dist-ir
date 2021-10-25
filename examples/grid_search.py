@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 import csv
 import json
 import itertools
-from multiprocessing import Manager
+from multiprocessing import Manager, cpu_count
 from os import path
 import sys
 from typing import NamedTuple
@@ -260,7 +260,9 @@ class GridSearch(ABC):
                 self.run(config)
                 torch.cuda.empty_cache()
         elif self.backend == "simulate":
-            process_map(self.run, configs, max_workers=50, chunksize=1)
+            process_map(
+                self.run, configs, max_workers=min(50, cpu_count()), chunksize=1
+            )
         else:
             raise ValueError(f"Invalid backend {self.backend}")
 

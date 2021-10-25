@@ -47,9 +47,7 @@ class GPTGridSearch(GridSearch):
     def get_model_and_input_data(self, batch_size, model_size):
         pytorch_backend = self.backend == "pytorch"
         if len(self.all_input_ids) < batch_size and pytorch_backend:
-            self.all_input_ids = gpt2.create_input_ids(
-                batch_size, pytorch_backend
-            )
+            self.all_input_ids = gpt2.create_input_ids(batch_size, pytorch_backend)
 
         if model_size not in self.models_and_input_data:
             n_layer, n_head, d_embd = self.model_params[model_size]

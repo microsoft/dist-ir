@@ -74,19 +74,24 @@ def prepare_best_grid_search_configs(args):
     model_sizes = df["model_size"].unique()
     batch_sizes = sorted(df["batch_size"].unique())
     if "mlp" in model_sizes[0]:
-        model_sizes = ["mlp-small", "mlp-medium", "mlp-large"]
+        model_sizes_ = ["mlp-small", "mlp-medium", "mlp-large"]
     elif "gpt" in model_sizes[0]:
-        model_sizes = ["gpt3-xl", "gpt3-13B", "gpt3-175B"]
+        model_sizes_ = ["gpt3-xl", "gpt3-13B", "gpt3-175B"]
+    assert set(model_sizes).issubset(set(model_sizes_))
+    model_sizes = model_sizes_
     for batch_size in batch_sizes:
         for model_size in model_sizes:
-            df = pd.read_csv(args.simulation_file)
-            df = df[(df["model_size"] == model_size) & (df["batch_size"] == batch_size)]
-            df = df[df["peak_memory"] < 28 * 1e9]  # TODO make memory limit an arg
-            df = df.sort_values(by="throughput", ascending=False).head(10)
+            df_ = df[
+                (df["model_size"] == model_size) & (df["batch_size"] == batch_size)
+            ]
+            df_ = df_[df_["peak_memory"] < 28 * 1e9]  # TODO: make memory limit an arg
+            df_ = df_.sort_values(by="throughput", ascending=False).head(
+                10
+            )  # TODO: make top-k an arg
             if best_configs is None:
-                best_configs = df
+                best_configs = df_
             else:
-                best_configs = best_configs.append(df)
+                best_configs = best_configs.append(df_)
     best_configs.to_csv(args.output_file)
 
 
@@ -96,20 +101,23 @@ def prepare_accuracy_sample_configs(args):
     df = pd.read_csv(args.simulation_file)
     model_sizes = df["model_size"].unique()
     if "mlp" in model_sizes[0]:
-        model_sizes = ["mlp-small", "mlp-medium", "mlp-large"]
+        model_sizes_ = ["mlp-small", "mlp-medium", "mlp-large"]
     elif "gpt" in model_sizes[0]:
-        model_sizes = ["gpt3-xl", "gpt3-13B", "gpt3-175B"]
+        model_sizes_ = ["gpt3-xl", "gpt3-13B", "gpt3-175B"]
+    assert set(model_sizes).issubset(set(model_sizes_))
+    model_sizes = model_sizes_
     sample_configs = None
     for model_size in model_sizes:
-        df = pd.read_csv(args.simulation_file)
-        df = df[df["model_size"] == model_size]
-        df = df[df["peak_memory"] < 28 * 1e9]  # TODO make memory limit an arg
-        df = df.sample(n=min(100, len(df)), random_state=args.seed)
-        df = df.sort_values(by="peak_memory")
+        df_ = df_[df_["model_size"] == model_size]
+        df_ = df_[df_["peak_memory"] < 28 * 1e9]  # TODO: make memory limit an arg
+        df_ = df_.sample(
+            n=min(100, len(df_)), random_state=args.seed
+        )  # TODO: Make sample size an arg
+        df_ = df_.sort_values(by="peak_memory")
         if sample_configs is None:
-            sample_configs = df
+            sample_configs = df_
         else:
-            sample_configs = sample_configs.append(df)
+            sample_configs = sample_configs.append(df_)
     sample_configs.to_csv(args.output_file)
 
 

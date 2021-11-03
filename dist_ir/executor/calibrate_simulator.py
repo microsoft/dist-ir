@@ -1,5 +1,6 @@
 import itertools
 from sklearn.linear_model import LinearRegression
+import logging
 import numpy as np
 import time
 import torch
@@ -95,7 +96,9 @@ def calibrate_network_bandwidth(dtype):
             bandwidth = fn.inputs[0].type.size() / BYTES_IN_Gb / pytorch_latency
             bandwidths.append([src.device_id, dst.device_id, bandwidth])
             bandwidths.append([dst.device_id, src.device_id, bandwidth])
-            print(f"bandwidth[({src.device_id}, {dst.device_id})] = {bandwidth} Gbps")
+            logging.info(
+                f"bandwidth[({src.device_id}, {dst.device_id})] = {bandwidth} Gbps"
+            )
 
     return bandwidths
 

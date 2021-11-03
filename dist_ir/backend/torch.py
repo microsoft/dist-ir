@@ -1,6 +1,10 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 import itertools
 import json
 from functools import partial
+import logging
 import numpy as np
 from operator import getitem
 import os
@@ -37,6 +41,8 @@ DistributedContext = NamedTuple(
     debug_stacktrace=bool,
     # Profile flag
     profile=bool,
+    # Chrome trace flag
+    dump_chrome_trace=bool,
     # Memory tracking flag
     measure_peak_memory=bool,
 )
@@ -419,7 +425,9 @@ def get_memory_usage(rank, verbose=False):
     r = torch.cuda.memory_reserved(rank)
     a = torch.cuda.memory_allocated(rank)
     if verbose:
-        print(f"[Rank {rank}] Total: {t} Reserved: {r} Allocated: {a} Free: {r-a}")
+        logging.info(
+            f"[Rank {rank}] Total: {t} Reserved: {r} Allocated: {a} Free: {r-a}"
+        )
     return MemoryUsage(t, r, a)
 
 
@@ -429,6 +437,40 @@ def add_event(ctx, events):
         events[-1].record()
     else:
         events.append(time.perf_counter())
+
+
+def dump_chrome_trace(
+    per_rank_functions, per_rank_op_runtimes, num_repetitions, world_size
+):
+    trace = []
+    global_ts = 0.0
+    max_rank_ts = -1
+    for j in range(num_repetitions):
+        for i in range(world_size):
+            rank_ts = global_ts
+            for op, runtime in zip(
+                per_rank_functions[i].ops, per_rank_op_runtimes[i][j]
+            ):
+                trace.append(
+                    {
+                        "name": op.op_type,
+                        "ph": "X",
+                        "ts": rank_ts,
+                        "dur": runtime * 1e6,
+                        "pid": 0,
+                        "tid": i,
+                    }
+                )
+                rank_ts += runtime * 1e6
+            max_rank_ts = max(max_rank_ts, rank_ts)
+        global_ts = max_rank_ts
+    profile_dir = f"{per_rank_functions[0].name}_profile"
+    if not os.path.isdir(profile_dir):
+        os.mkdir(profile_dir)
+    fname = f"{profile_dir}/trace.json"
+    with open(fname, "w") as f:
+        json.dump(trace, f)
+        logging.info(f"Saved Chrome trace to {fname}")
 
 
 def run_function(
@@ -453,9 +495,7 @@ def run_function(
 
     if ctx.measure_peak_memory:
         torch.cuda.synchronize(device=rank)
-        memory_usage = get_memory_usage(rank)
-        allocated_memory = memory_usage.allocated
-        peak_memory = allocated_memory
+        peak_memory = get_memory_usage(rank).allocated
     else:
         peak_memory = 0.0
 
@@ -471,12 +511,11 @@ def run_function(
         if record_op_runtimes:
             add_event(ctx, op_runtime_events)
         if op.op_type == "RecvP2P":
+            # TODO: Move this inside the Recv op implementation
             if op in recv_buffers:
                 buffer = recv_buffers[op]
             else:
                 buffer = _allocate_recv_buffer(kwargs["shape"], kwargs["dtype"], ctx)
-                if ctx.use_gpu:
-                    torch.cuda.synchronize(device=rank)
                 recv_buffers[op] = buffer
             kwargs["x"] = buffer
             del kwargs["shape"]
@@ -545,19 +584,20 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
 
     if ctx.use_gpu:
         # Move inputs to GPU
-        print(
+        logging.info(
             f"Rank {rank}: Moving inputs with shapes {[inp.shape for inp in inputs]} to GPU..."
         )
         gpu_inputs = []
         torch.cuda.synchronize(device=rank)
         memory_usage = get_memory_usage(rank)
-        print(
+        logging.info(
             f"Rank {rank}: reserved={memory_usage.reserved}, "
             f"allocated={memory_usage.allocated}"
         )
         for i, t in enumerate(inputs):
             input_size = t.nelement() * t.element_size()
             # TODO: Hide under a verbose flag
+            # TODO: Use logging
             """
             print(
                 f"Rank {rank}: Moving input {i} of shape {t.shape} "
@@ -577,7 +617,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
         torch.cuda.synchronize(device=rank)
         inputs = gpu_inputs
     else:
-        print(
+        logging.info(
             f"Rank {rank}: Using inputs with shapes {[inp.shape for inp in inputs]}..."
         )
 
@@ -590,25 +630,21 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
                 fn,
                 inputs,
                 rank,
-                recv_buffers,
+                recv_buffers={},
             )
         except Exception as e:
             print_exc()
-        print(f"{rank}: PyTorch backend exiting after 1 run in debug mode.")
+        logging.info(f"{rank}: PyTorch backend exiting after 1 run in debug mode.")
         dist.destroy_process_group()
         return None
 
-    def run(events, p=None):
-        # This keeps track of the starting timestamp for the current iteration
-        # when constructing a profiled trace.
-        op_runtimes_ts = None
-
+    def run(events, prof=None):
         all_op_runtimes = []
         recv_buffers = {}
         for i in range(num_warmup_steps + num_repetitions):
             # We start constructing a profiled trace after finishing the warmup phase.
             record_op_runtimes = False
-            if ctx.profile:
+            if ctx.dump_chrome_trace:
                 # Before starting the op runtime profiling, we sychronize all
                 # devices to make sure all op runtimes begin from the same point.
                 if i == num_warmup_steps:
@@ -618,7 +654,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
                         torch.cuda.synchronize(device=rank)
                 record_op_runtimes = i >= num_warmup_steps
 
-            print(f"Rank {rank}: Dispatching step {i}...")
+            logging.info(f"Rank {rank}: Dispatching step {i}...")
 
             # We add a timing event at the start of every iteration, and at the
             # end of the last iteration. This ensures that the delta between any
@@ -629,10 +665,11 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
             # because we compute the latency for a given iteration by taking the
             # maximum runtime observed across all ranks in that iteration.
             add_event(ctx, events)
-            if i == 0:
+            if i == 0 and num_warmup_steps > 0:
                 # We run the first iteration with a try/catch block to gracefully
                 # exit in the event of errors. After confirming there are no errors,
-                # we proceed without the try/catch in subsequent iterations.
+                # we proceed without the try/catch in subsequent iterations. This will
+                # only be done as part of the warm-up phase.
                 try:
                     outputs, peak_memory, op_runtime_events = run_function(
                         ctx,
@@ -654,8 +691,6 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
                     recv_buffers,
                     record_op_runtimes=record_op_runtimes,
                 )
-            if i == (num_warmup_steps + num_repetitions - 1):
-                add_event(ctx, events)
 
             if record_op_runtimes:
                 # We synchronize here to make sure all computation has completed
@@ -668,8 +703,10 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
                 # We measure the duration of each op as the delta between each pair
                 # of events i and j where i is even and j = i + 1. Note that this
                 # differs from how we measure durations for the entire iteration,
-                # as in this case we want to ignore any overhead from de-allocating
-                # memory when constructing the trace.
+                # as in this case we want to ignore any overhead from freeing
+                # memory when constructing the trace (see run_function for memory
+                # freeing code).
+                # TODO: Add the memory freeing overhead to the trace
                 if ctx.use_gpu:
                     op_runtimes = [
                         op_runtime_events[i].elapsed_time(op_runtime_events[i + 1])
@@ -683,25 +720,17 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
                     ]
                 all_op_runtimes.append(op_runtimes)
 
-                # We synchronize here again to make sure all op durations have been
-                # computed before starting the next iteration.
-                if ctx.world_size > 1:
-                    torch.distributed.barrier()
-
             # If we are profiling with the PyTorch profiler, we advance the profiler
             # iterator here.
-            if p is not None:
-                p.step()
+            if prof is not None:
+                prof.step()
+
+        # This is the last event for iteration timing.
+        add_event(ctx, events)
 
         return outputs, peak_memory, all_op_runtimes
 
     if ctx.profile:
-        profile_dir = f"{fn.name}_profile"
-        if not os.path.isdir(profile_dir):
-            os.mkdir(profile_dir)
-        outputs, peak_memory, all_op_runtimes = run(events)
-        # TODO: Include separate flag for PyTorch profiling?
-        """
         with torch.profiler.profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
@@ -711,11 +740,10 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
                 wait=0, warmup=num_warmup_steps, active=num_repetitions
             ),
             on_trace_ready=torch.profiler.tensorboard_trace_handler(
-                profile_dir,
+                f"{fn.name}_profile"
             ),
-        ) as p:
-            outputs, peak_memory, all_op_runtimes = run(events, p)
-        """
+        ) as prof:
+            outputs, peak_memory, all_op_runtimes = run(events, prof)
     else:
         outputs, peak_memory, all_op_runtimes = run(events)
 
@@ -726,6 +754,7 @@ def run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
     if ctx.use_gpu:
         # Move outputs back to cpu
         outputs = [t.cpu() for t in outputs]
+        # Synchronize to ensure all ops are complete before measuring elapsed time
         torch.cuda.synchronize()
         runtimes = [
             events[i].elapsed_time(events[i + 1]) / 1e3 for i in range(len(events) - 1)
@@ -786,42 +815,21 @@ def run_multiprocesses(
         per_rank_op_runtimes,
     ) = zip(*outputs)
 
-    if ctx.profile:
-        trace = []
-        global_ts = 0.0
-        max_rank_ts = -1
-        for j in range(num_repetitions):
-            for i in range(ctx.world_size):
-                rank_ts = global_ts
-                for op, runtime in zip(
-                    per_rank_functions[i].ops, per_rank_op_runtimes[i][j]
-                ):
-                    trace.append(
-                        {
-                            "name": op.op_type,
-                            "ph": "X",
-                            "ts": rank_ts,
-                            "dur": runtime * 1e6,
-                            "pid": 0,
-                            "tid": i,
-                        }
-                    )
-                    rank_ts += runtime * 1e6
-                max_rank_ts = max(max_rank_ts, rank_ts)
-            global_ts = max_rank_ts
-        with open(f"{per_rank_functions[0].name}_profile/trace.json", "w") as f:
-            json.dump(trace, f)
+    if ctx.dump_chrome_trace:
+        dump_chrome_trace(
+            per_rank_functions, per_rank_op_runtimes, num_repetitions, ctx.world_size
+        )
 
     # Latency is measured as the median across all iterations of
     # the maximum runtime across all distributed workers per iteration.
     per_rank_runtimes = np.array(per_rank_runtimes)
-    print("Per rank runtimes:")
-    print(per_rank_runtimes)
+    logging.info("Per rank runtimes:")
+    logging.info(per_rank_runtimes)
     latencies = [
         np.max(per_rank_runtimes[:, i]) for i in range(len(per_rank_runtimes[0]))
     ]
     latency = np.median(latencies)
-    print(f"Latency: {latency} (stddev={np.std(latencies)})")
+    logging.info(f"Latency: {latency} (stddev={np.std(latencies)})")
     peak_memory = np.max(per_rank_peak_memory)
     return BackendResults(per_rank_outputs, latency, peak_memory)
 
@@ -835,6 +843,7 @@ def run_pytorch(
     num_warmup=0,
     debug_mock=False,
     debug_stacktrace=False,
+    dump_chrome_trace=False,
     profile=False,
     measure_peak_memory=False,
 ):
@@ -857,15 +866,20 @@ def run_pytorch(
     synchronizing after every op, which will result in runtime overhead).
     """
 
-    if measure_peak_memory:
-        assert use_gpu
+    if measure_peak_memory and not use_gpu:
+        raise ValueError("Peak memory can currently only be measured on GPU")
+
+    if profile and dump_chrome_trace:
+        raise ValueError(
+            "Only one of PyTorch profiling and Chrome trace exporting is allowed"
+        )
 
     if input_types is None:
         input_types = tuple(v.type for v in fn.inputs)
     else:
         assert len(input_types) == len(fn.inputs)
 
-    print("Projecting function...")
+    logging.info("Projecting function...")
     device_to_fns, groups = project(fn, input_types)
 
     # Map between DistIR devices and pytorch ranks:
@@ -885,6 +899,7 @@ def run_pytorch(
         device_to_rank=device_to_rank,
         debug_stacktrace=debug_stacktrace,
         profile=profile,
+        dump_chrome_trace=dump_chrome_trace,
         measure_peak_memory=measure_peak_memory,
     )
 
@@ -893,7 +908,7 @@ def run_pytorch(
         per_rank_inputs[device_to_rank[t.device]].append(a)
     assert len(fn.inputs) == len(inputs)
 
-    print("Launching distributed processes...")
+    logging.info("Launching distributed processes...")
     if debug_mock:
         return run_mock_multiprocess(per_rank_fns, per_rank_inputs)
     else:

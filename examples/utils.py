@@ -1,4 +1,21 @@
 import json
+import logging
+
+
+def configure_logging(args):
+    # TODO: Make logging level a command line arg
+    if args.loglevel == "info":
+        level = logging.INFO
+    elif args.loglevel == "debug":
+        level = logging.DEBUG
+    elif args.loglevel == "warning":
+        level = logging.WARNING
+    elif args.loglevel == "error":
+        level = logging.ERROR
+    elif args.loglevel == "critical":
+        level = logging.CRITICAL
+    logging.basicConfig(filename=args.logname, level=level)
+    logging.getLogger().addHandler(logging.StreamHandler())
 
 
 def load_simulation_parameters_to_args(args):

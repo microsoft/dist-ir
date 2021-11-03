@@ -92,9 +92,6 @@ class Parser(ArgumentParser):
     def add_execution_mode_config_arguments(self):
         self.add_argument("--backend", choices=["simulate", "pytorch"], required=True)
 
-    def add_simulation_output_config_arguments(self):
-        self.add_argument("--trace_file", type=str, default=None, help="Trace file")
-
     def add_backend_config_arguments(self):
         self.add_argument(
             "--debug_stacktrace",
@@ -113,6 +110,12 @@ class Parser(ArgumentParser):
             action="store_true",
             default=False,
             help="Profile with PyTorch profiler",
+        )
+        self.add_argument(
+            "--dump_chrome_trace",
+            default=False,
+            action="store_true",
+            help="Dump Chrome trace in JSON format",
         )
         self.add_argument(
             "--measure_peak_memory",
@@ -218,4 +221,14 @@ class Parser(ArgumentParser):
                 "(downloaded from https://github.com/onnx/models/blob/master/"
                 "text/machine_comprehension/gpt-2/model/gpt2-10.onnx?raw=True)"
             ),
+        )
+
+    def add_logging_config_arguments(self):
+        self.add_argument("--logname", type=str, default="dist_ir.log", help="Log name")
+        self.add_argument(
+            "--loglevel",
+            type=str,
+            choices=["info", "debug", "warning", "error", "critical"],
+            default="info",
+            help="Logging level",
         )

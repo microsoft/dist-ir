@@ -4,7 +4,7 @@ from .type import Type
 
 
 @dataclass(frozen=True, eq=False)
-class Value(object):
+class Value:
     """A DistIR value. While values have names, DistIR makes no attempt to ensure
     value names are unique in a function. Therefore Value equality is object
     equality. (TODO correct terminology for this?)

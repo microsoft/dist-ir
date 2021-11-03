@@ -11,7 +11,7 @@ from .type import Type
 @dataclass(frozen=True)
 class Op:
     op_type: str
-    name: str = field(default="", hash=False, compare=False)
+    name: str = ""
     inputs: Tuple[Value] = field(default_factory=tuple)
     attributes: Dict[str, Any] = field(
         default_factory=frozendict, hash=False, compare=False

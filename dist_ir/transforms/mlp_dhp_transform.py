@@ -381,9 +381,6 @@ def mlp_dhp_transform(
 ):
     """Automatically distributes an MLP function using D/H/P hybrid parallelism."""
 
-    if debug:
-        logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.DEBUG)
-
     # Initialize the transformed function and construct the device tree given the
     # specified parallelism dimensions.
     fn_name = f"{function.name}_{dp_degree}_{hp_degree}_{pp_degree}_{num_microbatches}"

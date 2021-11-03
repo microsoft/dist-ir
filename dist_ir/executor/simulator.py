@@ -1,8 +1,8 @@
 from copy import deepcopy
 from collections import defaultdict
 import json
+import logging
 from typing import Any, Dict, Sequence, Set, Tuple
-from warnings import warn
 
 from ..ir import Function, Device, Op
 from ..ir.type import Tensor, Type, abstract_values
@@ -50,22 +50,27 @@ class SimulatorState(AbstractState):
                     isinstance(inputs[i], ConcreteValue)
                     and inputs[i].device is not None
                 ):
-                    self.peak_memory[inputs[i].device] += inputs[i].val.nbytes
+                    cur_live_memory = self.live_memory[inputs[i].device][0][-1]
+                    cur_live_memory += inputs[i].val.nbytes
+                    self.live_memory[inputs[i].device][0] = (0, cur_live_memory)
                 elif (
                     isinstance(inputs[i], Tensor)
                     and inputs[i].shape is not None
                     and inputs[i].dtype is not None
                     and inputs[i].device is not None
                 ):
-                    self.peak_memory[inputs[i].device] += inputs[i].size()
+                    cur_live_memory = self.live_memory[inputs[i].device][0][-1]
+                    cur_live_memory += inputs[i].size()
+                    self.live_memory[inputs[i].device][0] = (0, cur_live_memory)
                 else:
-                    warn_msg = (
+                    logging.warning(
                         f"No input type or device for input {inp} ({type(inputs[i])})"
                     )
-                    warn(warn_msg)
                     continue
             else:
-                self.peak_memory[inp.type.device] += inp.type.size()
+                cur_live_memory = self.live_memory[inp.type.device][0][-1]
+                cur_live_memory += inp.type.size()
+                self.live_memory[inp.type.device][0] = (0, cur_live_memory)
         for device in self.peak_memory:
             self.live_memory[device][0] = (0, self.peak_memory[device])
 
@@ -75,13 +80,24 @@ class SimulatorState(AbstractState):
     def get_throughput(self, batch_size):
         return batch_size / self.get_latency()
 
+    def set_peak_memory(self):
+        for device in self.live_memory:
+            self.peak_memory[device] = max(
+                [
+                    self.live_memory[device][i][1]
+                    for i in range(len(self.live_memory[device]))
+                ]
+            )
+
     def get_peak_memory(self):
         return max([self.peak_memory[d] for d in self.peak_memory])
 
     def print_summary(self, batch_size):
-        print(f"Latency: {self.get_latency()} seconds")
-        print(f"Throughput: {self.get_throughput(batch_size):.2f} samples / second")
-        print(f"Peak memory: {self.get_peak_memory() / 1e9:.2f} GB")
+        logging.info(f"Latency: {self.get_latency()} seconds")
+        logging.info(
+            f"Throughput: {self.get_throughput(batch_size):.2f} samples / second"
+        )
+        logging.info(f"Peak memory: {self.get_peak_memory() / 1e9:.2f} GB")
 
     def add_trace_event(self, op_type, device, start_time, duration):
         if device is None:
@@ -226,12 +242,6 @@ class Simulator:
             _simulate_op(state, op, costs, inputs, outputs)
 
         # Record the peak memory.
-        for device in state.live_memory:
-            state.peak_memory[device] = max(
-                [
-                    state.live_memory[device][i][1]
-                    for i in range(len(state.live_memory[device]))
-                ]
-            )
+        state.set_peak_memory()
 
         return state

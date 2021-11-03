@@ -3,6 +3,7 @@ import copy
 from .grid_search import DHPConfig, GridSearch, run_grid_search
 from . import gpt2
 from .parser import Parser
+from .utils import configure_logging
 from dist_ir.transforms.gpt2_dhp_transform import check_params
 
 
@@ -66,7 +67,7 @@ class GPTGridSearch(GridSearch):
         if pytorch_backend:
             input_ids = self.all_input_ids[:batch_size]
         else:
-            input_ids = gpt2.create_input_ids(batch_size, pytorch_backend)
+            input_ids = gpt2.create_input_ids(batch_size, False)
         input_data = [input_ids] + input_data
         return model, input_data
 
@@ -142,5 +143,7 @@ if __name__ == "__main__":
     parser.add_backend_config_arguments()
     parser.add_gpt2_model_path_config_arguments()
     parser.add_model_config_arguments(choices=list(gpt2.model_params.keys()))
+    parser.add_logging_config_arguments()
     args = parser.parse_args()
+    configure_logging(args)
     run_grid_search(args, GPTGridSearch)

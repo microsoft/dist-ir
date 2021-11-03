@@ -305,6 +305,7 @@ def run_pytorch(
     num_repetitions,
     use_gpu=torch.cuda.is_available(),
     profile=False,
+    dump_chrome_trace=False,
     measure_peak_memory=False,
 ):
     # TODO: Move this to a utils file
@@ -347,6 +348,7 @@ def run_pytorch(
         num_warmup=num_warmup,
         num_repetitions=num_repetitions,
         profile=profile,
+        dump_chrome_trace=dump_chrome_trace,
     )
 
 
@@ -368,10 +370,10 @@ def run_mlp(
     dram_bandwidth,
     kernel_launch_overhead,
     network_bandwidth,
-    trace_file,
     num_warmup,
     num_repetitions,
     profile=False,
+    dump_chrome_trace=False,
     skip_allgathers=False,
     measure_peak_memory=False,
     verbose=False,
@@ -454,7 +456,8 @@ def run_mlp(
         simulation = simulate(transformed_fn, input_types, topology)
         if verbose:
             simulation.print_summary(batch_size=batch_size)
-        if trace_file is not None:
+        if dump_chrome_trace:
+            trace_file = f"{transformed_fn.name}.json"
             simulation.dump_chrome_trace(trace_file)
         return simulation
     elif backend == "pytorch":
@@ -466,6 +469,7 @@ def run_mlp(
             num_repetitions,
             use_gpu=use_gpu,
             profile=profile,
+            dump_chrome_trace=dump_chrome_trace,
             measure_peak_memory=measure_peak_memory,
         )
         if verbose:
@@ -501,10 +505,10 @@ def main(args):
         args.dram_bandwidth,
         args.kernel_launch_overhead,
         args.network_bandwidth,
-        args.trace_file,
         args.num_warmup,
         args.num_repetitions,
         args.profile,
+        args.dump_chrome_trace,
         args.skip_allgathers,
         args.measure_peak_memory,
         args.verbose,
@@ -517,9 +521,9 @@ if __name__ == "__main__":
     parser.add_simulation_config_arguments()
     parser.add_execution_mode_config_arguments()
     parser.add_backend_config_arguments()
-    parser.add_simulation_output_config_arguments()
     parser.add_global_output_config_arguments()
     parser.add_model_config_arguments(choices=list(model_params.keys()))
+    parser.add_logging_config_arguments()
     parser.add_argument(
         "--phase", choices=["inference", "training"], default="training"
     )
@@ -530,4 +534,5 @@ if __name__ == "__main__":
         "--num_hidden_layers", type=int, default=16, help="# hidden layers"
     )
     args = parser.parse_args()
+    utils.configure_logging(args)
     main(args)

@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 import numpy as np
 
 from dist_ir.ir import Value
@@ -7,6 +10,7 @@ from dist_ir.transforms import mlp_dhp_transform
 from . import mlp
 from .grid_search import DHPConfig, GridSearch, run_grid_search
 from .parser import Parser
+from .utils import configure_logging
 
 
 class MLPGridSearch(GridSearch):
@@ -138,5 +142,7 @@ if __name__ == "__main__":
     parser.add_grid_search_config_arguments(defaults)
     parser.add_backend_config_arguments()
     parser.add_model_config_arguments(choices=list(mlp.model_params.keys()))
+    parser.add_logging_config_arguments()
     args = parser.parse_args()
+    configure_logging(args)
     run_grid_search(args, MLPGridSearch)

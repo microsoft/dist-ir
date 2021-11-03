@@ -21,7 +21,7 @@ from dist_ir.transforms import (
 from dist_ir.transforms.gpt2_dhp_transform import check_params, update_attributes
 
 from .parser import Parser
-
+from . import utils
 
 model_params = {
     "gpt2-xs": (4, 12, 768),  # Debug
@@ -603,6 +603,7 @@ def run_pytorch(
     debug_stacktrace=False,
     measure_peak_memory=False,
     profile=False,
+    dump_chrome_trace=False,
 ):
     # TODO: Move this to a utils file
     def _resolve_dtype(dtype):
@@ -645,10 +646,12 @@ def run_pytorch(
         debug_stacktrace=debug_stacktrace,
         measure_peak_memory=measure_peak_memory,
         profile=profile,
+        dump_chrome_trace=dump_chrome_trace,
     )
 
 
 def main(args):
+    utils.load_simulation_parameters_to_args(args)
     if args.model_size is not None:
         args.n_layer, args.n_head, args.d_embd = model_params[args.model_size]
     check_params(
@@ -690,8 +693,9 @@ def main(args):
 
     if args.backend == "simulate":
         simulation = simulate(transformed_function, initialized_input_data, topology)
-        if args.trace_file is not None:
-            simulation.dump_chrome_trace(args.trace_file)
+        if args.dump_chrome_trace:
+            trace_file = f"{transformed_function.name}.json"
+            simulation.dump_chrome_trace(trace_file)
         simulation.print_summary(args.batch_size)
     elif args.backend == "pytorch":
         world_size = args.dp_degree * args.hp_degree * args.pp_degree
@@ -705,6 +709,7 @@ def main(args):
             debug_stacktrace=args.debug_stacktrace,
             measure_peak_memory=args.measure_peak_memory,
             profile=args.profile,
+            dump_chrome_trace=args.dump_chrome_trace,
         )
         print(f"Latency: {results.latency*1000:.2f} ms")
         print(f"Throughput: {args.batch_size / results.latency:.2f} " f"samples/second")
@@ -718,8 +723,8 @@ if __name__ == "__main__":
     parser.add_backend_config_arguments()
     parser.add_execution_mode_config_arguments()
     parser.add_gpt2_model_path_config_arguments()
-    parser.add_simulation_output_config_arguments()
     parser.add_model_config_arguments(choices=list(model_params.keys()))
+    parser.add_logging_config_arguments()
     parser.add_argument("--n_layer", type=int, default=12, help="Num hidden layers")
     parser.add_argument(
         "--n_head",
@@ -735,4 +740,5 @@ if __name__ == "__main__":
         help="Use real weights",
     )
     args = parser.parse_args()
+    utils.configure_logging(args)
     main(args)

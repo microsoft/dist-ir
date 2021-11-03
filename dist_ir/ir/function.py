@@ -114,7 +114,6 @@ class Function:
             ):
                 # We need to explicitly set the subfunction outputs because some output
                 # values might have consumers outside the subfunction (external).
-                has_external_output = False
                 if (
                     orig_output in self.outputs
                     or len(set(self.consumers[orig_output]).difference(ops_set)) > 0

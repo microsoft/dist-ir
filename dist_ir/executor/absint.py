@@ -260,7 +260,10 @@ class AbstractInterpreter:
                 if not isinstance(outputs, tuple):
                     assert len(op.outputs) == 1
                     outputs = (outputs,)
-                assert len(outputs) == len(op.outputs)
+                if len(outputs) != len(op.outputs):
+                    raise ValueError(
+                        f"Received incorrect number of outputs for op {op}"
+                    )
                 for x, val in zip(op.outputs, outputs):
                     state.env[x] = val
 

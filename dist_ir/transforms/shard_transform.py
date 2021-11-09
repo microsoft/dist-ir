@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 from ..ir.function import FunctionMaker
 from ..ir import Device
 

@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 DEFAULT_DEVICE_THROUGHPUT = 1.4e13
 DEFAULT_DRAM_BANDWIDTH = 9.0e11
 DEFAULT_KERNEL_LAUNCH_OVERHEAD = 1.0e-5

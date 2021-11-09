@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 import itertools
 from sklearn.linear_model import LinearRegression
 import logging

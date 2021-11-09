@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 from dist_ir.ir import cpprint, FunctionMaker, Topology
 from dist_ir.ir.type import Float32
 from dist_ir.ir.type import Tensor

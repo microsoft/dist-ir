@@ -1,4 +1,6 @@
-import argparse
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 from collections import defaultdict
 import numpy as np
 import re

@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """
 This file defines a register of reference implementations for communication ops.
 They work explicitly on ConcreteValues and return ConcreteValues on the

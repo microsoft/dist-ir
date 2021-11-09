@@ -1,4 +1,6 @@
 #! /bin/bash
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
 
 # A script to run grid search using the pytorch backend.
 # Given a file of configurations, we run them one by one and do clean-up etc in

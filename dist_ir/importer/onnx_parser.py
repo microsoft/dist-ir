@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 from collections import defaultdict, OrderedDict
 from functools import reduce
 import logging

@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 """
 Create a simple ONNX graph consisting of a single gemm from PyTorch
 """

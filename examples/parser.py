@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 import torch
 

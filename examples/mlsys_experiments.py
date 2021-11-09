@@ -111,7 +111,7 @@ def prepare_accuracy_sample_configs(args):
     model_sizes = model_sizes_
     sample_configs = None
     for model_size in model_sizes:
-        df_ = df_[df_["model_size"] == model_size]
+        df_ = df[df["model_size"] == model_size]
         df_ = df_[df_["peak_memory"] < 28 * 1e9]  # TODO: make memory limit an arg
         df_ = df_.sample(
             n=min(100, len(df_)), random_state=args.seed

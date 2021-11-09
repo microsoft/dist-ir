@@ -88,7 +88,6 @@ def test_mlp_grid_search(backend, dtype):
                     network_bandwidth=constants.DEFAULT_NETWORK_BANDWIDTH,
                     num_warmup=0,
                     num_repetitions=0,
-                    trace_file=None,
                     skip_allgathers=True,
                     verbose=False,
                 )

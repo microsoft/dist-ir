@@ -58,7 +58,7 @@ jobs:
           pushd /tmp; \
           git clone https://github.com/onnx/models.git; \
           pushd models; \
-          git lfs migrate import --fixup --everything; \
+          yes | git lfs migrate import --fixup --everything; \
           git checkout ${{ env.GPT_ONNX_COMMIT }}; \
           git lfs pull --include="text/machine_comprehension/gpt-2/model/${GPT_ONNX_FNAME}" --exclude ""; \
           popd; popd; \

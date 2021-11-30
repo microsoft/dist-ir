@@ -559,7 +559,11 @@ def run_function(
 
 
 def run_process_wrapper(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs):
-    with torch.inference_mode():
+    if ctx.use_gpu:
+        with torch.inference_mode():
+            return run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs)
+    else:
+        # NOTE: GLOO all_gather on CPU does not work with inference mode
         return run_process(ctx, num_warmup_steps, num_repetitions, rank, fn, inputs)
 
 

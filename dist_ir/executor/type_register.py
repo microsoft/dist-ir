@@ -225,8 +225,8 @@ def _matmul_grad_prop_fn(op, x, y, z):
         isinstance(x, Tensor)
         and isinstance(y, Tensor)
         and isinstance(z, Tensor)
-        and x.dtype == y.dtype
-        and x.dtype == z.dtype
+        and type(x.dtype) == type(y.dtype)
+        and type(x.dtype) == type(z.dtype)
         and x.device == y.device
         and x.device == z.device
     ):
@@ -363,7 +363,7 @@ def _mpi_reduce_prop_fn(op, *xs):
     if not (
         all(isinstance(x, Tensor) for x in xs)
         and len(set(x.shape for x in xs)) == 1
-        and len(set(x.dtype for x in xs)) == 1
+        and len(set(type(x.dtype) for x in xs)) == 1
         and len(xs) > 0
     ):
         # TODO: To strictly follow MPI semantics we should check that the output
@@ -613,6 +613,7 @@ TypePropRegister = {
     ("Concat", tuple(Tensor for _ in range(3 * 2))): _concat_prop_fn,
     ("Concat", tuple(Tensor for _ in range(3 * 4))): _concat_prop_fn,
     ("Concat", tuple(Tensor for _ in range(3 * 8))): _concat_prop_fn,
+    ("Concat", tuple(Tensor for _ in range(3 * 12))): _concat_prop_fn,
     ("Concat", tuple(Tensor for _ in range(3 * 16))): _concat_prop_fn,
     ("Concat", tuple(Tensor for _ in range(3 * 32))): _concat_prop_fn,
     ("Concat", tuple(Tensor for _ in range(3 * 64))): _concat_prop_fn,
@@ -726,12 +727,18 @@ TypePropRegister = {
     ("Select", (TupleType,)): _select_prop_fn,
     ("Send", (Tensor,)): _send_prop_fn,
     ("Send", (Int32,)): _send_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(2)))): _sgd_prop_fn,
     ("SGDOptimizer", (tuple(Tensor for i in range(4)))): _sgd_prop_fn,
     ("SGDOptimizer", (tuple(Tensor for i in range(8)))): _sgd_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(12)))): _sgd_prop_fn,
     ("SGDOptimizer", (tuple(Tensor for i in range(16)))): _sgd_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(24)))): _sgd_prop_fn,
     ("SGDOptimizer", (tuple(Tensor for i in range(32)))): _sgd_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(48)))): _sgd_prop_fn,
     ("SGDOptimizer", (tuple(Tensor for i in range(64)))): _sgd_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(96)))): _sgd_prop_fn,
     ("SGDOptimizer", (tuple(Tensor for i in range(128)))): _sgd_prop_fn,
+    ("SGDOptimizer", (tuple(Tensor for i in range(192)))): _sgd_prop_fn,
     ("SGDOptimizer", (tuple(Tensor for i in range(256)))): _sgd_prop_fn,
     ("SGDOptimizer", (tuple(Tensor for i in range(512)))): _sgd_prop_fn,
     ("SGDOptimizer", (tuple(Tensor for i in range(1024)))): _sgd_prop_fn,

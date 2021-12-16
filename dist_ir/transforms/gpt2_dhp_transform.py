@@ -11,14 +11,10 @@ import logging
 import re
 import roundrobin
 
-
 from ..executor.type_inference import infer_types
 from ..ir.function import FunctionMaker
 from .pipedream_scheduler import PipeDreamScheduler
-from .sanitize_attributes_transform import (
-    sanitize_unhashable_attributes,
-    restore_unhashable_attributes,
-)
+
 
 # TODO: Add these helper functions to a transform-writing API
 
@@ -421,7 +417,6 @@ def check_params(
 def update_attributes(
     op_type,
     attributes,
-    attribute_map,
     old_d_embd,
     new_d_embd,
     old_n_head,
@@ -447,24 +442,13 @@ def update_attributes(
                 }
             )
     elif op_type == "Constant":
-        value = attribute_map[("value", attributes["value"])]
-        if (
-            isinstance(value, np.ndarray)
-            and value.shape == (1,)
-            and value[0] == old_n_head
-        ):
-            value = np.array([new_n_head])
-            sanitized_value = value.tobytes()
-            attributes = frozendict(
-                {"value": sanitized_value, "device": attributes["device"]}
-            )
-            attribute_map[("value", sanitized_value)] = value
+        value = attributes["value"]
+        if value == old_n_head:
+            value = new_n_head
             new_device = new_device if new_device is not None else attributes["device"]
-            attributes = frozendict({"value": sanitized_value, "device": new_device})
-            attribute_map[("value", sanitized_value)] = value
+            attributes = frozendict({"value": value, "device": new_device})
         elif new_device is not None:
-            sanitized_value = attributes["value"]
-            attributes = frozendict({"value": sanitized_value, "device": new_device})
+            attributes = frozendict({"value": value, "device": new_device})
     return attributes
 
 
@@ -478,15 +462,13 @@ def gpt2_dhp_transform(
     num_microbatches,
     d_embd,
     n_head,
+    skip_allgathers=False,
     debug=False,
 ):
     """Automatically distributes a GPT-2 function using D/H/P hybrid parallelism."""
 
     if debug:
         logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.DEBUG)
-
-    # Temporarily remove unhashable attributes.
-    (function, attribute_map) = sanitize_unhashable_attributes(function)
 
     # Initialize the transformed function and construct the device tree given the
     # specified parallelism dimensions.
@@ -560,6 +542,8 @@ def gpt2_dhp_transform(
     for v in init_function.outputs:
         transformed_function.inputs.append(v)
 
+    function_inputs = set(function.inputs)
+
     dp_outputs = defaultdict(list)
     for i, dp_device in enumerate(device_tree[device_tree_root]):
         # A map with the following structure:
@@ -609,7 +593,7 @@ def gpt2_dhp_transform(
                             # Retrieve the transformed input value from the appropriate
                             # data structure depending on whether the original input is
                             # a function input or an intermediate value.
-                            if inp in function.inputs:
+                            if inp in function_inputs:
                                 v = transformed_inputs[inp]
                                 dp_v = dp_inputs[v][i]
                                 hp_v = hp_inputs[dp_v][j]
@@ -627,7 +611,6 @@ def gpt2_dhp_transform(
                             attributes = update_attributes(
                                 op.op_type,
                                 op.attributes,
-                                attribute_map,
                                 old_d_embd=d_embd,
                                 new_d_embd=d_embd // hp_degree,
                                 old_n_head=n_head,
@@ -846,7 +829,7 @@ def gpt2_dhp_transform(
             assert len(dp_outputs[output][-1]) == len(hp_devices)
 
     # Aggregate data parallel outputs.
-    if dp_degree > 1:
+    if dp_degree > 1 and not skip_allgathers:
         for output in dp_outputs:
             logging.debug(f"Doing data parallel reduction for {dp_outputs[output]}")
             hp_groups = list(zip(*dp_outputs[output]))
@@ -870,11 +853,5 @@ def gpt2_dhp_transform(
             else:
                 # Do nothing for other outputs
                 pass
-
-    # Hack to get around unhashable numpy array attributes
-    # TODO: Fix this more gracefully?
-    transformed_function = restore_unhashable_attributes(
-        transformed_function, attribute_map
-    )
 
     return init_function, transformed_function.finalize()

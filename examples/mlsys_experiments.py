@@ -14,6 +14,10 @@ from dist_ir.executor import (
 
 
 def calibrate_parameters(args):
+    if args.calibrate_all:
+        args.calibrate_device_parameters = True
+        args.calibrate_network_bandwidth = True
+        args.calibrate_allreduce_parameters = True
     if args.output_file is None:
         raise ValueError(
             "Output file must be specified to calibrate simulation parameters"
@@ -22,52 +26,42 @@ def calibrate_parameters(args):
         print(f"Reading simulation parameters from {args.output_file}...")
         with open(args.output_file, "r") as f:
             simulation_parameters = json.load(f)
-        if "device_throughput" in simulation_parameters:
-            device_throughput = simulation_parameters["device_throughput"]
+        if "device_parameters" in simulation_parameters:
+            device_parameters = simulation_parameters["device_parameters"]
         else:
-            assert args.calibrate_device_parameters
-        if "dram_bandwidth" in simulation_parameters:
-            dram_bandwidth = simulation_parameters["dram_bandwidth"]
-        else:
-            assert args.calibrate_device_parameters
-        if "kernel_launch_overhead" in simulation_parameters:
-            kernel_launch_overhead = simulation_parameters["kernel_launch_overhead"]
-        else:
-            assert args.calibrate_device_parameters
+            device_parameters = [
+                1.0 / args.dram_bandwidth,
+                1.0 / args.device_throughput,
+                args.kernel_launch_overhead,
+            ]
         if "network_bandwidth" in simulation_parameters:
             network_bandwidth = simulation_parameters["network_bandwidth"]
         else:
-            assert args.calibrate_network_bandwidth
+            network_bandwidth = args.network_bandwidth
         if "allreduce_parameters" in simulation_parameters:
             allreduce_parameters = simulation_parameters["allreduce_parameters"]
         else:
-            assert args.calibrate_allreduce_parameters
+            allreduce_parameters = args.allreduce_parameters
     else:
         simulation_parameters = {}
     update_simulation_parameters = False
     if args.calibrate_device_parameters:
         print("Calibrating device parameters...")
-        (
-            dram_bandwidth,
-            device_throughput,
-            kernel_launch_overhead,
-        ) = calibrate_device_parameters()
+        device_parameters = calibrate_device_parameters(args.dtype)
         update_simulation_parameters = True
-        print(f"DRAM bandwidth: {dram_bandwidth:.2e}")
-        print(f"Device throughput: {device_throughput:.2e}")
-        print(f"Kernel launch overhead: {kernel_launch_overhead:.2e}")
+        print(f"DRAM bandwidth: {1.0 / device_parameters[0]:.2e}")
+        print(f"Device throughput: {1.0 / device_parameters[1]:.2e}")
+        print(f"Kernel launch overhead: {device_parameters[2]:.2e}")
     if args.calibrate_network_bandwidth:
-        network_bandwidth = calibrate_network_bandwidth()
+        network_bandwidth = calibrate_network_bandwidth(args.dtype)
         update_simulation_parameters = True
         print(f"Network bandwidth: {network_bandwidth}")
     if args.calibrate_allreduce_parameters:
-        allreduce_parameters = calibrate_allreduce_parameters()
+        allreduce_parameters = calibrate_allreduce_parameters(args.dtype)
         update_simulation_parameters = True
         print(f"Allreduce parameters: {allreduce_parameters}")
     if update_simulation_parameters:
-        simulation_parameters["dram_bandwidth"] = dram_bandwidth
-        simulation_parameters["device_throughput"] = device_throughput
-        simulation_parameters["kernel_launch_overhead"] = kernel_launch_overhead
+        simulation_parameters["device_parameters"] = device_parameters
         simulation_parameters["network_bandwidth"] = network_bandwidth
         simulation_parameters["allreduce_parameters"] = allreduce_parameters
         with open(args.output_file, "w") as f:
@@ -78,9 +72,29 @@ def prepare_best_grid_search_configs(args):
     if args.simulation_file is None:
         raise ValueError("Simulation file must be provided")
     # TODO handle files containing multiple model(-size)s
+    best_configs = None
     df = pd.read_csv(args.simulation_file)
-    best_configs = df[df["peak_memory"] < 21e3]  # TODO make memory limit an arg
-    best_configs = best_configs.sort_values(by="throughput", ascending=False).head(10)
+    model_sizes = df["model_size"].unique()
+    batch_sizes = sorted(df["batch_size"].unique())
+    if "mlp" in model_sizes[0]:
+        model_sizes_ = ["mlp-small", "mlp-medium", "mlp-large"]
+    elif "gpt" in model_sizes[0]:
+        model_sizes_ = ["gpt3-xl", "gpt3-13B", "gpt3-175B"]
+    assert set(model_sizes).issubset(set(model_sizes_))
+    model_sizes = model_sizes_
+    for batch_size in batch_sizes:
+        for model_size in model_sizes:
+            df_ = df[
+                (df["model_size"] == model_size) & (df["batch_size"] == batch_size)
+            ]
+            df_ = df_[df_["peak_memory"] < 28 * 1e9]  # TODO: make memory limit an arg
+            df_ = df_.sort_values(by="throughput", ascending=False).head(
+                10
+            )  # TODO: make top-k an arg
+            if best_configs is None:
+                best_configs = df_
+            else:
+                best_configs = best_configs.append(df_)
     best_configs.to_csv(args.output_file)
 
 
@@ -88,10 +102,26 @@ def prepare_accuracy_sample_configs(args):
     if args.simulation_file is None:
         raise ValueError("Simulation file must be provided")
     df = pd.read_csv(args.simulation_file)
-    sample = df[df["peak_memory"] < 21e3]  # TODO make memory limit an arg
-    sample = sample.sample(n=20, random_state=1)
-    sample = sample.sort_values(by="peak_memory")
-    sample.to_csv(args.output_file)
+    model_sizes = df["model_size"].unique()
+    if "mlp" in model_sizes[0]:
+        model_sizes_ = ["mlp-small", "mlp-medium", "mlp-large"]
+    elif "gpt" in model_sizes[0]:
+        model_sizes_ = ["gpt3-xl", "gpt3-13B", "gpt3-175B"]
+    assert set(model_sizes).issubset(set(model_sizes_))
+    model_sizes = model_sizes_
+    sample_configs = None
+    for model_size in model_sizes:
+        df_ = df[df["model_size"] == model_size]
+        df_ = df_[df_["peak_memory"] < 28 * 1e9]  # TODO: make memory limit an arg
+        df_ = df_.sample(
+            n=min(100, len(df_)), random_state=args.seed
+        )  # TODO: Make sample size an arg
+        df_ = df_.sort_values(by="peak_memory")
+        if sample_configs is None:
+            sample_configs = df_
+        else:
+            sample_configs = sample_configs.append(df_)
+    sample_configs.to_csv(args.output_file)
 
 
 if __name__ == "__main__":
@@ -142,6 +172,16 @@ if __name__ == "__main__":
         default=False,
         help="Calibrate allreduce parameters",
     )
+    parser.add_argument(
+        "--calibrate_all",
+        action="store_true",
+        default=False,
+        help="Calibrate all parameters",
+    )
+    parser.add_argument(
+        "--dtype", choices=["fp32", "fp16"], default="fp16", help="dtype"
+    )
+    parser.add_argument("--seed", type=int, default=1, help="Random seed")
 
     args = parser.parse_args()
     assert args.mode is not None

@@ -26,6 +26,9 @@ class PipelineParallelTransform:
         self._batch_dims = batch_dims
         self._reduction_params = reduction_params
         self._partition_map = partition_map
+        self._partition_map_with_stage_name_keys = {
+            stage.name: device for stage, device in partition_map.items()
+        }
         self._schedule = schedule
         self._op_to_stage_map = utils.get_op_to_stage_map(
             list(self._partition_map.keys())
@@ -78,7 +81,9 @@ class PipelineParallelTransform:
             consumer_stages = utils.get_stages_from_ops(
                 self._op_to_stage_map, consumer_ops
             )
-            consumer_devices = set([self._partition_map[c] for c in consumer_stages])
+            consumer_devices = set(
+                [self._partition_map_with_stage_name_keys[c] for c in consumer_stages]
+            )
             for consumer_device in consumer_devices:
                 if consumer_device != input_device:
                     # For the first microbatch we always forward the value. For subsequent
@@ -241,7 +246,8 @@ class PipelineParallelTransform:
                                 self._op_to_stage_map, consumer_ops
                             )
                             consumer_devices = {
-                                self._partition_map[c] for c in consumer_stages
+                                self._partition_map_with_stage_name_keys[c]
+                                for c in consumer_stages
                             }
                             for consumer_device in consumer_devices:
                                 if device != consumer_device:

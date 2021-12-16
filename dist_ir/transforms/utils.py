@@ -8,11 +8,11 @@ from ..ir import Function, Op
 
 def get_op_to_stage_map(stages: Iterable[Function]) -> Dict[Op, Function]:
     """Given a list of stages, returns a map from individual op to
-    encompassing stage."""
+    the encompassing stage name."""
     op_to_stage = {}
     for stage in stages:
         for op in stage.ops:
-            op_to_stage[op] = stage
+            op_to_stage[op] = stage.name
     return op_to_stage
 
 

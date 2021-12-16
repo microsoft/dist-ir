@@ -20,11 +20,22 @@ GPT2_MODEL_PATH = (Path(__file__).parent.parent / "gpt2-10.onnx").absolute()
 
 
 @pytest.mark.parametrize(
-    ("backend"),
-    ["simulate", "pytorch"],
+    "backend, dtype",
+    [
+        ("simulate", "fp32"),
+        ("simulate", "fp16"),
+        ("pytorch", "fp32"),
+        pytest.param(
+            "pytorch",
+            "fp16",
+            marks=pytest.mark.skipif(
+                not torch.cuda.is_available(), reason="fp16 only available on GPU"
+            ),
+        ),
+    ],
 )
-def test_mlp_grid_search(backend):
-    all_world_sizes = [1, 2, 4]
+def test_mlp_grid_search(backend, dtype):
+    all_world_sizes = [1, 2]
     all_batch_sizes = [256]
     all_model_sizes = ["mlp-xs"]
     with tempfile.NamedTemporaryFile() as tf:
@@ -33,6 +44,7 @@ def test_mlp_grid_search(backend):
             writer.writeheader()
         grid_search = MLPGridSearch(
             backend=backend,
+            dtype=dtype,
             use_gpu=torch.cuda.is_available(),
             output_file=tf.name,
             device_throughput=constants.DEFAULT_DEVICE_THROUGHPUT,
@@ -59,6 +71,7 @@ def test_mlp_grid_search(backend):
                 simulation = mlp.run_mlp(
                     phase="training",
                     backend="simulate",
+                    dtype=dtype,
                     use_gpu=False,
                     batch_size=all_batch_sizes[0],
                     input_dim=dim,
@@ -73,7 +86,9 @@ def test_mlp_grid_search(backend):
                     dram_bandwidth=constants.DEFAULT_DRAM_BANDWIDTH,
                     kernel_launch_overhead=constants.DEFAULT_KERNEL_LAUNCH_OVERHEAD,
                     network_bandwidth=constants.DEFAULT_NETWORK_BANDWIDTH,
-                    trace_file=None,
+                    num_warmup=0,
+                    num_repetitions=0,
+                    skip_allgathers=True,
                     verbose=False,
                 )
                 latency = simulation.get_latency()
@@ -91,11 +106,22 @@ def test_mlp_grid_search(backend):
 
 
 @pytest.mark.parametrize(
-    ("backend"),
-    ["simulate", "pytorch"],
+    "backend, dtype",
+    [
+        ("simulate", "fp32"),
+        ("simulate", "fp16"),
+        ("pytorch", "fp32"),
+        pytest.param(
+            "pytorch",
+            "fp16",
+            marks=pytest.mark.skipif(
+                not torch.cuda.is_available(), reason="fp16 only available on GPU"
+            ),
+        ),
+    ],
 )
-def test_gpt_grid_search(backend):
-    all_world_sizes = [1, 2, 4]
+def test_gpt_grid_search(backend, dtype):
+    all_world_sizes = [1, 2]
     all_batch_sizes = [64]
     all_model_sizes = ["gpt2-xs"]
     with tempfile.NamedTemporaryFile() as tf:
@@ -104,6 +130,7 @@ def test_gpt_grid_search(backend):
             writer.writeheader()
         grid_search = GPTGridSearch(
             backend=backend,
+            dtype=dtype,
             use_gpu=torch.cuda.is_available(),
             output_file=tf.name,
             device_throughput=constants.DEFAULT_DEVICE_THROUGHPUT,
@@ -134,6 +161,7 @@ def test_gpt_grid_search(backend):
                     topology,
                 ) = gpt2.get_transformed_function_and_input_data(
                     model_path=GPT2_MODEL_PATH,
+                    dtype=dtype,
                     device_throughput=constants.DEFAULT_DEVICE_THROUGHPUT,
                     dram_bandwidth=constants.DEFAULT_DRAM_BANDWIDTH,
                     kernel_launch_overhead=constants.DEFAULT_KERNEL_LAUNCH_OVERHEAD,
@@ -146,6 +174,7 @@ def test_gpt_grid_search(backend):
                     n_layer=n_layer,
                     n_head=n_head,
                     d_embd=d_embd,
+                    skip_allgathers=True,
                     use_real_weights=False,
                     print_stats=False,
                 )

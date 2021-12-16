@@ -135,7 +135,10 @@ def dispatch(
         if _abstractable_types(input_types, signature):
             return signature, implementation
 
-    raise ValueError(f"Could not dispatch {op_type} with input types {input_types}")
+    raise ValueError(
+        f"Could not dispatch {op_type} with {len(input_types)} "
+        f"input types {input_types}"
+    )
 
 
 class AbstractState:
@@ -257,7 +260,10 @@ class AbstractInterpreter:
                 if not isinstance(outputs, tuple):
                     assert len(op.outputs) == 1
                     outputs = (outputs,)
-                assert len(outputs) == len(op.outputs)
+                if len(outputs) != len(op.outputs):
+                    raise ValueError(
+                        f"Received incorrect number of outputs for op {op}"
+                    )
                 for x, val in zip(op.outputs, outputs):
                     state.env[x] = val
 

@@ -1,0 +1,230 @@
+description: Run DistIR MLSys experiments
+
+target:
+  service: amlk8s
+  name: itphyperdgx2cl1 #v100-32gb-eus
+  vc: hai8 #aml-ds
+
+environment:
+  image: pytorch/pytorch:1.9.0-cuda10.2-cudnn7-devel
+  registry: docker.io
+  setup:
+    - pip install -r requirements.txt
+
+code:
+  # local directory of the code. this will be uploaded to the server.
+  # $CONFIG_DIR is expanded to the directory of this config file
+  local_dir: $CONFIG_DIR
+
+data:
+  local_dir: data
+  remote_dir: distir-data
+
+jobs:
+  - name: sleep
+    sku: G16
+    command:
+      - sleep 10h
+  - name: calibrate_network_bandwidth
+    sku: G16
+    command:
+      - cp $$AMLT_DATA_DIR/dgx.fp16.calibration_parameters.json $$AMLT_OUTPUT_DIR
+      - python -m examples.mlsys_experiments --mode calibrate --calibrate_network_bandwidth --output_file $$AMLT_OUTPUT_DIR/dgx.fp16.calibration_parameters.json
+      - cp $$AMLT_OUTPUT_DIR/dgx.fp16.calibration_parameters.json $$AMLT_DATA_DIR
+  - name: calibrate_simulator_parameters
+    sku: G16
+    command:
+      - python -m examples.mlsys_experiments --mode calibrate --calibrate_all --output_file $$AMLT_OUTPUT_DIR/dgx.fp16.calibration_parameters.json
+  - name: mlp-small_pure_baseline_dp
+    sku: G16
+    command:
+      - ./examples/run_pure_baseline.sh mlp mlp-small DP 16 128 524288 $$AMLT_OUTPUT_DIR/mlp-small_backend_dp.csv
+  - name: mlp-small_pure_baseline_hp
+    sku: G16
+    command:
+      - ./examples/run_pure_baseline.sh mlp mlp-small HP 16 128 65536 $$AMLT_OUTPUT_DIR/mlp-small_backend_hp.csv
+  - name: mlp-small_pure_baseline_pp
+    sku: G16
+    command:
+      - ./examples/run_pure_baseline.sh mlp mlp-small PP 16 128 262144 $$AMLT_OUTPUT_DIR/mlp-small_backend_pp.csv
+  - name: mlp-medium_pure_baseline_dp
+    sku: G16
+    command:
+      - ./examples/run_pure_baseline.sh mlp mlp-medium DP 16 128 1048576 $$AMLT_OUTPUT_DIR/mlp-medium_backend_dp.csv
+  - name: mlp-medium_pure_baseline_hp
+    sku: G16
+    command:
+      - ./examples/run_pure_baseline.sh mlp mlp-medium HP 16 128 8192 $$AMLT_OUTPUT_DIR/mlp-medium_backend_hp.csv
+  - name: mlp-medium_pure_baseline_pp
+    sku: G16
+    command:
+      - ./examples/run_pure_baseline.sh mlp mlp-medium PP 16 128 65536 $$AMLT_OUTPUT_DIR/mlp-medium_backend_pp.csv
+  - name: mlp-large_pure_baseline_dp
+    sku: G16
+    command:
+      - ./examples/run_pure_baseline.sh mlp mlp-large DP 16 128 131072 $$AMLT_OUTPUT_DIR/mlp-large_backend_dp.csv
+  - name: mlp-large_pure_baseline_hp
+    sku: G16
+    command:
+      - ./examples/run_pure_baseline.sh mlp mlp-large HP 16 128 2048 $$AMLT_OUTPUT_DIR/mlp-large_backend_hp.csv
+  - name: mlp-large_pure_baseline_pp
+    sku: G16
+    command:
+      - ./examples/run_pure_baseline.sh mlp mlp-large PP 16 128 128 $$AMLT_OUTPUT_DIR/mlp-large_backend_pp.csv
+  - name: gpt3-xl_pure_baseline_dp_2
+    sku: G16
+    command:
+      - echo "START"
+      - free -h
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_pure_baseline.sh gpt gpt3-xl DP 16
+        128 524288
+        $$AMLT_OUTPUT_DIR/gpt3-xl_backend_dp.csv
+  - name: gpt3-xl_pure_baseline_hp_2
+    sku: G16
+    command:
+      - echo "START"
+      - free -h
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_pure_baseline.sh gpt gpt3-xl HP 16
+        128 131072
+        $$AMLT_OUTPUT_DIR/gpt3-xl_backend_hp.csv
+  - name: gpt3-xl_pure_baseline_pp_2
+    sku: G16
+    command:
+      - echo "START"
+      - free -h
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_pure_baseline.sh gpt gpt3-xl PP 16
+        128 131072
+        $$AMLT_OUTPUT_DIR/gpt3-xl_backend_pp.csv
+  - name: gpt3-6.7B_pure_baseline_dp_2
+    sku: G16
+    command:
+      - echo "START"
+      - free -h
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_pure_baseline.sh gpt gpt3-6.7B DP 16
+        128 65536
+        $$AMLT_OUTPUT_DIR/gpt3-6.7B_backend_dp.csv
+  - name: gpt3-6.7B_pure_baseline_hp_2
+    sku: G16
+    command:
+      - echo "START"
+      - free -h
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_pure_baseline.sh gpt gpt3-6.7B HP 16
+        128 131072
+        $$AMLT_OUTPUT_DIR/gpt3-6.7B_backend_hp.csv
+  - name: gpt3-6.7B_pure_baseline_pp_2
+    sku: G16
+    command:
+      - echo "START"
+      - free -h
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_pure_baseline.sh gpt gpt3-6.7B PP 16
+        128 131072
+        $$AMLT_OUTPUT_DIR/gpt3-6.7B_backend_pp.csv
+  - name: gpt3-13B_pure_baseline_dp_2
+    sku: G16
+    command:
+      - echo "START"
+      - free -h
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_pure_baseline.sh gpt gpt3-13B DP 16
+        128 65536
+        $$AMLT_OUTPUT_DIR/gpt3-13B_backend_dp.csv
+  - name: gpt3-13B_pure_baseline_hp_2
+    sku: G16
+    command:
+      - echo "START"
+      - free -h
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_pure_baseline.sh gpt gpt3-13B HP 16
+        128 65536
+        $$AMLT_OUTPUT_DIR/gpt3-13B_backend_hp.csv
+  - name: gpt3-13B_pure_baseline_pp_2
+    sku: G16
+    command:
+      - echo "START"
+      - free -h
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_pure_baseline.sh gpt gpt3-13B PP 16
+        128 32768
+        $$AMLT_OUTPUT_DIR/gpt3-13B_backend_pp.csv
+  - name: gpt3-175B_pure_baseline_hp_2
+    sku: G16
+    command:
+      - echo "START"
+      - free -h
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_pure_baseline.sh gpt gpt3-175B HP 16
+        128 8192
+        $$AMLT_OUTPUT_DIR/gpt3-175B_backend_hp.csv
+  - name: gpt3-175B_pure_baseline_pp_2
+    sku: G16
+    command:
+      - echo "START"
+      - free -h
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_pure_baseline.sh gpt gpt3-175B PP 16
+        128 4096
+        $$AMLT_OUTPUT_DIR/gpt3-175B_backend_pp.csv
+  - name: mlp-sample
+    sku: G16
+    command:
+      - cp $$AMLT_DATA_DIR/mlp_dgx_backend_grid_search_results_sample.csv $$AMLT_OUTPUT_DIR
+      - ./examples/run_grid_search.sh mlp 16 $$AMLT_DATA_DIR/mlp_dgx_simulated_grid_search_results_sample.csv $$AMLT_OUTPUT_DIR/mlp_dgx_backend_grid_search_results_sample.csv
+  - name: gpt2-sample
+    sku: G16
+    command:
+      - cp $$AMLT_DATA_DIR/gpt2_dgx_backend_grid_search_results_sample.csv $$AMLT_OUTPUT_DIR
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_grid_search.sh gpt 16 $$AMLT_DATA_DIR/gpt2_dgx_simulated_grid_search_results_sample.csv $$AMLT_OUTPUT_DIR/gpt2_dgx_backend_grid_search_results_sample.csv
+  - name: mlp-sample-v2
+    sku: G16
+    command:
+      - ./examples/run_grid_search.sh mlp 16 $$AMLT_DATA_DIR/mlp_dgx_simulated_grid_search_results_sample_v2.csv $$AMLT_OUTPUT_DIR/mlp_dgx_backend_grid_search_results_sample_v2.csv
+  - name: gpt2-sample-v2
+    sku: G16
+    command:
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_grid_search.sh gpt 16 $$AMLT_DATA_DIR/gpt2_dgx_simulated_grid_search_results_sample_v2.csv $$AMLT_OUTPUT_DIR/gpt2_dgx_backend_grid_search_results_sample_v2.csv
+  - name: mlp-best
+    sku: G16
+    command:
+      - cp $$AMLT_DATA_DIR/mlp_dgx_backend_grid_search_results_best.csv $$AMLT_OUTPUT_DIR
+      - ./examples/run_grid_search.sh mlp 16 $$AMLT_DATA_DIR/mlp_dgx_simulated_grid_search_results_best.csv $$AMLT_OUTPUT_DIR/mlp_dgx_backend_grid_search_results_best.csv
+  - name: gpt2-best
+    sku: G16
+    command:
+      - cp $$AMLT_DATA_DIR/gpt2_dgx_backend_grid_search_results_best.csv $$AMLT_OUTPUT_DIR
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_grid_search.sh gpt 16 $$AMLT_DATA_DIR/gpt2_dgx_simulated_grid_search_results_best.csv $$AMLT_OUTPUT_DIR/gpt2_dgx_backend_grid_search_results_best.csv
+  - name: mlp-best-v2-1
+    sku: G16
+    command:
+      - ./examples/run_grid_search.sh mlp 16 $$AMLT_DATA_DIR/mlp_dgx_simulated_grid_search_results_best_v2-1.csv $$AMLT_OUTPUT_DIR/mlp_dgx_backend_grid_search_results_best_v2-1.csv
+  - name: mlp-best-v2-2
+    sku: G16
+    command:
+      - ./examples/run_grid_search.sh mlp 16 $$AMLT_DATA_DIR/mlp_dgx_simulated_grid_search_results_best_v2-2.csv $$AMLT_OUTPUT_DIR/mlp_dgx_backend_grid_search_results_best_v2-2.csv
+  - name: mlp-best-v2-3
+    sku: G16
+    command:
+      - ./examples/run_grid_search.sh mlp 16 $$AMLT_DATA_DIR/mlp_dgx_simulated_grid_search_results_best_v2-3.csv $$AMLT_OUTPUT_DIR/mlp_dgx_backend_grid_search_results_best_v2-3.csv
+  - name: gpt2-best-v2-1
+    sku: G16
+    command:
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_grid_search.sh gpt 16 $$AMLT_DATA_DIR/gpt2_dgx_simulated_grid_search_results_best_v2-1.csv $$AMLT_OUTPUT_DIR/gpt2_dgx_backend_grid_search_results_best_v2-1.csv
+  - name: gpt2-best-v2-2
+    sku: G16
+    command:
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_grid_search.sh gpt 16 $$AMLT_DATA_DIR/gpt2_dgx_simulated_grid_search_results_best_v2-2.csv $$AMLT_OUTPUT_DIR/gpt2_dgx_backend_grid_search_results_best_v2-2.csv
+  - name: gpt2-best-v2-3
+    sku: G16
+    command:
+      - cp $$AMLT_DATA_DIR/gpt2-10.onnx ./
+      - ./examples/run_grid_search.sh gpt 16 $$AMLT_DATA_DIR/gpt2_dgx_simulated_grid_search_results_best_v2-3.csv $$AMLT_OUTPUT_DIR/gpt2_dgx_backend_grid_search_results_best_v2-3.csv

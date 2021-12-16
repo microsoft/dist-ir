@@ -29,11 +29,12 @@ class PipelineParallelScheduler(ABC):
 
     def _prepare_stages_to_schedule(self, function, partition_map):
         """Enumerates the stages to schedule on each device across all microbatches."""
+        function_inputs = set(function.inputs)
         for stage, device in partition_map.items():
             inputs = stage.inputs
             remaining_inputs = len(inputs)
-            for input in inputs:
-                if input in function.inputs:
+            for inp in inputs:
+                if inp in function_inputs:
                     remaining_inputs -= 1
             for i in range(self._num_microbatches):
                 self._remaining_inputs[(stage.name, i)] = remaining_inputs
@@ -46,9 +47,13 @@ class PipelineParallelScheduler(ABC):
 
     def schedule(self, function, partition_map):
         # Verify that all stage names are unique
-        assert len(set([stage.name for stage in partition_map])) == len(partition_map)
+        all_stages = {stage.name: stage for stage in partition_map}
+        assert len(all_stages) == len(partition_map)
         self._prepare_stages_to_schedule(function, partition_map)
         op_to_stage = utils.get_op_to_stage_map(list(partition_map.keys()))
+        partition_map_with_stage_name_keys = {
+            stage.name: device for (stage, device) in partition_map.items()
+        }
         num_scheduled_stages = 0
         total_stages_to_schedule = len(partition_map) * self._num_microbatches
         schedule = []
@@ -75,12 +80,18 @@ class PipelineParallelScheduler(ABC):
                         consumer_ops = function.consumers[output]
                         consumer_stages = set([op_to_stage[op] for op in consumer_ops])
                         for consumer_stage in consumer_stages:
-                            consumer_stage_key = (consumer_stage.name, microbatch)
+                            consumer_stage_key = (consumer_stage, microbatch)
                             self._remaining_inputs[consumer_stage_key] -= 1
                             if self._remaining_inputs[consumer_stage_key] == 0:
-                                consumer_stage_device = partition_map[consumer_stage]
+                                consumer_stage_device = (
+                                    partition_map_with_stage_name_keys[consumer_stage]
+                                )
                                 next_ready_stages.append(
-                                    (consumer_stage_device, consumer_stage, microbatch)
+                                    (
+                                        consumer_stage_device,
+                                        all_stages[consumer_stage],
+                                        microbatch,
+                                    )
                                 )
             if len(per_timestep_schedule) == 0:
                 raise RuntimeError(

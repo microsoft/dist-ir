@@ -2,6 +2,7 @@
 # Licensed under the MIT License.
 
 import numpy as np
+import scipy
 
 
 def _handle_negative_axis(axis, tensor_rank):
@@ -54,10 +55,7 @@ def concat(op, *xs):
 
 def constant(op):
     v = op.attributes["value"]
-    if v.shape == (1,):
-        return v[0]
-    else:
-        return v
+    return np.array(v)
 
 
 def constant_of_shape(op, x):
@@ -97,12 +95,11 @@ def expand(op, x, y):
 def gather(op, x, y):
     if "axis" in op.attributes:
         axis = op.attributes["axis"]
+        if axis != 0:
+            raise NotImplementedError(f"Gather currently requires axis to be 0")
     else:
         axis = 0
-    res = np.take(x, y.astype(np.int64), axis=axis)
-    if res.shape == (1,):
-        return res[0]
-    return res
+    return x[y]
 
 
 def identity(op, x):
@@ -208,6 +205,8 @@ def shape(op, x):
 
 def slice_conc(op, x, starts, ends, axes, steps=None):
     # TODO handle the other cases, e.g. negative indices
+    if steps is not None and isinstance(steps, np.ndarray) and len(steps.shape) == 0:
+        steps = np.expand_dims(steps, 0)
     if steps is None:
         steps = [1] * len(starts)
     elif isinstance(steps, np.int64):
@@ -223,8 +222,7 @@ def slice_conc(op, x, starts, ends, axes, steps=None):
 
 def softmax(op, x):
     axis = op.attributes["axis"]
-    exp = np.exp(x)
-    return exp / np.sum(exp, axis=axis, keepdims=True)
+    return scipy.special.softmax(x, axis=axis)
 
 
 def split_uniform(op, x):
@@ -332,12 +330,18 @@ NumPyRegister = {
     ("Reshape", (np.ndarray, np.ndarray)): reshape,
     ("Select", (tuple,)): select,
     ("Select", (np.ndarray,)): select,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(2))): sgd,
     ("SGDOptimizer", tuple(np.ndarray for i in range(4))): sgd,
     ("SGDOptimizer", tuple(np.ndarray for i in range(8))): sgd,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(12))): sgd,
     ("SGDOptimizer", tuple(np.ndarray for i in range(16))): sgd,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(24))): sgd,
     ("SGDOptimizer", tuple(np.ndarray for i in range(32))): sgd,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(48))): sgd,
     ("SGDOptimizer", tuple(np.ndarray for i in range(64))): sgd,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(96))): sgd,
     ("SGDOptimizer", tuple(np.ndarray for i in range(128))): sgd,
+    ("SGDOptimizer", tuple(np.ndarray for i in range(192))): sgd,
     ("SGDOptimizer", tuple(np.ndarray for i in range(256))): sgd,
     ("SGDOptimizer", tuple(np.ndarray for i in range(512))): sgd,
     ("SGDOptimizer", tuple(np.ndarray for i in range(1024))): sgd,

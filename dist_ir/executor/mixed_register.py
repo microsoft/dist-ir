@@ -22,13 +22,13 @@ def _elementwise_numpy_op_prop_fn(op, x, y):
     if (
         isinstance(x, Tensor)
         and isinstance(y, ConcreteValue)
-        and y.val.dtype == np.float32
+        and (y.val.dtype == np.float32 or y.val.dtype == np.float64)
     ):
         return x
     elif (
         isinstance(x, ConcreteValue)
         and isinstance(y, Tensor)
-        and x.val.dtype == np.float32
+        and (x.val.dtype == np.float32 or x.val.dtype == np.float64)
     ):
         return y
     else:
@@ -52,9 +52,9 @@ def _gather_prop_fn(op, x, y):
         axis = op.attributes["axis"]
     else:
         axis = 0
-    if isinstance(y, np.ndarray) and axis == 0:
+    if isinstance(y.val, np.ndarray) and axis == 0:
         # Manually compute the new shape for the common case
-        new_shape = y.shape + x.shape[1:]
+        new_shape = y.val.shape + x.shape[1:]
     else:
         # Use the NumPy implementation in the general case
         temp = np.zeros(x.shape)
@@ -108,6 +108,9 @@ def _slice_prop_fn(op, x, starts, ends, axes, steps):
     ends = ends.val
     axes = axes.val
     steps = steps.val
+
+    if len(steps.shape) == 0:
+        steps = np.expand_dims(steps, 0)
 
     # TODO handle the other cases, e.g. negative indices
     assert -1 not in starts.tolist()

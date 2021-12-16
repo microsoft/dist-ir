@@ -6,6 +6,7 @@ import copy
 from .grid_search import DHPConfig, GridSearch, run_grid_search
 from . import gpt2
 from .parser import Parser
+from .utils import configure_logging
 from dist_ir.transforms.gpt2_dhp_transform import check_params
 
 
@@ -13,6 +14,7 @@ class GPTGridSearch(GridSearch):
     def __init__(
         self,
         backend,
+        dtype,
         use_gpu,
         output_file,
         device_throughput,
@@ -23,24 +25,10 @@ class GPTGridSearch(GridSearch):
         max_world_size,
         model_path,
     ):
-        model_params = {
-            "gpt2-xs": (4, 12, 768),
-            "gpt2": (12, 12, 768),
-            "gpt2-medium": (24, 16, 1024),
-            "gpt2-large": (36, 20, 1280),
-            "gpt2-xl": (48, 25, 1600),
-            "gpt2-xl": (48, 25, 1600),
-            "gpt3": (12, 12, 768),
-            "gpt3-medium": (24, 16, 1024),
-            "gpt3-large": (24, 16, 1536),
-            "gpt3-xl": (24, 16, 2048),
-            "gpt3-2.7B": (32, 32, 2560),
-            "gpt3-6.7B": (32, 32, 4096),
-            "gpt3-13B": (40, 40, 5120),
-        }
         super().__init__(
-            model_params,
+            gpt2.model_params,
             backend,
+            dtype,
             use_gpu,
             output_file,
             device_throughput,
@@ -54,15 +42,16 @@ class GPTGridSearch(GridSearch):
         self.base_model, self.base_input_data = gpt2.import_function_and_get_input_data(
             self.model_path,
             self.topology.devices[0],
+            self.dtype,
             use_real_weights=(self.backend == "pytorch"),
         )
         self.models_and_input_data = {}
         self.all_input_ids = []
 
     def get_model_and_input_data(self, batch_size, model_size):
-        if len(self.all_input_ids) < batch_size:
-            # TODO only do this for pytorch backend, use abstract tensor for simulator?
-            self.all_input_ids = gpt2.create_input_ids(batch_size)
+        pytorch_backend = self.backend == "pytorch"
+        if len(self.all_input_ids) < batch_size and pytorch_backend:
+            self.all_input_ids = gpt2.create_input_ids(batch_size, pytorch_backend)
 
         if model_size not in self.models_and_input_data:
             n_layer, n_head, d_embd = self.model_params[model_size]
@@ -74,10 +63,14 @@ class GPTGridSearch(GridSearch):
                 n_layer,
                 n_head,
                 d_embd,
+                self.dtype,
             )
 
         model, input_data = self.models_and_input_data[model_size]
-        input_ids = self.all_input_ids[:batch_size]
+        if pytorch_backend:
+            input_ids = self.all_input_ids[:batch_size]
+        else:
+            input_ids = gpt2.create_input_ids(batch_size, False)
         input_data = [input_ids] + input_data
         return model, input_data
 
@@ -111,6 +104,7 @@ class GPTGridSearch(GridSearch):
             config.num_microbatches,
             d_embd,
             n_head,
+            skip_allgathers=True,
             use_real_weights=(self.backend == "pytorch"),
         )
 
@@ -120,8 +114,14 @@ class GPTGridSearch(GridSearch):
         )
 
     def pytorch(self, transformed_fn, input_data, world_size):
+        # TODO: Get num_warmup and num_repetitions from args
         return gpt2.run_pytorch(
-            transformed_fn, input_data, world_size, use_gpu=self.use_gpu
+            transformed_fn,
+            input_data,
+            world_size,
+            num_warmup=5,
+            num_repetitions=10,
+            use_gpu=self.use_gpu,
         )
 
 
@@ -145,5 +145,8 @@ if __name__ == "__main__":
     parser.add_grid_search_config_arguments(defaults)
     parser.add_backend_config_arguments()
     parser.add_gpt2_model_path_config_arguments()
+    parser.add_model_config_arguments(choices=list(gpt2.model_params.keys()))
+    parser.add_logging_config_arguments()
     args = parser.parse_args()
+    configure_logging(args)
     run_grid_search(args, GPTGridSearch)

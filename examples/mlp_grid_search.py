@@ -1,19 +1,23 @@
 # Copyright (c) Microsoft Corporation.
 # Licensed under the MIT License.
 
+import numpy as np
+
 from dist_ir.ir import Value
-from dist_ir.ir.type import Tensor
+from dist_ir.ir.type import Tensor, Float32, Float16
 from dist_ir.executor import infer_types, sequentially_execute, ConcreteValue
 from dist_ir.transforms import mlp_dhp_transform
 from . import mlp
 from .grid_search import DHPConfig, GridSearch, run_grid_search
 from .parser import Parser
+from .utils import configure_logging
 
 
 class MLPGridSearch(GridSearch):
     def __init__(
         self,
         backend,
+        dtype,
         use_gpu,
         output_file,
         device_throughput,
@@ -24,15 +28,10 @@ class MLPGridSearch(GridSearch):
         max_world_size,
         model_path=None,
     ):
-        model_params = {
-            "mlp-xs": (8, 512),
-            "mlp-small": (16, 8192),
-            "mlp-medium": (64, 16384),
-            "mlp-large": (128, 32768),
-        }
         super().__init__(
-            model_params,
+            mlp.model_params,
             backend,
+            dtype,
             use_gpu,
             output_file,
             device_throughput,
@@ -49,16 +48,26 @@ class MLPGridSearch(GridSearch):
         if model_size not in self.models:
             num_layers, dim = self.model_params[model_size]
             self.models[model_size] = mlp.mlp(
-                dim, dim, dim, num_layers, self.topology.devices[0]
+                dim,
+                dim,
+                dim,
+                num_layers,
+                self.topology.devices[0],
+                Float32 if self.dtype == "fp32" else Float16,
             )
 
         fn = self.models[model_size]
         num_layers, dim = self.model_params[model_size]
         if self.backend == "pytorch":
-            input_data = mlp.get_input_data(batch_size, dim, num_layers)
-            input_data = tuple(
-                ConcreteValue(t, inp.type.device)
-                for t, inp in zip(input_data, fn.inputs)
+            dtype = np.float32 if self.dtype == "fp32" else np.float16
+            input_data = mlp.get_input_data(
+                fn.inputs,
+                batch_size,
+                dim,
+                dim,
+                self.topology.devices[0],
+                dtype,
+                uniform_weight_sizes=True,
             )
         else:
             input_data = mlp.get_typed_input_values(fn.inputs, batch_size, dim, dim)
@@ -81,6 +90,7 @@ class MLPGridSearch(GridSearch):
             config.pp_degree,
             config.num_microbatches,
             topology.devices,
+            skip_allgathers=True,
         )
         if self.backend == "pytorch":
             _, dim = self.model_params[config.model_size]
@@ -108,8 +118,15 @@ class MLPGridSearch(GridSearch):
         )
 
     def pytorch(self, transformed_fn, input_data, world_size):
+        # TODO: Get num_warmup and num_repetitions from args
         return mlp.run_pytorch(
-            transformed_fn, input_data, world_size, use_gpu=self.use_gpu
+            transformed_fn,
+            input_data,
+            world_size,
+            use_gpu=self.use_gpu,
+            num_warmup=5,
+            num_repetitions=10,
+            profile=False,
         )
 
 
@@ -124,5 +141,8 @@ if __name__ == "__main__":
     parser.add_execution_mode_config_arguments()
     parser.add_grid_search_config_arguments(defaults)
     parser.add_backend_config_arguments()
+    parser.add_model_config_arguments(choices=list(mlp.model_params.keys()))
+    parser.add_logging_config_arguments()
     args = parser.parse_args()
+    configure_logging(args)
     run_grid_search(args, MLPGridSearch)

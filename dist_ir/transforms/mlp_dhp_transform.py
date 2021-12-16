@@ -15,10 +15,6 @@ import roundrobin
 from ..ir import cpprint, Op
 from ..ir.function import Function, FunctionMaker
 from .pipedream_scheduler import PipeDreamScheduler
-from .sanitize_attributes_transform import (
-    sanitize_unhashable_attributes,
-    restore_unhashable_attributes,
-)
 
 # TODO: Add these helper functions to a transform-writing API
 
@@ -39,12 +35,15 @@ def _identity(v, function, output_name):
 
 def _split_value(v, function, num_splits, parallelism_level, dim=0):
     output_names = [f"{v.name}_{parallelism_level}_{i}" for i in range(num_splits)]
-    return function.add_op(
+    split_values = function.add_op(
         "SplitUniform",
         inputs=[v],
         attributes={"axis": dim, "num_splits": num_splits},
         output_names=output_names,
     )
+    if not isinstance(split_values, tuple):
+        split_values = (split_values,)
+    return split_values
 
 
 def _mpi_allgather_values(vs, function, dim, output_names):
@@ -217,6 +216,7 @@ def _partition_inputs_pp(
                             dim=0,
                         )
                     elif k == 1:
+                        # Labels will be used on downstream device
                         consumer_devices = _get_consumer_devices_for_pp_value(
                             orig_inp,
                             function,
@@ -373,15 +373,16 @@ def _get_device_tree(dp_degree, hp_degree, pp_degree, devices):
 
 
 def mlp_dhp_transform(
-    function, dp_degree, hp_degree, pp_degree, num_microbatches, devices, debug=False
+    function,
+    dp_degree,
+    hp_degree,
+    pp_degree,
+    num_microbatches,
+    devices,
+    skip_allgathers=False,
+    debug=False,
 ):
     """Automatically distributes an MLP function using D/H/P hybrid parallelism."""
-
-    if debug:
-        logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.DEBUG)
-
-    # Temporarily remove unhashable attributes.
-    (function, attribute_map) = sanitize_unhashable_attributes(function)
 
     # Initialize the transformed function and construct the device tree given the
     # specified parallelism dimensions.
@@ -764,7 +765,7 @@ def mlp_dhp_transform(
                             for j in range(len(hp_group))
                         ],
                     )
-            else:
+            elif not skip_allgathers:
                 for i, hp_group in enumerate(hp_groups):
                     _mpi_allgather_values(
                         hp_group,
@@ -775,11 +776,5 @@ def mlp_dhp_transform(
                             for j in range(len(hp_group))
                         ],
                     )
-
-    # Hack to get around unhashable numpy array attributes
-    # TODO: Fix this more gracefully?
-    transformed_function = restore_unhashable_attributes(
-        transformed_function, attribute_map
-    )
 
     return init_function, transformed_function.finalize()

@@ -17,16 +17,31 @@ from dist_ir.executor import (
     ConcreteValue,
 )
 from dist_ir.importer import import_from_onnx
-from dist_ir.ir import FunctionMaker, Op, get_uniform_topology
-from dist_ir.ir.type import Tensor, Type, abstract_values
+from dist_ir.ir import FunctionMaker, Op, Value, get_uniform_topology
+from dist_ir.ir.type import Int64, Float16, Float32, Tensor, Type, abstract_values
 from dist_ir.transforms import (
     gpt2_dhp_transform,
-    sanitize_unhashable_attributes,
-    restore_unhashable_attributes,
 )
 from dist_ir.transforms.gpt2_dhp_transform import check_params, update_attributes
 
 from .parser import Parser
+from . import utils
+
+model_params = {
+    "gpt2-xs": (4, 12, 768),  # Debug
+    "gpt2": (12, 12, 768),  # HuggingFace
+    "gpt2-medium": (24, 16, 1024),  # HuggingFace
+    "gpt2-large": (36, 20, 1280),  # HuggingFace
+    "gpt2-xl": (48, 25, 1600),  # HuggingFace
+    "gpt3": (12, 12, 768),  # OpenAI
+    "gpt3-medium": (24, 16, 1024),  # OpenAI
+    "gpt3-large": (24, 16, 1536),  # OpenAI
+    "gpt3-xl": (24, 16, 2048),  # OpenAI
+    "gpt3-2.7B": (32, 32, 2560),  # OpenAI
+    "gpt3-6.7B": (32, 32, 4096),  # OpenAI
+    "gpt3-13B": (40, 40, 5120),  # OpenAI
+    "gpt3-175B": (96, 96, 12288),  # OpenAI
+}
 
 
 def _to_numpy(x):
@@ -36,8 +51,6 @@ def _to_numpy(x):
 
 
 def _filter_extra_outputs(function):
-    function, attribute_map = sanitize_unhashable_attributes(function)
-
     # Map from op to set of function output values.
     sinks = defaultdict(set)
 
@@ -82,12 +95,11 @@ def _filter_extra_outputs(function):
         for orig_output, new_output in zip(op.outputs, new_op.outputs):
             value_map[orig_output] = new_output
 
-    filtered_function = restore_unhashable_attributes(filtered_function, attribute_map)
     return filtered_function.finalize()
 
 
-def _set_model_size(function, n_layer, n_head, d_embd):
-    function, attribute_map = sanitize_unhashable_attributes(function)
+def _set_model_size(function, n_layer, n_head, d_embd, dtype):
+    dist_ir_dtype = Float32 if dtype == "fp32" else Float16
 
     # Prepare a list of the existing Transformer blocks in the function.
     blocks = []
@@ -138,11 +150,11 @@ def _set_model_size(function, n_layer, n_head, d_embd):
             if inp.name == "wte.weight":
                 vocab_size = inp.type.shape[0]
                 shape = (vocab_size, d_embd)
-                typ = Tensor(shape=shape, device=inp.type.device, dtype=inp.type.dtype)
+                typ = Tensor(shape=shape, device=inp.type.device, dtype=dist_ir_dtype())
             elif inp.name == "wpe.weight":
                 max_position_embeddings = inp.type.shape[0]
                 shape = (max_position_embeddings, d_embd)
-                typ = Tensor(shape=shape, device=inp.type.device, dtype=inp.type.dtype)
+                typ = Tensor(shape=shape, device=inp.type.device, dtype=dist_ir_dtype())
             elif (
                 "ln_1.weight" in inp.name
                 or "ln_1.bias" in inp.name
@@ -169,7 +181,7 @@ def _set_model_size(function, n_layer, n_head, d_embd):
             elif "mlp.c_proj.bias" in inp.name:
                 shape = (d_embd,)
             if shape != inp.type.shape:
-                typ = Tensor(shape=shape, device=inp.type.device, dtype=inp.type.dtype)
+                typ = Tensor(shape=shape, device=inp.type.device, dtype=dist_ir_dtype())
             else:
                 typ = inp.type
             value_map[inp] = transformed_function.add_input_value(inp.name, typ)
@@ -194,7 +206,6 @@ def _set_model_size(function, n_layer, n_head, d_embd):
                 attributes = update_attributes(
                     op.op_type,
                     op.attributes,
-                    attribute_map,
                     old_d_embd=768,
                     new_d_embd=d_embd,
                     old_n_head=12,
@@ -314,20 +325,22 @@ def _set_model_size(function, n_layer, n_head, d_embd):
         for output, transformed_output in zip(op.outputs, new_op.outputs):
             value_map[output] = transformed_output
 
-    transformed_function = restore_unhashable_attributes(
-        transformed_function, attribute_map
-    )
-
     return transformed_function.finalize(), inputs_to_remove
 
 
-def _get_stats(function):
+def _get_stats(function, input_types):
     parameter_count = 0
     model_size = 0
-    for inp in function.inputs:
+    for inp, typ in zip(function.inputs, input_types):
         if "weight" in inp.name or "bias" in inp.name:
-            parameter_count += np.prod(inp.type.shape)
-            model_size += inp.type.size()
+            if isinstance(typ, Type):
+                parameter_count += np.prod(typ.shape)
+                model_size += typ.size()
+            elif isinstance(typ, np.ndarray):
+                parameter_count += typ.size
+                model_size += typ.size * typ.itemsize
+            else:
+                raise ValueError(f"Invalid input type {type(typ)}")
 
     if parameter_count >= 1e3 and parameter_count < 1e6:
         parameter_count_str = f"{parameter_count / 1e3:.2f}K"
@@ -353,8 +366,11 @@ def _get_stats(function):
 def import_function_and_get_input_data(
     model_path,
     default_device,
+    dtype,
     use_real_weights=False,
 ):
+    is_input_or_weight = lambda x: "input" in x or "weight" in x or "bias" in x
+
     function, input_data_map = import_from_onnx(
         model_path,
         name="GPT-2",
@@ -364,17 +380,30 @@ def import_function_and_get_input_data(
 
     function = _filter_extra_outputs(function)
 
-    if not use_real_weights:
-        for inp in input_data_map:
-            if "input" in inp.name or "weight" in inp.name or "bias" in inp.name:
-                input_data_map[inp] = inp.type
+    for inp in input_data_map:
+        if is_input_or_weight(inp.name):
+            if not use_real_weights:
+                if dtype == "fp16" and isinstance(inp.type.dtype, Float32):
+                    input_data_map[inp] = Tensor(
+                        shape=inp.type.shape,
+                        dtype=Float16(inp.type.dtype.device),
+                        device=inp.type.device,
+                    )
+                else:
+                    input_data_map[inp] = inp.type
+            elif dtype == "fp16" and input_data_map[inp].dtype == np.float32:
+                input_data_map[inp] = input_data_map[inp].astype(np.float16)
     input_data = list(input_data_map.values())
 
     return function, input_data
 
 
-def resize_function_and_input_data(function, input_data, n_layer, n_head, d_embd):
-    function, inputs_to_remove = _set_model_size(function, n_layer, n_head, d_embd)
+def resize_function_and_input_data(
+    function, input_data, n_layer, n_head, d_embd, dtype
+):
+    function, inputs_to_remove = _set_model_size(
+        function, n_layer, n_head, d_embd, dtype
+    )
 
     # If we shrunk the model, remove any unnecessary inputs.
     for i in inputs_to_remove[::-1]:
@@ -423,13 +452,17 @@ def resize_function_and_input_data(function, input_data, n_layer, n_head, d_embd
     return function, input_data
 
 
-def create_input_ids(batch_size):
-    tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
-    tokens = tokenizer.encode(
-        "Here is some text to encode Hello World", add_special_tokens=True
-    )
-    input_ids = torch.tensor([[tokens] for _ in range(batch_size)])
-    return _to_numpy(input_ids)
+def create_input_ids(batch_size, use_real_data):
+    if use_real_data:
+        tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
+        tokens = tokenizer.encode(
+            "Here is some text to encode Hello World", add_special_tokens=True
+        )
+        input_ids = torch.tensor([[tokens] for _ in range(batch_size)])
+        input_ids = _to_numpy(input_ids)
+    else:
+        input_ids = Tensor(shape=(batch_size, 1, 8), dtype=Int64(), device=None)
+    return input_ids
 
 
 def _update_input_data_for_hp(
@@ -463,6 +496,7 @@ def transform(
     num_microbatches,
     d_embd,
     n_head,
+    skip_allgathers=False,
     use_real_weights=False,
 ):
     if hp_degree > 1:
@@ -479,6 +513,7 @@ def transform(
         num_microbatches,
         d_embd,
         n_head,
+        skip_allgathers=skip_allgathers,
     )
     wrapped_input_data = []
     for v in input_data:
@@ -492,6 +527,7 @@ def transform(
 
 def get_transformed_function_and_input_data(
     model_path,
+    dtype,
     device_throughput,
     dram_bandwidth,
     kernel_launch_overhead,
@@ -504,6 +540,7 @@ def get_transformed_function_and_input_data(
     n_layer,
     n_head,
     d_embd,
+    skip_allgathers=False,
     use_real_weights=False,
     print_stats=False,
 ):
@@ -519,19 +556,20 @@ def get_transformed_function_and_input_data(
     function, input_data = import_function_and_get_input_data(
         model_path,
         default_device=topology.devices[0],
+        dtype=dtype,
         use_real_weights=use_real_weights,
     )
 
     function, input_data = resize_function_and_input_data(
-        function, input_data, n_layer, n_head, d_embd
+        function, input_data, n_layer, n_head, d_embd, dtype
     )
 
-    input_ids = create_input_ids(batch_size)
+    input_ids = create_input_ids(batch_size, use_real_weights)
     input_data = [input_ids] + input_data
 
     if print_stats:
         parameter_count, model_size, parameter_count_str, model_size_str = _get_stats(
-            function
+            function, input_data
         )
         print("Parameter count:", parameter_count_str)
         print("Model size:", model_size_str)
@@ -546,6 +584,7 @@ def get_transformed_function_and_input_data(
         num_microbatches,
         d_embd,
         n_head,
+        skip_allgathers=skip_allgathers,
         use_real_weights=use_real_weights,
     )
 
@@ -558,13 +597,26 @@ def simulate(function, input_data, topology, allreduce_parameters=None):
     return simulation
 
 
-def run_pytorch(function, input_data, world_size, use_gpu=True, debug_stacktrace=False):
+def run_pytorch(
+    function,
+    input_data,
+    world_size,
+    num_warmup,
+    num_repetitions,
+    use_gpu=False,
+    debug_stacktrace=False,
+    measure_peak_memory=False,
+    profile=False,
+    dump_chrome_trace=False,
+):
     # TODO: Move this to a utils file
     def _resolve_dtype(dtype):
         if dtype == np.int32:
             return torch.int32
         elif dtype == np.int64:
             return torch.int64
+        elif dtype == np.float16:
+            return torch.float16
         elif dtype == np.float32:
             return torch.float32
         else:
@@ -588,19 +640,24 @@ def run_pytorch(function, input_data, world_size, use_gpu=True, debug_stacktrace
             f"Specified world size is {world_size}, but only "
             f"{torch.cuda.device_count()} GPUs available"
         )
-    per_rank_outputs, runtimes = torch_backend.run_pytorch(
+    return torch_backend.run_pytorch(
         function,
         pytorch_input_data,
         input_types=input_types,
         use_gpu=use_gpu,
-        num_warmup=5,
-        num_repetitions=10,
+        num_warmup=num_warmup,
+        num_repetitions=num_repetitions,
         debug_stacktrace=debug_stacktrace,
+        measure_peak_memory=measure_peak_memory,
+        profile=profile,
+        dump_chrome_trace=dump_chrome_trace,
     )
-    return per_rank_outputs, runtimes
 
 
 def main(args):
+    utils.load_simulation_parameters_to_args(args)
+    if args.model_size is not None:
+        args.n_layer, args.n_head, args.d_embd = model_params[args.model_size]
     check_params(
         args.batch_size,
         args.dp_degree,
@@ -620,6 +677,7 @@ def main(args):
         topology,
     ) = get_transformed_function_and_input_data(
         args.model_path,
+        args.dtype,
         args.device_throughput,
         args.dram_bandwidth,
         args.kernel_launch_overhead,
@@ -632,29 +690,34 @@ def main(args):
         args.n_layer,
         args.n_head,
         args.d_embd,
+        args.skip_allgathers,
         args.use_real_weights,
         print_stats=True,
     )
 
     if args.backend == "simulate":
         simulation = simulate(transformed_function, initialized_input_data, topology)
-        if args.trace_file is not None:
-            simulation.dump_chrome_trace(args.trace_file)
+        if args.dump_chrome_trace:
+            trace_file = f"{transformed_function.name}.json"
+            simulation.dump_chrome_trace(trace_file)
         simulation.print_summary(args.batch_size)
     elif args.backend == "pytorch":
         world_size = args.dp_degree * args.hp_degree * args.pp_degree
-        per_rank_outputs, runtimes = run_pytorch(
+        results = run_pytorch(
             transformed_function,
             initialized_input_data,
             world_size,
+            args.num_warmup,
+            args.num_repetitions,
             use_gpu=args.use_gpu,
             debug_stacktrace=args.debug_stacktrace,
+            measure_peak_memory=args.measure_peak_memory,
+            profile=args.profile,
+            dump_chrome_trace=args.dump_chrome_trace,
         )
-        print(f"Latency: {np.median(runtimes[-1])*1000:.2f} ms")
-        print(
-            f"Throughput: {args.batch_size / np.median(runtimes[-1]):.2f} "
-            f"samples/second"
-        )
+        print(f"Latency: {results.latency*1000:.2f} ms")
+        print(f"Throughput: {args.batch_size / results.latency:.2f} " f"samples/second")
+        print(f"Peak memory: {results.peak_memory / 1e9:.2f} GB")
 
 
 if __name__ == "__main__":
@@ -664,7 +727,8 @@ if __name__ == "__main__":
     parser.add_backend_config_arguments()
     parser.add_execution_mode_config_arguments()
     parser.add_gpt2_model_path_config_arguments()
-    parser.add_simulation_output_config_arguments()
+    parser.add_model_config_arguments(choices=list(model_params.keys()))
+    parser.add_logging_config_arguments()
     parser.add_argument("--n_layer", type=int, default=12, help="Num hidden layers")
     parser.add_argument(
         "--n_head",
@@ -680,4 +744,5 @@ if __name__ == "__main__":
         help="Use real weights",
     )
     args = parser.parse_args()
+    utils.configure_logging(args)
     main(args)

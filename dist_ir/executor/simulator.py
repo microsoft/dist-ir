@@ -4,11 +4,11 @@
 from copy import deepcopy
 from collections import defaultdict
 import json
+import logging
 from typing import Any, Dict, Sequence, Set, Tuple
-from warnings import warn
 
 from ..ir import Function, Device, Op
-from ..ir.type import Type, abstract_values
+from ..ir.type import Tensor, Type, abstract_values
 from .absint import (
     AbstractState,
     interpreter,
@@ -47,12 +47,27 @@ class SimulatorState(AbstractState):
         self.trace = []
         self._function_inputs_set = set(function.inputs)
 
-        for inp in function.inputs:
+        for i, inp in enumerate(function.inputs):
             if inp.type is None or inp.type.device is None:
-                continue
-            self.peak_memory[inp.type.device] += inp.type.size()
-        for device in self.peak_memory:
-            self.live_memory[device][0] = (0, self.peak_memory[device])
+                if (
+                    isinstance(inputs[i], ConcreteValue)
+                    and inputs[i].device is not None
+                ):
+                    self.update_live_memory({inputs[i].device: inputs[i].val.nbytes})
+                elif (
+                    isinstance(inputs[i], Tensor)
+                    and inputs[i].shape is not None
+                    and inputs[i].dtype is not None
+                    and inputs[i].device is not None
+                ):
+                    self.update_live_memory({inputs[i].device: inputs[i].size()})
+                else:
+                    logging.warning(
+                        f"No input type or device for input {inp} ({type(inputs[i])})"
+                    )
+                    continue
+            else:
+                self.update_live_memory({inp.type.device: inp.type.size()})
 
     def get_latency(self):
         return max([self.timestamps[d] for d in self.timestamps])
@@ -60,13 +75,24 @@ class SimulatorState(AbstractState):
     def get_throughput(self, batch_size):
         return batch_size / self.get_latency()
 
+    def set_peak_memory(self):
+        for device in self.live_memory:
+            self.peak_memory[device] = max(
+                [
+                    self.live_memory[device][i][1]
+                    for i in range(len(self.live_memory[device]))
+                ]
+            )
+
     def get_peak_memory(self):
         return max([self.peak_memory[d] for d in self.peak_memory])
 
     def print_summary(self, batch_size):
-        print(f"Latency: {self.get_latency()} seconds")
-        print(f"Throughput: {self.get_throughput(batch_size):.2f} samples / second")
-        print(f"Peak memory: {self.get_peak_memory() / 1e9:.2f} GB")
+        logging.info(f"Latency: {self.get_latency()} seconds")
+        logging.info(
+            f"Throughput: {self.get_throughput(batch_size):.2f} samples / second"
+        )
+        logging.info(f"Peak memory: {self.get_peak_memory() / 1e9:.2f} GB")
 
     def add_trace_event(self, op_type, device, start_time, duration):
         if device is None:
@@ -94,12 +120,23 @@ class SimulatorState(AbstractState):
 
     def update_live_memory(self, deltas):
         for device in deltas:
-            self.live_memory[device].append(
-                (
+            if self.timestamps[device] == self.live_memory[device][-1][0]:
+                self.live_memory[device][-1] = (
                     self.timestamps[device],
                     self.live_memory[device][-1][1] + deltas[device],
                 )
-            )
+            elif self.timestamps[device] > self.live_memory[device][-1][0]:
+                self.live_memory[device].append(
+                    (
+                        self.timestamps[device],
+                        self.live_memory[device][-1][1] + deltas[device],
+                    )
+                )
+            else:
+                raise ValueError(
+                    f"Current timestamp precedes latest timestamp "
+                    f"on device {device.device_id}"
+                )
 
 
 def _simulate_op(
@@ -131,19 +168,17 @@ def _simulate_op(
         state.timestamps[device] += costs[device]
 
     # Update the live memory with any new activations.
-    live_memory_deltas = defaultdict(lambda: 0)
-    for output, out_edge in zip(outputs, op.outputs):
-        state.consumers[out_edge] = len(state.function.consumers[out_edge])
-        output_devices = _get_all_devices([output])
-        for output_device in output_devices:
-            live_memory_deltas[output_device] += output.size()
-    state.update_live_memory(live_memory_deltas)
-
-    # Update the peak memory.
-    for device in state.live_memory:
-        state.peak_memory[device] = max(
-            state.peak_memory[device], state.live_memory[device][-1][1]
-        )
+    # We skip updating memory for SGDOptimizer outputs because we
+    # assume in-place weight updates.
+    # TODO: Handle in-place ops more generally?
+    if op.op_type != "SGDOptimizer":
+        live_memory_deltas = defaultdict(lambda: 0)
+        for output, out_edge in zip(outputs, op.outputs):
+            state.consumers[out_edge] = len(state.function.consumers[out_edge])
+            output_devices = _get_all_devices([output])
+            for output_device in output_devices:
+                live_memory_deltas[output_device] += output.size()
+        state.update_live_memory(live_memory_deltas)
 
     # Update the live memory to reflect any freed activations.
     live_memory_deltas = defaultdict(lambda: 0)
@@ -211,4 +246,8 @@ class Simulator:
                 costs = cost_function(op, *abstracted_inputs)
 
             _simulate_op(state, op, costs, inputs, outputs)
+
+        # Record the peak memory.
+        state.set_peak_memory()
+
         return state

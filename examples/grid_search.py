@@ -5,18 +5,19 @@ from abc import ABC, abstractmethod
 import csv
 import json
 import itertools
-from multiprocessing import Manager
+from multiprocessing import Manager, cpu_count
 from os import path
 import sys
 from typing import NamedTuple
 import traceback
+import torch
 
 import numpy as np
 import pandas as pd
 from tqdm.contrib.concurrent import process_map
 
 from dist_ir.ir.topology import get_uniform_topology
-
+from . import utils
 
 FIELDNAMES = [
     "model_size",
@@ -46,6 +47,7 @@ class GridSearch(ABC):
         self,
         model_params,
         backend,
+        dtype,
         use_gpu,
         output_file,
         device_throughput,
@@ -58,6 +60,7 @@ class GridSearch(ABC):
     ):
         self.model_params = model_params
         self.backend = backend
+        self.dtype = dtype
         self.use_gpu = use_gpu
         self.output_file = output_file
         self.device_throughput = device_throughput
@@ -163,11 +166,11 @@ class GridSearch(ABC):
                 elif pp_degree == 1:
                     all_num_microbatches = [1]
                 else:
-                    all_num_microbatches = [
-                        int(2 ** k)
-                        for k in range(1, int(np.floor(np.log2(dp_batch_size) / 2)))
-                    ]
+                    all_num_microbatches = [int(2 ** k) for k in range(1, 8)]
                 for num_microbatches in all_num_microbatches:
+                    pp_batch_size = dp_batch_size // num_microbatches
+                    if pp_batch_size == 0:
+                        continue
                     config = DHPConfig(
                         model_size,
                         dp_degree,
@@ -214,25 +217,28 @@ class GridSearch(ABC):
         pass
 
     def run(self, config: DHPConfig):
+        print("Generating model and input data...")
         fn, input_data = self.get_model_and_input_data(
             config.batch_size, config.model_size
         )
         try:
+            print("Applying transform...")
             _, transformed_fn, input_data = self.transform(
                 fn, input_data, self.topology, config
             )
             if self.backend == "simulate":
+                print("Simulating...")
                 simulation = self.simulate(transformed_fn, input_data, self.topology)
                 latency = max([simulation.timestamps[d] for d in simulation.timestamps])
                 peak_memory = max(
                     [simulation.peak_memory[d] for d in simulation.peak_memory]
-                ) / (2.0 ** 20)
+                )
             elif self.backend == "pytorch":
+                print(f"Running with PyTorch backend...")
                 world_size = config.dp_degree * config.hp_degree * config.pp_degree
-                _, runtimes = self.pytorch(transformed_fn, input_data, world_size)
-                latency = np.median(runtimes[-1])
-                # TODO: Measure peak memory?
-                peak_memory = 0
+                results = self.pytorch(transformed_fn, input_data, world_size)
+                latency = results.latency
+                peak_memory = results.peak_memory
         except Exception as e:
             print(f"Failed to run the configuration {config}:")
             traceback.print_exc()
@@ -255,26 +261,21 @@ class GridSearch(ABC):
             for config in configs:
                 print(config)  # TODO add current date/time
                 self.run(config)
+                torch.cuda.empty_cache()
         elif self.backend == "simulate":
-            process_map(self.run, configs)
+            process_map(
+                self.run, configs, max_workers=min(50, cpu_count()), chunksize=1
+            )
         else:
             raise ValueError(f"Invalid backend {self.backend}")
 
 
 # TODO merge with grid_search? move everything there or here?
 def run_grid_search(args, grid_search_cls):
-    if args.simulation_parameters_file is not None:
-        with open(args.simulation_parameters_file, "r") as f:
-            simulation_parameters = json.load(f)
-        args.device_throughput = simulation_parameters["device_throughput"]
-        args.dram_bandwidth = simulation_parameters["dram_bandwidth"]
-        args.kernel_launch_overhead = simulation_parameters["kernel_launch_overhead"]
-        args.network_bandwidth = simulation_parameters["network_bandwidth"]
-        args.allreduce_parameters = {
-            int(k): v for k, v in simulation_parameters["allreduce_parameters"].items()
-        }
+    utils.load_simulation_parameters_to_args(args)
     grid_search = grid_search_cls(
         args.backend,
+        args.dtype,
         args.use_gpu,
         args.output_file,
         args.device_throughput,

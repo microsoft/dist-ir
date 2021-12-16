@@ -9,8 +9,8 @@ import re
 
 from examples import mlp
 from dist_ir.ir import FunctionMaker, get_uniform_topology
+from dist_ir.ir.type import Float32, Float16
 from dist_ir.executor import infer_types, sequentially_execute, ConcreteValue
-from dist_ir.ir.type import Float32, Tensor
 from dist_ir.transforms import mlp_dhp_transform
 
 BATCH_SIZE = 64
@@ -54,19 +54,22 @@ def _verify_hp(function, transformed_function, outputs, transformed_outputs, dp=
 
 
 @pytest.mark.parametrize(
-    ("dp_degree", "hp_degree", "pp_degree"),
-    list(itertools.product([1, 2], [1, 2], [1, 2])),
+    ("dp_degree", "hp_degree", "pp_degree", "dtype"),
+    list(itertools.product([1, 2], [1, 2], [1, 2], ["fp32", "fp16"])),
 )
 def test_mlp_dhp_transform(
     dp_degree,
     hp_degree,
     pp_degree,
+    dtype,
     batch_size=BATCH_SIZE,
     num_hidden_layers=8,
     input_dim=INPUT_DIM,
 ):
     num_microbatches = pp_degree
     world_size = dp_degree * hp_degree * pp_degree
+    dist_ir_dtype = Float32 if dtype == "fp32" else Float16
+    numpy_dtype = np.float32 if dtype == "fp32" else np.float16
     topology = get_uniform_topology(world_size)
     function = mlp.mlp(
         input_dim,
@@ -74,6 +77,7 @@ def test_mlp_dhp_transform(
         input_dim,
         num_hidden_layers,
         topology.devices[0],
+        dist_ir_dtype,
     )
     typed_inputs = mlp.get_typed_input_values(
         function.inputs, batch_size, input_dim, input_dim
@@ -93,13 +97,14 @@ def test_mlp_dhp_transform(
     transformed_function = infer_types(transformed_function, init_function.outputs)
     transformed_function = mlp.add_optimizer_ops(transformed_function)
 
-    input_data = [
-        ConcreteValue(
-            np.random.normal(size=inp.type.shape) if i != 2 else batch_size,
-            topology.devices[0],
-        )
-        for i, inp in enumerate(typed_inputs)
-    ]
+    input_data = mlp.get_input_data(
+        init_function.inputs,
+        batch_size,
+        input_dim,
+        input_dim,
+        topology.devices[0],
+        numpy_dtype,
+    )
     outputs = sequentially_execute(function, input_data)
     dist_input_data = sequentially_execute(init_function, input_data)
     transformed_outputs = sequentially_execute(transformed_function, dist_input_data)

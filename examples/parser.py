@@ -40,6 +40,12 @@ class Parser(ArgumentParser):
             "-k", "--num_microbatches", type=int, default=1, help="# of microbatches"
         )
         self.add_argument("--batch_size", type=int, default=64, help="Batch size")
+        self.add_argument(
+            "--skip_allgathers",
+            action="store_true",
+            default=False,
+            help="Skip adding allgather ops",
+        )
 
     def add_simulation_config_arguments(self):
         self.add_argument(
@@ -76,11 +82,18 @@ class Parser(ArgumentParser):
             help="Simulation parameters file",
         )
 
+    def add_model_config_arguments(self, choices):
+        self.add_argument(
+            "--model_size",
+            type=str,
+            choices=choices,
+            default=None,
+            help="The model size to run when mode == config, e.g. mlp-xs or gpt3",
+        )
+        self.add_argument("--dtype", choices=["fp32", "fp16"], default="fp16")
+
     def add_execution_mode_config_arguments(self):
         self.add_argument("--backend", choices=["simulate", "pytorch"], required=True)
-
-    def add_simulation_output_config_arguments(self):
-        self.add_argument("--trace_file", type=str, default=None, help="Trace file")
 
     def add_backend_config_arguments(self):
         self.add_argument(
@@ -92,8 +105,38 @@ class Parser(ArgumentParser):
         self.add_argument(
             "--use_gpu",
             action="store_true",
-            default=torch.cuda.is_available(),
+            default=False,
             help="Use GPU with PyTorch backend",
+        )
+        self.add_argument(
+            "--profile",
+            action="store_true",
+            default=False,
+            help="Profile with PyTorch profiler",
+        )
+        self.add_argument(
+            "--dump_chrome_trace",
+            default=False,
+            action="store_true",
+            help="Dump Chrome trace in JSON format",
+        )
+        self.add_argument(
+            "--measure_peak_memory",
+            action="store_true",
+            default=False,
+            help="Measure peak memory usage",
+        )
+        self.add_argument(
+            "--num_warmup",
+            type=int,
+            default=5,
+            help="Number of warmup steps",
+        )
+        self.add_argument(
+            "--num_repetitions",
+            type=int,
+            default=10,
+            help="Number of repetitions",
         )
 
     def add_grid_search_config_arguments(self, defaults):
@@ -137,13 +180,6 @@ class Parser(ArgumentParser):
             type=int,
             default=None,
             help="The configuration from configs_file to run (line number, 0 = header)",
-        )
-        # single config arguments:
-        self.add_argument(
-            "--model_size",
-            type=str,
-            default=None,
-            help="The model size to run when mode == config, e.g. mlp-xs or gpt3",
         )
         self.add_argument(
             "--config",
@@ -190,6 +226,12 @@ class Parser(ArgumentParser):
             ),
         )
 
-    def add_calibration_arguments(self):
-        # TODO: Add for simulator accuracy
-        pass
+    def add_logging_config_arguments(self):
+        self.add_argument("--logname", type=str, default="dist_ir.log", help="Log name")
+        self.add_argument(
+            "--loglevel",
+            type=str,
+            choices=["info", "debug", "warning", "error", "critical"],
+            default="info",
+            help="Logging level",
+        )

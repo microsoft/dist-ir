@@ -5,6 +5,7 @@ from abc import ABC, abstractmethod
 import csv
 import json
 import itertools
+import logging
 from multiprocessing import Manager, cpu_count
 from os import path
 import sys
@@ -123,7 +124,9 @@ class GridSearch(ABC):
     def _filter_configs_from_file(configs, file):
         """Filter `configs` to those configs that are not already in `file`."""
         existing_configs = set(GridSearch._read_configs(file))
-        print(f"Found {len(existing_configs)} existing configurations, skipping them")
+        logging.info(
+            f"Found {len(existing_configs)} existing configurations, skipping them"
+        )
         return [c for c in configs if c not in existing_configs]
 
     @staticmethod
@@ -182,7 +185,7 @@ class GridSearch(ABC):
                     try:
                         self.verify_config(config)
                     except Exception as e:
-                        print(f"Skipping configuration {config}:\n{e}")
+                        logging.error(f"Skipping configuration {config}:\n{e}")
                         continue
 
                     yield config
@@ -217,35 +220,31 @@ class GridSearch(ABC):
         pass
 
     def run(self, config: DHPConfig):
-        print("Generating model and input data...")
+        logging.debug("Generating model and input data...")
         fn, input_data = self.get_model_and_input_data(
             config.batch_size, config.model_size
         )
         try:
-            print("Applying transform...")
+            logging.debug("Applying transform...")
             _, transformed_fn, input_data = self.transform(
                 fn, input_data, self.topology, config
             )
             if self.backend == "simulate":
-                print("Simulating...")
+                logging.debug("Simulating...")
                 simulation = self.simulate(transformed_fn, input_data, self.topology)
                 latency = max([simulation.timestamps[d] for d in simulation.timestamps])
                 peak_memory = max(
                     [simulation.peak_memory[d] for d in simulation.peak_memory]
                 )
             elif self.backend == "pytorch":
-                print(f"Running with PyTorch backend...")
+                logging.debug(f"Running with PyTorch backend...")
                 world_size = config.dp_degree * config.hp_degree * config.pp_degree
                 results = self.pytorch(transformed_fn, input_data, world_size)
                 latency = results.latency
                 peak_memory = results.peak_memory
         except Exception as e:
-            print(f"Failed to run the configuration {config}:")
+            logging.error(f"Failed to run the configuration {config}:")
             traceback.print_exc()
-            latency = -1
-            peak_memory = -1
-        except RuntimeError as e:
-            print(e)
             latency = -1
             peak_memory = -1
 
@@ -259,7 +258,7 @@ class GridSearch(ABC):
     def grid_search(self, configs):
         if self.backend == "pytorch":
             for config in configs:
-                print(config)  # TODO add current date/time
+                logging.info(config)
                 self.run(config)
                 torch.cuda.empty_cache()
         elif self.backend == "simulate":
@@ -272,6 +271,7 @@ class GridSearch(ABC):
 
 # TODO merge with grid_search? move everything there or here?
 def run_grid_search(args, grid_search_cls):
+    logging.basicConfig(format="%(levelname)s:%(message)s", level=logging.DEBUG)
     utils.load_simulation_parameters_to_args(args)
     grid_search = grid_search_cls(
         args.backend,
@@ -294,7 +294,7 @@ def run_grid_search(args, grid_search_cls):
                 args.all_world_sizes, args.all_batch_sizes, args.all_model_sizes
             )
         )
-        print(f"Generated {len(configs)} configurations")
+        logging.info(f"Generated {len(configs)} configurations")
     elif args.mode == "file":
         if args.config_number is not None:
             # lookup and run only given config
@@ -303,7 +303,7 @@ def run_grid_search(args, grid_search_cls):
         else:
             # use all configs in file
             configs = GridSearch._read_configs(args.configs_file)
-        print(f"Found {len(configs)} configurations")
+        logging.info(f"Found {len(configs)} configurations")
     else:
         assert args.mode == "config" and all(isinstance(i, int) for i in args.config)
         d, h, p, k, batch_size = args.config
@@ -312,7 +312,7 @@ def run_grid_search(args, grid_search_cls):
     # If output file exists, skip existing configs and append results to output file
     if path.exists(args.output_file) and not args.overwrite_output_file:
         if args.append_output_file:
-            print(f'File "{args.output_file}" already exists. Appending to it')
+            logging.info(f'File "{args.output_file}" already exists. Appending to it')
         else:
             message = f'File "{args.output_file}" already exists. Append to it? [y/n] '
             if input(message).lower().strip()[0] != "y":

@@ -6,7 +6,7 @@ import numpy as np
 import re
 import torch
 
-from dist_ir.ir import FunctionMaker, Topology, get_uniform_topology, Value
+from dist_ir.ir import FunctionMaker, Topology, get_uniform_topology, Value, cpprint
 from dist_ir.ir.type import Int32, Float16, Float32, Tensor, abstract_values
 from dist_ir.executor import (
     CostModel,
@@ -28,7 +28,7 @@ model_params = {
 }
 
 
-def get_typed_input_values(inputs, batch_size, input_dim, output_dim):
+def get_typed_input_values(inputs, batch_size, input_dim, output_dim, phase="training"):
     # TODO: Add types for weights as well?
     typed_inputs = list(inputs)
     # Update x and z to use the selected batch size
@@ -40,35 +40,54 @@ def get_typed_input_values(inputs, batch_size, input_dim, output_dim):
             device=typed_inputs[0].type.device,
         ),
     )
-    typed_inputs[1] = Value(
-        typed_inputs[1].name,
-        Tensor(
-            shape=(batch_size, output_dim),
-            dtype=typed_inputs[1].type.dtype,
-            device=typed_inputs[1].type.device,
-        ),
-    )
-    # Add value for batch size
-    typed_inputs[2] = Value(
-        typed_inputs[2].name, Int32(device=typed_inputs[2].type.device)
-    )
+    if phase == "training":
+        typed_inputs[1] = Value(
+            typed_inputs[1].name,
+            Tensor(
+                shape=(batch_size, output_dim),
+                dtype=typed_inputs[1].type.dtype,
+                device=typed_inputs[1].type.device,
+            ),
+        )
+        # Add value for batch size
+        typed_inputs[2] = Value(
+            typed_inputs[2].name, Int32(device=typed_inputs[2].type.device)
+        )
     return tuple(typed_inputs)
 
 
 def get_input_data(
-    inputs, batch_size, input_dim, output_dim, device, dtype, uniform_weight_sizes=False
+    inputs,
+    batch_size,
+    input_dim,
+    output_dim,
+    device,
+    dtype,
+    uniform_weight_sizes=False,
+    seed=0,
+    phase="training",
 ):
-    input_data = []
-    x = np.random.normal(0, 0.02, size=(batch_size, input_dim))
-    z = np.random.normal(0, 0.02, size=(batch_size, output_dim))
-    n = np.int64(batch_size)  # Batch size needed for loss weighting
+    rng = np.random.default_rng(seed)
+    x = rng.normal(0, 0.02, size=(batch_size, input_dim))
+    if phase == "training":
+        z = rng.normal(0, 0.02, size=(batch_size, output_dim))
+        n = np.int64(batch_size)  # Batch size needed for loss weighting
+        offset = 3
+    elif phase == "inference":
+        offset = 1
     if uniform_weight_sizes:
-        weight = np.random.normal(0, 0.02, size=inputs[3].type.shape)
-        weights = [weight for _ in range(len(inputs[3:]))]
+        weight = rng.normal(0, 0.02, size=inputs[offset].type.shape)
+        weights = [weight for _ in range(len(inputs[offset:]))]
     else:
-        weights = [np.random.normal(0, 0.02, size=inp.type.shape) for inp in inputs[3:]]
-    input_data = [x, z, n] + weights
-    input_data = [v.astype(dtype) if i != 2 else v for i, v in enumerate(input_data)]
+        weights = [rng.normal(0, 0.02, size=inp.type.shape) for inp in inputs[offset:]]
+    if phase == "training":
+        input_data = [x, z, n] + weights
+        input_data = [
+            v.astype(dtype) if i != 2 else v for i, v in enumerate(input_data)
+        ]
+    elif phase == "inference":
+        input_data = [x] + weights
+        input_data = [v.astype(dtype) for i, v in enumerate(input_data)]
     input_data = [ConcreteValue(v, device) for v in input_data]
     assert len(input_data) == len(inputs)
     return input_data
@@ -131,10 +150,12 @@ def mlp(input_dim, hidden_dim, output_dim, num_hidden_layers, device, dtype):
     return function.finalize()
 
 
-def mlp_inference(
-    batch_size, input_dim, hidden_dim, output_dim, num_hidden_layers, device, dtype
-):
+def mlp_inference(input_dim, hidden_dim, output_dim, num_hidden_layers, device, dtype):
     function = FunctionMaker(name="mlp")
+    x = function.add_input_value(
+        "x",
+        Tensor(dtype=dtype(), shape=None, device=device),
+    )
     weights = []
     for i in range(num_hidden_layers - 1):
         w = function.add_input_value(
@@ -147,10 +168,6 @@ def mlp_inference(
         Tensor(dtype=dtype(), shape=(hidden_dim, output_dim), device=device),
     )
     weights.append(w)
-    x = function.add_input_value(
-        "x",
-        Tensor(dtype=dtype(), shape=(batch_size, input_dim), device=device),
-    )
 
     a = x
     for i, weight in enumerate(weights):
@@ -424,6 +441,7 @@ def run_mlp(
             topology.devices[0],
             numpy_dtype,
             uniform_weight_sizes=(input_dim == hidden_dim and input_dim == output_dim),
+            phase=phase,
         )
 
     if world_size > 1:
@@ -437,7 +455,7 @@ def run_mlp(
             skip_allgathers=skip_allgathers,
         )
         typed_inputs = get_typed_input_values(
-            init_fn.inputs, batch_size, input_dim, output_dim
+            init_fn.inputs, batch_size, input_dim, output_dim, phase
         )
         init_fn = infer_types(init_fn, typed_inputs)
         transformed_fn = infer_types(transformed_fn, init_fn.outputs)
@@ -446,14 +464,15 @@ def run_mlp(
             transformed_input_data = sequentially_execute(init_fn, input_data)
     else:
         typed_inputs = get_typed_input_values(
-            fn.inputs, batch_size, input_dim, output_dim
+            fn.inputs, batch_size, input_dim, output_dim, phase
         )
         fn = infer_types(fn, typed_inputs)
         transformed_fn = fn
         input_types = tuple(inp.type for inp in fn.inputs)
         if backend == "pytorch":
             transformed_input_data = input_data
-    transformed_fn = add_optimizer_ops(transformed_fn)
+    if phase == "training":
+        transformed_fn = add_optimizer_ops(transformed_fn)
     if backend == "simulate":
         simulation = simulate(transformed_fn, input_types, topology)
         if verbose:
@@ -463,6 +482,7 @@ def run_mlp(
             simulation.dump_chrome_trace(trace_file)
         return simulation
     elif backend == "pytorch":
+        # cpprint(transformed_fn)
         results = run_pytorch(
             transformed_fn,
             transformed_input_data,

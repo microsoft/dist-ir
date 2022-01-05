@@ -74,8 +74,6 @@ class SimulatorState(AbstractState):
                 cur_live_memory = self.live_memory[inp.type.device][0][-1]
                 cur_live_memory += inp.type.size()
                 self.live_memory[inp.type.device][0] = (0, cur_live_memory)
-        for device in self.peak_memory:
-            self.live_memory[device][0] = (0, self.peak_memory[device])
 
     def get_latency(self):
         return max([self.timestamps[d] for d in self.timestamps])

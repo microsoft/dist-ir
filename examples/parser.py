@@ -168,6 +168,12 @@ class Parser(ArgumentParser):
             type=str,
             default=defaults["all_model_sizes"],
         )
+        self.add_argument(
+            "--all_scheduler_types",
+            nargs="+",
+            choices=["pipedream", "gpipe"],
+            default=defaults["all_scheduler_types"],
+        )
         # config file arguments:
         self.add_argument(
             "--configs_file",

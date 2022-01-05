@@ -391,6 +391,7 @@ def run_mlp(
     network_bandwidth,
     num_warmup,
     num_repetitions,
+    scheduler_type="pipedream",
     profile=False,
     dump_chrome_trace=False,
     skip_allgathers=False,
@@ -452,6 +453,7 @@ def run_mlp(
             pp_degree,
             num_microbatches,
             topology.devices,
+            scheduler_type=scheduler_type,
             skip_allgathers=skip_allgathers,
         )
         typed_inputs = get_typed_input_values(
@@ -502,7 +504,6 @@ def run_mlp(
 
 
 def main(args):
-    # TODO: Add names to arguments
     utils.load_simulation_parameters_to_args(args)
     if args.model_size is not None:
         args.num_hidden_layers, dim = model_params[args.model_size]
@@ -510,30 +511,31 @@ def main(args):
         args.hidden_dim = dim
         args.output_dim = dim
     run_mlp(
-        args.phase,
-        args.backend,
-        args.dtype,
-        args.use_gpu,
-        args.batch_size,
-        args.input_dim,
-        args.hidden_dim,
-        args.output_dim,
-        args.num_hidden_layers,
-        args.dp_degree,
-        args.hp_degree,
-        args.pp_degree,
-        args.num_microbatches,
-        args.device_throughput,
-        args.dram_bandwidth,
-        args.kernel_launch_overhead,
-        args.network_bandwidth,
-        args.num_warmup,
-        args.num_repetitions,
-        args.profile,
-        args.dump_chrome_trace,
-        args.skip_allgathers,
-        args.measure_peak_memory,
-        args.verbose,
+        phase=args.phase,
+        backend=args.backend,
+        dtype=args.dtype,
+        use_gpu=args.use_gpu,
+        batch_size=args.batch_size,
+        input_dim=args.input_dim,
+        hidden_dim=args.hidden_dim,
+        output_dim=args.output_dim,
+        num_hidden_layers=args.num_hidden_layers,
+        dp_degree=args.dp_degree,
+        hp_degree=args.hp_degree,
+        pp_degree=args.pp_degree,
+        num_microbatches=args.num_microbatches,
+        device_throughput=args.device_throughput,
+        dram_bandwidth=args.dram_bandwidth,
+        kernel_launch_ovheread=args.kernel_launch_overhead,
+        network_bandwidth=args.network_bandwidth,
+        num_warmup=args.num_warmup,
+        num_repetitions=args.num_repetitions,
+        scheduler_type=args.scheduler_type,
+        profile=args.profile,
+        dump_chrome_trace=args.dump_chrome_trace,
+        skip_allgathers=args.skip_allgathers,
+        measure_peak_memory=args.measure_peak_memory,
+        verbose=args.verbose,
     )
 
 
@@ -554,6 +556,12 @@ if __name__ == "__main__":
     parser.add_argument("--output_dim", type=int, default=256, help="Output dim")
     parser.add_argument(
         "--num_hidden_layers", type=int, default=16, help="# hidden layers"
+    )
+    parser.add_argument(
+        "--scheduler_type",
+        choices=["pipedream", "gpipe"],
+        default="pipedream",
+        help="Pipeline parallel scheduler type",
     )
     args = parser.parse_args()
     utils.configure_logging(args)

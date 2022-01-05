@@ -135,6 +135,7 @@ if __name__ == "__main__":
         "all_world_sizes": [1, 2, 4],
         "all_batch_sizes": [2 ** i for i in range(16)],
         "all_model_sizes": ["mlp-small", "mlp-medium", "mlp-large"],
+        "all_scheduler_types": ["pipedream"],
     }
     parser = Parser(description="MLP Grid Search")
     parser.add_simulation_config_arguments()

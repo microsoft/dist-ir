@@ -15,6 +15,7 @@ import roundrobin
 from ..ir import cpprint, Op
 from ..ir.function import Function, FunctionMaker
 from .pipedream_scheduler import PipeDreamScheduler
+from .gpipe_scheduler import GPipeScheduler
 
 # TODO: Add these helper functions to a transform-writing API
 
@@ -380,6 +381,7 @@ def mlp_dhp_transform(
     num_microbatches,
     devices,
     skip_allgathers=False,
+    scheduler_type="pipedream",
     debug=False,
 ):
     """Automatically distributes an MLP function using D/H/P hybrid parallelism."""
@@ -422,7 +424,12 @@ def mlp_dhp_transform(
                 function, pp_degree, pp_devices
             )
             op_to_stage_maps[i] = _get_op_to_stage_map(partition_maps[i][j].keys())
-            scheduler = PipeDreamScheduler(num_microbatches)
+            if scheduler_type == "pipedream":
+                scheduler = PipeDreamScheduler(num_microbatches)
+            elif scheduler_type == "gpipe":
+                scheduler = GPipeScheduler(num_microbatches)
+            else:
+                raise ValueError(f"Unknown scheduler type {scheduler_type}")
             schedule = scheduler.schedule(function, partition_maps[i][j])
             pp_schedules[i].append(schedule)
 

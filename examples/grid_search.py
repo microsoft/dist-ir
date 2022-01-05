@@ -28,6 +28,7 @@ FIELDNAMES = [
     "hp_degree",
     "pp_degree",
     "num_microbatches",
+    "scheduler_type",
     "latency",
     "throughput",
     "peak_memory",
@@ -41,6 +42,7 @@ class DHPConfig(NamedTuple):
     pp_degree: int
     num_microbatches: int
     batch_size: int
+    scheduler_type: str
 
 
 class GridSearch(ABC):
@@ -95,6 +97,7 @@ class GridSearch(ABC):
                         "hp_degree": config.hp_degree,
                         "pp_degree": config.pp_degree,
                         "num_microbatches": config.num_microbatches,
+                        "scheduler_type": config.scheduler_type,
                         "latency": latency,
                         "throughput": throughput,
                         "peak_memory": peak_memory,
@@ -155,16 +158,19 @@ class GridSearch(ABC):
             d *= 2
         return all_degrees
 
-    def gen_configurations(self, all_world_sizes, all_batch_sizes, all_model_sizes):
-        for (
-            world_size,
-            batch_size,
-            model_size,
-        ) in itertools.product(all_world_sizes, all_batch_sizes, all_model_sizes):
+    def gen_configurations(
+        self, all_world_sizes, all_batch_sizes, all_model_sizes, all_scheduler_types
+    ):
+        for (world_size, batch_size, model_size, scheduler_type) in itertools.product(
+            all_world_sizes, all_batch_sizes, all_model_sizes, all_scheduler_types
+        ):
             all_degrees = GridSearch.get_all_degrees(world_size)
             for (dp_degree, hp_degree, pp_degree) in all_degrees:
                 dp_batch_size = batch_size // dp_degree
                 if dp_batch_size == 0:
+                    logging.warning(
+                        f"Skipping configuration {config}: data-parallel batch size = 0"
+                    )
                     continue
                 elif pp_degree == 1:
                     all_num_microbatches = [1]
@@ -173,6 +179,9 @@ class GridSearch(ABC):
                 for num_microbatches in all_num_microbatches:
                     pp_batch_size = dp_batch_size // num_microbatches
                     if pp_batch_size == 0:
+                        logging.warning(
+                            f"Skipping configuration {config}: pipeline-parallel batch size = 0"
+                        )
                         continue
                     config = DHPConfig(
                         model_size,
@@ -181,6 +190,7 @@ class GridSearch(ABC):
                         pp_degree,
                         num_microbatches,
                         batch_size,
+                        scheduler_type,
                     )
                     try:
                         self.verify_config(config)
@@ -291,7 +301,10 @@ def run_grid_search(args, grid_search_cls):
     if args.mode == "grid":
         configs = list(
             grid_search.gen_configurations(
-                args.all_world_sizes, args.all_batch_sizes, args.all_model_sizes
+                args.all_world_sizes,
+                args.all_batch_sizes,
+                args.all_model_sizes,
+                args.all_scheduler_types,
             )
         )
         logging.info(f"Generated {len(configs)} configurations")

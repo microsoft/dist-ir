@@ -53,21 +53,27 @@ class SimulatorState(AbstractState):
                     isinstance(inputs[i], ConcreteValue)
                     and inputs[i].device is not None
                 ):
-                    self.update_live_memory({inputs[i].device: inputs[i].val.nbytes})
+                    cur_live_memory = self.live_memory[inputs[i].device][0][-1]
+                    cur_live_memory += inputs[i].val.nbytes
+                    self.live_memory[inputs[i].device][0] = (0, cur_live_memory)
                 elif (
                     isinstance(inputs[i], Tensor)
                     and inputs[i].shape is not None
                     and inputs[i].dtype is not None
                     and inputs[i].device is not None
                 ):
-                    self.update_live_memory({inputs[i].device: inputs[i].size()})
+                    cur_live_memory = self.live_memory[inputs[i].device][0][-1]
+                    cur_live_memory += inputs[i].size()
+                    self.live_memory[inputs[i].device][0] = (0, cur_live_memory)
                 else:
                     logging.warning(
                         f"No input type or device for input {inp} ({type(inputs[i])})"
                     )
                     continue
             else:
-                self.update_live_memory({inp.type.device: inp.type.size()})
+                cur_live_memory = self.live_memory[inp.type.device][0][-1]
+                cur_live_memory += inp.type.size()
+                self.live_memory[inp.type.device][0] = (0, cur_live_memory)
 
     def get_latency(self):
         return max([self.timestamps[d] for d in self.timestamps])
@@ -120,23 +126,12 @@ class SimulatorState(AbstractState):
 
     def update_live_memory(self, deltas):
         for device in deltas:
-            if self.timestamps[device] == self.live_memory[device][-1][0]:
-                self.live_memory[device][-1] = (
+            self.live_memory[device].append(
+                (
                     self.timestamps[device],
                     self.live_memory[device][-1][1] + deltas[device],
                 )
-            elif self.timestamps[device] > self.live_memory[device][-1][0]:
-                self.live_memory[device].append(
-                    (
-                        self.timestamps[device],
-                        self.live_memory[device][-1][1] + deltas[device],
-                    )
-                )
-            else:
-                raise ValueError(
-                    f"Current timestamp precedes latest timestamp "
-                    f"on device {device.device_id}"
-                )
+            )
 
 
 def _simulate_op(

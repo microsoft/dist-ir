@@ -1,3 +1,6 @@
+# Copyright (c) Microsoft Corporation.
+# Licensed under the MIT License.
+
 import numpy as np
 import pandas as pd
 import time
@@ -13,21 +16,6 @@ class MLPTorch(torch.nn.Module):
         self, input_dim, hidden_dim, output_dim, num_hidden_layers, dtype, weight=None
     ):
         super().__init__()
-        """
-        self.register_parameter(
-            name="w0",
-            param=torch.nn.Parameter(weight),
-        )
-        for i in range(1, num_hidden_layers - 1):
-            self.register_parameter(
-                name=f"w{i}",
-                param=torch.nn.Parameter(weight),
-            )
-        self.register_parameter(
-            name=f"w{i+1}",
-            param=torch.nn.Parameter(weight),
-        )
-        """
         if weight is not None:
             params = []
             params.append(torch.nn.Parameter(weight))
@@ -129,13 +117,14 @@ def experiment(
     print(f"PyTorch latency: {pytorch_latency * 1e3} ms")
     print(f"DistIR latency: {dist_ir_results.latency * 1e3} ms")
 
-    return dist_ir_latency, pytorch_latency
-
+    # TODO: Verify outputs match
     # dist_ir_output = dist_ir_results.per_rank_outputs[0][0]
 
     # print(pytorch_output)
     # print(dist_ir_output)
     # print(np.linalg.norm((pytorch_output.cpu() - dist_ir_output).detach().numpy()))
+
+    return dist_ir_latency, pytorch_latency
 
 
 if __name__ == "__main__":
@@ -149,5 +138,7 @@ if __name__ == "__main__":
         except RuntimeError as e:
             break
         data.append((batch_size, dist_ir_latency, pytorch_latency))
-    df = pd.DataFrame(data, columns=["batch_size", "dist_ir_latency", "pytorch_latency"])
+    df = pd.DataFrame(
+        data, columns=["batch_size", "dist_ir_latency", "pytorch_latency"]
+    )
     df.to_csv("pytorch_backend_benchmark.csv")

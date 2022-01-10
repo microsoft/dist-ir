@@ -141,7 +141,7 @@ def experiment(
 if __name__ == "__main__":
     torch.cuda.set_per_process_memory_fraction(1.0)
     data = []
-    for batch_size in [2 ** i for i in range(6, 14)]:
+    for batch_size in [2 ** i for i in range(7, 18)]:
         try:
             dist_ir_latency, pytorch_latency = experiment(
                 batch_size, 8192, 8192, 8192, 16, "fp16", 5, 10

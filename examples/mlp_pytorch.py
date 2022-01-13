@@ -9,6 +9,8 @@ import time
 import torch
 import tqdm
 
+from queue import Queue
+
 import torch.distributed as dist
 import torch.multiprocessing as mp
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -69,7 +71,7 @@ def setup(rank, world_size):
     # initialize the process group
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
 
-    print(f"Initialized rank {rank}")
+    # print(f"Initialized rank {rank}")
 
 
 def cleanup():
@@ -89,6 +91,8 @@ def driver(
     num_repetitions,
     result_queue,
 ):
+    torch.cuda.set_device(rank)
+
     if world_size > 1:
         setup(rank, world_size)
 
@@ -104,8 +108,8 @@ def driver(
     )
     weight = rng.normal(0, 0.02, size=(hidden_dim, hidden_dim)).astype(np_dtype)
 
-    x = torch.from_numpy(x).to(rank)
-    z = torch.from_numpy(z).to(rank)
+    x = torch.from_numpy(x).cuda()
+    z = torch.from_numpy(z).cuda()
 
     mlp = MLPTorch(
         input_dim,
@@ -114,26 +118,26 @@ def driver(
         num_hidden_layers,
         dtype,
         torch.from_numpy(weight),
-    ).to(rank)
+    ).cuda()
 
     if world_size > 1:
         mlp = DDP(mlp, device_ids=[rank])
 
-    #criterion = torch.nn.MSELoss()
-    #optimizer = torch.optim.SGD(params=mlp.parameters(), lr=0)
+    criterion = torch.nn.MSELoss()
+    optimizer = torch.optim.SGD(params=mlp.parameters(), lr=0)
     runtimes = []
     torch.cuda.synchronize()
     if world_size > 1:
         torch.distributed.barrier()
     for i in list(range(num_warmup + num_repetitions)):
-        print(f"Starting iteration {i+1} / {num_warmup + num_repetitions}...")
+        # print(f"Starting iteration {i+1} / {num_warmup + num_repetitions}...")
         start = time.time()
-        #optimizer.zero_grad()
-        #z_pred = mlp(x)
-        #loss = criterion(z, z_pred)
-        #optimizer.zero_grad()
-        #loss.backward()
-        #optimizer.step()
+        optimizer.zero_grad()
+        z_pred = mlp(x)
+        loss = criterion(z, z_pred)
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
         torch.cuda.synchronize()
         if world_size > 1:
             torch.distributed.barrier()
@@ -161,11 +165,30 @@ def experiment(
     num_repetitions,
     world_size=1,
 ):
-    smp = mp.get_context("spawn")
-    result_queue = smp.SimpleQueue()
-    mp.spawn(
-        driver,
-        args=(
+    if world_size > 1:
+        smp = mp.get_context("spawn")
+        result_queue = smp.SimpleQueue()
+        mp.spawn(
+            driver,
+            args=(
+                world_size,
+                batch_size,
+                input_dim,
+                hidden_dim,
+                output_dim,
+                num_hidden_layers,
+                dtype,
+                num_warmup,
+                num_repetitions,
+                result_queue,
+            ),
+            nprocs=world_size,
+            join=True,
+        )
+    else:
+        result_queue = Queue()
+        driver(
+            0,
             world_size,
             batch_size,
             input_dim,
@@ -176,10 +199,7 @@ def experiment(
             num_warmup,
             num_repetitions,
             result_queue,
-        ),
-        nprocs=world_size,
-        join=True,
-    )
+        )
     pytorch_runtimes = np.zeros((world_size, num_warmup + num_repetitions))
     for rank in range(world_size):
         (runtimes, _) = result_queue.get()
@@ -198,7 +218,6 @@ def experiment(
     )
     """
 
-    """
     dist_ir_results = run_mlp(
         phase="training",
         backend="pytorch",
@@ -221,18 +240,16 @@ def experiment(
         num_repetitions=num_repetitions,
         skip_allgathers=True,
     )
-    """
     pytorch_latencies = [
         np.max(pytorch_runtimes[:, i]) for i in range(len(pytorch_runtimes[0]))
     ]
     pytorch_latency = np.median(pytorch_latencies)
-    dist_ir_latency = 0
-    #dist_ir_latency = dist_ir_results.latency
+    dist_ir_latency = dist_ir_results.latency
 
     print(f"World size: {world_size}")
     print(f"Batch size: {batch_size}")
     print(f"PyTorch throughput: {batch_size / pytorch_latency}")
-    #print(f"DistIR throughput: {batch_size / dist_ir_results.latency}")
+    print(f"DistIR throughput: {batch_size / dist_ir_results.latency}")
     print()
 
     # TODO: Verify outputs match
@@ -262,8 +279,7 @@ if __name__ == "__main__":
         help="Run n-way data parallel",
     )
     args = parser.parse_args()
-    world_sizes = []
-    #world_sizes = [1]
+    world_sizes = [1]
     if args.distributed:
         world_sizes.append(torch.cuda.device_count())
     data = []
@@ -283,7 +299,7 @@ if __name__ == "__main__":
                 5,
                 10,
                 world_size,
-            ) 
+            )
             torch.cuda.empty_cache()
             torch.cuda.synchronize()
             data.append((world_size, batch_size, dist_ir_latency, pytorch_latency))

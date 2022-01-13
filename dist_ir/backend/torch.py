@@ -144,7 +144,8 @@ def _identity(x, ctx=None):
 
 
 def _loss(x, y, n, ctx=None):
-    return ((x - y) ** 2).mean()
+    return torch.square(x - y) / n
+    # return ((x - y) ** 2).mean()
 
 
 def _loss_grad(x, y, n, ctx=None):

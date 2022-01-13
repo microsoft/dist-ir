@@ -117,6 +117,7 @@ class GridSearch(ABC):
 
     @staticmethod
     def _read_configs(configs_file):
+        logging.info(f"Reading configs from {configs_file}")
         df = pd.read_csv(configs_file)
         return [GridSearch._config_from_df(df, i) for i in range(len(df))]
 
@@ -124,9 +125,18 @@ class GridSearch(ABC):
     def _filter_configs_from_file(configs, file):
         """Filter `configs` to those configs that are not already in `file`."""
         existing_configs = set(GridSearch._read_configs(file))
+        configs_to_skip = [c for c in configs if c in existing_configs]
+        skipped_configs_str = ""
+        for i, config in enumerate(configs_to_skip):
+            if i < len(configs_to_skip) - 1:
+                skipped_configs_str += f"{config}\n"
+            else:
+                skipped_configs_str += f"{config}"
         logging.info(
-            f"Found {len(existing_configs)} existing configurations, skipping them"
+                f"Found {len(existing_configs)} existing configurations, "
+                f"skipping the following configurations:\n{skipped_configs_str}"
         )
+        
         return [c for c in configs if c not in existing_configs]
 
     @staticmethod
@@ -298,6 +308,7 @@ def run_grid_search(args, grid_search_cls):
     elif args.mode == "file":
         if args.config_number is not None:
             # lookup and run only given config
+            logging.info(f"Running config #{args.config_number - 1} from {args.configs_file}")
             df = pd.read_csv(args.configs_file)
             configs = [GridSearch._config_from_df(df, args.config_number - 1)]
         else:

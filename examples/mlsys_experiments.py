@@ -82,19 +82,21 @@ def prepare_best_grid_search_configs(args):
         model_sizes_ = ["gpt3-xl", "gpt3-13B", "gpt3-175B"]
     assert set(model_sizes).issubset(set(model_sizes_))
     model_sizes = model_sizes_
-    for batch_size in batch_sizes:
-        for model_size in model_sizes:
-            df_ = df[
-                (df["model_size"] == model_size) & (df["batch_size"] == batch_size)
-            ]
-            df_ = df_[df_["peak_memory"] < 28 * 1e9]  # TODO: make memory limit an arg
-            df_ = df_.sort_values(by="throughput", ascending=False).head(
-                10
-            )  # TODO: make top-k an arg
-            if best_configs is None:
-                best_configs = df_
-            else:
-                best_configs = best_configs.append(df_)
+    #for batch_size in batch_sizes:
+    for model_size in model_sizes:
+        df_ = df[
+            (df["model_size"] == model_size) #& (df["batch_size"] == batch_size)
+        ]
+        df_ = df_[df_["peak_memory"] < args.max_memory_gb * 1e9]
+        if args.max_batch_size is not None:
+            df_ = df_[df_["batch_size"] <= args.max_batch_size]
+        df_ = df_.sort_values(by="throughput", ascending=False).head(
+            args.num_configs_per_experiment
+        )
+        if best_configs is None:
+            best_configs = df_
+        else:
+            best_configs = best_configs.append(df_)
     best_configs.to_csv(args.output_file)
 
 
@@ -110,18 +112,40 @@ def prepare_accuracy_sample_configs(args):
     assert set(model_sizes).issubset(set(model_sizes_))
     model_sizes = model_sizes_
     sample_configs = None
+    """
     for model_size in model_sizes:
         df_ = df[df["model_size"] == model_size]
-        df_ = df_[df_["peak_memory"] < 28 * 1e9]  # TODO: make memory limit an arg
+        df_ = df_[df_["peak_memory"] < args.max_memory_gb * 1e9]
+        if args.max_batch_size is not None:
+            df_ = df_[df_["batch_size"] <= args.max_batch_size]
         df_ = df_.sample(
-            n=min(100, len(df_)), random_state=args.seed
-        )  # TODO: Make sample size an arg
+            n=min(args.num_configs_per_experiment, len(df_)), random_state=args.seed
+        )
         df_ = df_.sort_values(by="peak_memory")
         if sample_configs is None:
             sample_configs = df_
         else:
             sample_configs = sample_configs.append(df_)
-    sample_configs.to_csv(args.output_file)
+    """
+    num_trials_per_sample = 3
+    seed = 0
+    for model_size in model_sizes:
+        for samples in [2, 4, 6, 8, 10]:
+            for _ in range(num_trials_per_sample):
+                df_ = df[df["model_size"] == model_size]
+                df_ = df_[df_["peak_memory"] < args.max_memory_gb * 1e9]
+                if args.max_batch_size is not None:
+                    df_ = df_[df_["batch_size"] <= args.max_batch_size]
+                df_ = df_.sample(
+                    n=min(samples, len(df_)), random_state=seed
+                )
+                df_ = df_.sort_values(by="peak_memory")
+                if sample_configs is None:
+                    sample_configs = df_
+                else:
+                    sample_configs = sample_configs.append(df_)
+                seed += 1
+    sample_configs.to_csv(args.output_file, index=False)
 
 
 if __name__ == "__main__":
@@ -182,6 +206,18 @@ if __name__ == "__main__":
         "--dtype", choices=["fp32", "fp16"], default="fp16", help="dtype"
     )
     parser.add_argument("--seed", type=int, default=1, help="Random seed")
+    parser.add_argument(
+        "--max_memory_gb", type=int, default=28, help="Maximum memory threshold in GB"
+    )
+    parser.add_argument(
+        "--max_batch_size", type=int, default=None, help="Maximum batch size"
+    )
+    parser.add_argument(
+        "--num_configs_per_experiment",
+        type=int,
+        default=10,
+        help="Maximum number of configs per experiment",
+    )
 
     args = parser.parse_args()
     assert args.mode is not None

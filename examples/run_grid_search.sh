@@ -31,7 +31,7 @@ for ((i=1;i<$num_configs;i++)); do
         --output_file $output_file --append_output_file \
         --all_world_sizes $world_size \
         "
-    timeout 1h python -m $command
+    timeout 45m python -m $command
     retcode=$?
     if [[ $retcode == 124 ]]; then
         echo "TIMEOUT"

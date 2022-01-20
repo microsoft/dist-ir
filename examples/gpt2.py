@@ -454,7 +454,8 @@ def resize_function_and_input_data(
 
 def create_input_ids(batch_size, use_real_data):
     if use_real_data:
-        tokenizer = GPT2Tokenizer.from_pretrained("gpt2", cache_dir="/future/u/keshav2/hf_cache")
+        # TODO: Specify cache dir
+        tokenizer = GPT2Tokenizer.from_pretrained("gpt2")
         tokens = tokenizer.encode(
             "Here is some text to encode Hello World", add_special_tokens=True
         )

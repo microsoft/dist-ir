@@ -40,38 +40,12 @@ class MLPTorch(torch.nn.Module):
         return x
 
 
-"""
-def train(mlp, x, z, num_warmup, num_repetitions, rank=0):
-    # def train(mlp, x, num_warmup, num_repetitions):
-    criterion = torch.nn.MSELoss()
-    optimizer = torch.optim.SGD(params=mlp.parameters(), lr=0)
-    runtimes = []
-    torch.cuda.synchronize()
-    for i in list(range(num_warmup + num_repetitions)):
-        start = time.time()
-        optimizer.zero_grad()
-        z_pred = mlp(x)
-        loss = criterion(z, z_pred)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        torch.cuda.synchronize()
-        runtime = time.time() - start
-        rtency
-        wnnuntimes.append(runtime)
-    grads = [w.grad for w in mlp.params]
-    return grads, runtimes[num_warmup:]
-"""
-
-
 def setup(rank, world_size):
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12355"
 
     # initialize the process group
     dist.init_process_group("nccl", rank=rank, world_size=world_size)
-
-    # print(f"Initialized rank {rank}")
 
 
 def cleanup():
@@ -97,28 +71,30 @@ def driver(
         setup(rank, world_size)
 
     if dtype == "fp16":
-        np_dtype = np.float16
+        pytorch_dtype = torch.half
     elif dtype == "fp32":
-        np_dtype = np.float
+        pytorch_dtype = torch.float
 
     rng = np.random.default_rng(0)
-    x = rng.normal(0, 0.02, size=(batch_size // world_size, input_dim)).astype(np_dtype)
-    z = rng.normal(0, 0.02, size=(batch_size // world_size, output_dim)).astype(
-        np_dtype
+    x = rng.normal(0, 0.02, size=(batch_size // world_size, input_dim))
+    z = rng.normal(0, 0.02, size=(batch_size // world_size, output_dim))
+    weight = rng.normal(0, 0.02, size=(hidden_dim, hidden_dim))
+
+    x = torch.from_numpy(x).cuda().to(pytorch_dtype)
+    z = torch.from_numpy(z).cuda().to(pytorch_dtype)
+
+    mlp = (
+        MLPTorch(
+            input_dim,
+            hidden_dim,
+            output_dim,
+            num_hidden_layers,
+            dtype,
+            torch.from_numpy(weight),
+        )
+        .cuda()
+        .to(pytorch_dtype)
     )
-    weight = rng.normal(0, 0.02, size=(hidden_dim, hidden_dim)).astype(np_dtype)
-
-    x = torch.from_numpy(x).cuda()
-    z = torch.from_numpy(z).cuda()
-
-    mlp = MLPTorch(
-        input_dim,
-        hidden_dim,
-        output_dim,
-        num_hidden_layers,
-        dtype,
-        torch.from_numpy(weight),
-    ).cuda()
 
     if world_size > 1:
         mlp = DDP(mlp, device_ids=[rank])
@@ -130,12 +106,10 @@ def driver(
     if world_size > 1:
         torch.distributed.barrier()
     for i in list(range(num_warmup + num_repetitions)):
-        # print(f"Starting iteration {i+1} / {num_warmup + num_repetitions}...")
         start = time.time()
         optimizer.zero_grad()
         z_pred = mlp(x)
         loss = criterion(z, z_pred)
-        optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         torch.cuda.synchronize()
@@ -205,18 +179,8 @@ def experiment(
         (runtimes, _) = result_queue.get()
         pytorch_runtimes[rank] = runtimes
 
-    # print(f"PyTorch runtimes:")
-    # print(pytorch_runtimes)
-
-    """
-    pytorch_outputs, pytorch_runtimes = train(
-        mlp,
-        torch.from_numpy(x).cuda(),
-        torch.from_numpy(z).cuda(),
-        num_warmup,
-        num_repetitions,
-    )
-    """
+    print(f"PyTorch runtimes:")
+    print(pytorch_runtimes)
 
     dist_ir_results = run_mlp(
         phase="training",
@@ -243,7 +207,7 @@ def experiment(
     pytorch_latencies = [
         np.max(pytorch_runtimes[:, i]) for i in range(len(pytorch_runtimes[0]))
     ]
-    pytorch_latency = np.median(pytorch_latencies)
+    pytorch_latency = np.median(pytorch_latencies[num_warmup:])
     dist_ir_latency = dist_ir_results.latency
 
     print(f"World size: {world_size}")
@@ -253,11 +217,6 @@ def experiment(
     print()
 
     # TODO: Verify outputs match
-    # dist_ir_output = dist_ir_results.per_rank_outputs[0][0]
-
-    # print(pytorch_output)
-    # print(dist_ir_output)
-    # print(np.linalg.norm((pytorch_output.cpu() - dist_ir_output).detach().numpy()))
 
     return dist_ir_latency, pytorch_latency
 
@@ -279,7 +238,7 @@ if __name__ == "__main__":
         help="Run n-way data parallel",
     )
     args = parser.parse_args()
-    world_sizes = [1]
+    world_sizes = []
     if args.distributed:
         world_sizes.append(torch.cuda.device_count())
     data = []

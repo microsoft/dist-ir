@@ -21,8 +21,7 @@ from . import utils
 import dist_ir.backend.torch as torch_backend
 
 model_params = {
-    #"mlp-xs": (8, 512),
-    "mlp-xs": (16, 4096),
+    "mlp-xs": (8, 512),
     "mlp-small": (16, 8192),
     "mlp-medium": (64, 16384),
     "mlp-large": (96, 32768),

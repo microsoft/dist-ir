@@ -132,11 +132,12 @@ class GridSearch(ABC):
                 skipped_configs_str += f"{config}\n"
             else:
                 skipped_configs_str += f"{config}"
-        logging.info(
-                f"Found {len(existing_configs)} existing configurations, "
-                f"skipping the following configurations:\n{skipped_configs_str}"
-        )
-        
+        if len(configs_to_skip) > 1:
+            logging.info(f"Found {len(existing_configs)} existing configuration(s)")
+            logging.debug(
+                f"skipping the following configuration(s):\n{skipped_configs_str}"
+            )
+
         return [c for c in configs if c not in existing_configs]
 
     @staticmethod
@@ -308,7 +309,9 @@ def run_grid_search(args, grid_search_cls):
     elif args.mode == "file":
         if args.config_number is not None:
             # lookup and run only given config
-            logging.info(f"Running config #{args.config_number - 1} from {args.configs_file}")
+            logging.info(
+                f"Running config #{args.config_number - 1} from {args.configs_file}"
+            )
             df = pd.read_csv(args.configs_file)
             configs = [GridSearch._config_from_df(df, args.config_number - 1)]
         else:

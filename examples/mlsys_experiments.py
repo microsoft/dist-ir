@@ -78,25 +78,30 @@ def prepare_best_grid_search_configs(args):
     batch_sizes = sorted(df["batch_size"].unique())
     if "mlp" in model_sizes[0]:
         model_sizes_ = ["mlp-small", "mlp-medium", "mlp-large"]
+        sweep_batch_sizes = True
     elif "gpt" in model_sizes[0]:
         model_sizes_ = ["gpt3-xl", "gpt3-13B", "gpt3-175B"]
+        sweep_batch_sizes = False
     assert set(model_sizes).issubset(set(model_sizes_))
     model_sizes = model_sizes_
-    #for batch_size in batch_sizes:
-    for model_size in model_sizes:
-        df_ = df[
-            (df["model_size"] == model_size) #& (df["batch_size"] == batch_size)
-        ]
-        df_ = df_[df_["peak_memory"] < args.max_memory_gb * 1e9]
-        if args.max_batch_size is not None:
-            df_ = df_[df_["batch_size"] <= args.max_batch_size]
-        df_ = df_.sort_values(by="throughput", ascending=False).head(
-            args.num_configs_per_experiment
-        )
-        if best_configs is None:
-            best_configs = df_
-        else:
-            best_configs = best_configs.append(df_)
+
+    for batch_size in batch_sizes:
+        for model_size in model_sizes:
+            df_ = df[df["model_size"] == model_size]
+            df_ = df_[df_["peak_memory"] < args.max_memory_gb * 1e9]
+            if sweep_batch_sizes:
+                df_ = df_[df_["batch_size"] == batch_size]
+            elif args.max_batch_size is not None:
+                df_ = df_[df_["batch_size"] <= args.max_batch_size]
+            df_ = df_.sort_values(by="throughput", ascending=False).head(
+                args.num_configs_per_experiment
+            )
+            if best_configs is None:
+                best_configs = df_
+            else:
+                best_configs = best_configs.append(df_)
+        if not sweep_batch_sizes:
+            break
     best_configs.to_csv(args.output_file)
 
 
@@ -112,7 +117,6 @@ def prepare_accuracy_sample_configs(args):
     assert set(model_sizes).issubset(set(model_sizes_))
     model_sizes = model_sizes_
     sample_configs = None
-    """
     for model_size in model_sizes:
         df_ = df[df["model_size"] == model_size]
         df_ = df_[df_["peak_memory"] < args.max_memory_gb * 1e9]
@@ -126,8 +130,10 @@ def prepare_accuracy_sample_configs(args):
             sample_configs = df_
         else:
             sample_configs = sample_configs.append(df_)
-    """
-    num_trials_per_sample = 3
+
+
+def prepare_random_search_sample_configs(args):
+    num_trials_per_sample = 10
     seed = 0
     for model_size in model_sizes:
         for samples in [2, 4, 6, 8, 10]:
@@ -136,9 +142,7 @@ def prepare_accuracy_sample_configs(args):
                 df_ = df_[df_["peak_memory"] < args.max_memory_gb * 1e9]
                 if args.max_batch_size is not None:
                     df_ = df_[df_["batch_size"] <= args.max_batch_size]
-                df_ = df_.sample(
-                    n=min(samples, len(df_)), random_state=seed
-                )
+                df_ = df_.sample(n=min(samples, len(df_)), random_state=seed)
                 df_ = df_.sort_values(by="peak_memory")
                 if sample_configs is None:
                     sample_configs = df_

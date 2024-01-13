@@ -30,7 +30,7 @@ jobs:
       id: cache_pip
       run: |
         python -m pip install --upgrade pip
-        echo "::set-output name=dir::$(pip cache dir)"
+        echo "dir=$(pip cache dir)" >> $GITHUB_OUTPUT
 
     - name: Cache pip
       uses: actions/cache@v2
